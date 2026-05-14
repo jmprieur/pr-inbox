@@ -1,6 +1,7 @@
-using System.Reflection;
+using PrInbox.Cli.Commands;
 using PrInbox.Cli.SmokeTools;
 using Spectre.Console;
+using Spectre.Console.Cli;
 
 namespace PrInbox.Cli;
 
@@ -8,6 +9,7 @@ internal static class Program
 {
     private static async Task<int> Main(string[] args)
     {
+        // Legacy smoke entry points (preserved while CLI command app stabilizes).
         if (args.Length > 0 && args[0] == "--smoke-tokens")
         {
             return await TokenSmoke.RunAsync(args);
@@ -17,14 +19,31 @@ internal static class Program
             return await GitHubSmoke.RunAsync(args);
         }
 
-        AnsiConsole.Write(new FigletText("pr-inbox").Color(Color.Aqua));
-        AnsiConsole.MarkupLine($"[grey]v{Assembly.GetExecutingAssembly().GetName().Version}[/]");
-        AnsiConsole.WriteLine();
-        AnsiConsole.MarkupLine("[yellow]pr-inbox is being built. Commands will arrive in upcoming phases.[/]");
-        AnsiConsole.MarkupLine("[grey]Smoke tools (temporary):[/]");
-        AnsiConsole.MarkupLine("[grey]  [bold]pr-inbox --smoke-tokens[/] - verify gh + az auth[/]");
-        AnsiConsole.MarkupLine("[grey]  [bold]pr-inbox --smoke-github[/] - live read of your github.com inbox[/]");
-        return 0;
+        var app = new CommandApp();
+        app.Configure(config =>
+        {
+            config.SetApplicationName("pr-inbox");
+            config.AddCommand<SyncCommand>("sync")
+                .WithDescription("Pull PRs assigned to me as reviewer from all enabled sources.");
+            config.AddCommand<ListCommand>("list")
+                .WithDescription("Show triage table of tracked PRs.");
+            config.AddCommand<ReviewCommand>("review")
+                .WithDescription("Generate an immutable review brief and a copilot invocation.");
+            config.AddBranch("config", cfg =>
+            {
+                cfg.SetDescription("Manage sources, ADO projects, and auth diagnostics.");
+                cfg.AddCommand<ConfigInitCommand>("init")
+                    .WithDescription("Seed an empty config.json at the default location.");
+                cfg.AddCommand<ConfigDoctorCommand>("doctor")
+                    .WithDescription("Verify gh + az auth for every enabled source.");
+                cfg.AddCommand<AddSourceCommand>("add-source")
+                    .WithDescription("Add a github / github-enterprise / azure-devops source.");
+                cfg.AddCommand<AddAdoProjectCommand>("add-ado-project")
+                    .WithDescription("Register an (org, project) pair for ADO enumeration.");
+            });
+        });
+
+        return await app.RunAsync(args);
     }
 }
 

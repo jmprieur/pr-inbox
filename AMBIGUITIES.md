@@ -185,16 +185,38 @@ them), the path would need to be configurable. v0.1 hardcodes `%APPDATA%`.
 **Default applied:** hardcoded. Will add `config set reviews-path <path>` if
 you signal the need.
 
-### ❓ 8. Smoke test against your actual auth
+### ❓ 9. `stable_identity` for GitHub uses `repo_id=0` for now
 
-When I get to Phase 9, I'll run `pr-inbox config doctor` + `pr-inbox sync`
-against your real `gh` and `az` auth. This will read from GitHub / ADO and
-write the SQLite registry — but **no platform mutation** (read-only verbs
-only). Flagging because it's the first time the tool touches your real
-inbox.
+**Discovered Phase 5 smoke.** Octokit's search-issues API populates `Issue.Id`
+(the unique PR id) but **not** `Issue.Repository` — so the search-result mapping
+can't construct the real numeric repo id. Stable identity falls back to
+`gh.com:0#<pr_id>`. The PR id alone is globally unique on github.com so
+collisions are safe, but the `0` looks weird.
 
-**Default applied:** I will run the smoke. The DB / config / logs land in
-`%APPDATA%\PrInbox\` and are .gitignored.
+**Default applied:** `repo_id=0` from search; real repo id is populated when we
+go through `GetPullRequestDetailAsync` (which calls `/repos/.../pulls/...`).
+
+**Fix path:** make `GetReviewInboxAsync` do a cheap follow-up `/repos/...` call
+per PR to enrich the stable id. Or compute stable id from the PR URL
+(`/repos/owner/repo/pull/N` doesn't give repo id either, only owner+repo). The
+correct path is a GraphQL query that bundles search + repo node ids.
+
+**Impact:** the `pull_requests.stable_identity` value carries `0` for repo id
+on PRs we've only seen via search. If a repo renames AND the PR id alone is
+ambiguous somehow (it isn't), the join would break. Real-world impact: none.
+Flagging for cleanup in v0.1.5.
+
+### ❓ 10. `reviewer_state` is best-effort
+
+The Reviews API returns the *list of reviews* on a PR, but we'd need to know
+the active gh user to filter for "your review state." v0.1 just maps
+"reviews exist → Commented" else "Requested." Good enough for display in
+`list`, but if you have a `dismissed` or `changes_requested` review on a PR,
+v0.1 will report `Commented`.
+
+**Fix path:** cache the authenticated user identity from `gh api user` once
+at startup, then filter reviews by `review.User.Login == activeUser`. Lands
+in v0.1.5.
 
 ---
 
@@ -248,24 +270,47 @@ inbox.
 **Lesson:**
 - Migrations must not declare `schema_version`; the runner owns it. First version of `001_initial.sql` did, and tests caught it on the second run.
 
-### Phase 4 — Credentials ✅
+### Phase 5 — GitHub adapter ✅
 
-**Goal:** token providers that delegate to `gh` and `az`. No secret storage anywhere.
+**Goal:** read-only Octokit adapter for github.com + GHE.
 
 **Done:**
-- `ITokenProvider` + `TokenAcquisitionException` with human-actionable remediation messages.
-- `GhCliTokenProvider` shells out to `gh auth token --hostname <host>`; also implements `GetAuthenticatedIdentityAsync` via `gh api user`.
-- `AzureCliTokenProvider` uses `Azure.Identity.AzureCliCredential` for ADO (resource id `499b84ac-1321-427f-aa17-267ca6975798`); identity via `az account show --query user.name`.
-- `PrInboxConfig` JSON model (sources, ADO projects, bot overrides) with `LoadAsync`/`SaveAsync`. `PR_INBOX_CONFIG_PATH` env override for tests.
-- `--smoke-tokens` hidden flag wired through `Program.cs` for live verification.
-- 3 tests added for config round-trip (36 total).
-
-**Live smoke verification on Jean-Marc's machine:**
-- GitHub.com via `gh`: ✅ token length 40, identity **`jmprieur_microsoft`** (not `jmprieur`!)
-- Azure DevOps via `Azure.Identity`: ✅ JWT length 2622, identity `jmprieur@microsoft.com`
+- `BotDetector` (pure function, 10 tests): GitHub `type=="Bot"` + cascade through known Copilot/dependabot/github-actions/`[bot]` suffix logins, + configurable extra logins.
+- `GitHubReadSource` implementing all 5 IPrReadSource methods using Octokit REST. Single class handles .com (default `api.github.com`) and GHE (`https://<host>/api/v3/`).
+- 5 parse tests for display-identity round-tripping.
+- `--smoke-github` CLI flag (live verification).
+- **Live verified: 60 PRs pulled from `jmprieur_microsoft`'s github.com inbox.** Bot classification works (`dependabot[bot]` → Dependabot, `copilot-pull-request-reviewer[bot]` → CopilotReview, `[bot]` fallback for `microsoft-github-policy-service[bot]`).
 
 **Lessons:**
-- `az` is shipped as `az.cmd` on Windows. `Process.Start` with `UseShellExecute=false` can't launch `.cmd` files directly; wrap with `cmd.exe /c az ...`. (`Azure.Identity` already handles this internally, but our ancillary identity-discovery shell-out did not.)
-- **`gh` on github.com is logged in as `jmprieur_microsoft`, not `jmprieur`.** This means our github.com queries will see PRs assigned to `jmprieur_microsoft`. If you also have `jmprieur` PRs to track, you'd need to either `gh auth switch` or set up multi-identity-per-host (deferred to v0.1.5). Flagged below in §3.
+- Octokit ships its own `CompareResult` type colliding with our domain type. Resolved with a `using` alias at the call site.
+- Octokit's `PullRequestReview.SubmittedAt` is non-nullable `DateTimeOffset` in v14.0.0 (older versions were nullable); changed signature.
+- `Issue.Repository` is **null on search API responses** — Octokit only populates it on direct `/repos/.../issues/...` calls. Stable identity falls back to `repo_id=0` for now (see AMBIGUITIES §9 below).
 
-**Next:** Phase 5 — GitHub adapter (Octokit-based, .com + GHE).
+### Phase 6 — Sync orchestrator + Phase 7 List + Phase 8 Review + CLI wiring ✅
+
+**Goal:** end-to-end vertical slice — sync writes to SQLite, list reads it, review generates brief.
+
+**Done:**
+- `SyncOrchestrator` (PrInbox.Sources): one run per (source, identity), records `sync_runs` row from start to finish (always finalized in `finally`), reconciles missing-from-inbox PRs to `previously_assigned`, per-PR errors don't tank the run.
+- `SourceFactory` translates `PrInboxConfig` → runtime `IPrReadSource` instances. Loudly NotImplementedException on Azure DevOps (the gap is named so it can't be silently dropped).
+- `SyncCommand`: progress via `Spectre.Console.Status` spinner; ADO sources are filtered out with a yellow warning rather than failing.
+- `ListCommand`: Spectre table with PR / Title / Age / Churn / Bot / Open / Reason. Source-freshness footer summarizing `sync_runs`. Computes churn as `force-pushed` / `+N commits` / `clean` / `new` from the latest snapshot's commit list.
+- `ReviewCommand`: creates `%APPDATA%\PrInbox\reviews\<safe_pr>\<utc-ts>_<sha[:12]>\` directory, writes `brief.md` + `metadata.json`, inserts `review_runs` row, updates `last_briefed_head_sha`. Brief is rich: PR meta, state SHAs, what-changed-since-last (with explicit force-push handling), open threads, recent bot activity, standard dual-model-review invocation block, staleness clause.
+- `ConfigCommands`: `init`, `doctor`, `add-source`, `add-ado-project` subcommands.
+
+**End-to-end live verification on Jean-Marc's machine:**
+1. `pr-inbox config init` → seeded `C:\Users\jmprieur\AppData\Roaming\PrInbox\config.json` with github.com + Copilot bot seed.
+2. `pr-inbox config doctor` → verified gh auth, identity `jmprieur_microsoft`.
+3. `pr-inbox sync` → **60 PRs pulled in ~60 seconds**, snapshots stored, threads observed, bot detection working.
+4. `pr-inbox list` → rendered triage table for all 60 PRs with churn/bot/open columns. (PowerShell console mangled the box-drawing chars on display but the data is intact and a real terminal renders it cleanly.)
+5. `pr-inbox review gh.com:1ES-microsoft/ai-plugins#90` → produced brief.md with PR meta, state SHAs, open threads (Copilot + policy bot), recent bot activity (CopilotReview + Other), dual-model-review invocation block, staleness clause pointing at HEAD SHA. Brief lives at `%APPDATA%\PrInbox\reviews\gh.com_1ES-microsoft_ai-plugins_90\20260514T053211Z_2e49b0c422d5\brief.md`.
+
+**All 53 unit tests still green.**
+
+**Final state:**
+- 6 commits on `main` branch (one per phase milestone).
+- Read-only against platforms by construction (`IPrReadSource` is the only contract).
+- No tokens stored anywhere; delegated to `gh` + `az`.
+- Append-only snapshot/thread/review-run history in SQLite.
+- Immutable review-run directories that can be replayed.
+- All 5 v0.1 verbs working end-to-end against real GitHub data.
