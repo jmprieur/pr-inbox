@@ -7,6 +7,7 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.Data.Sqlite" />
     <PackageReference Include="Microsoft.Extensions.Logging" />
+    <PackageReference Include="Azure.Identity" />
   </ItemGroup>
 
   <ItemGroup>

@@ -132,13 +132,16 @@ per `bridge.md`). On a single host, `gh auth login --hostname <host>` is per-hos
 one active identity at a time. v0.1 assumes 1:1 (one identity per host) which
 matches `gh`'s model.
 
-**Default applied:** identity = whatever `gh auth status --hostname <host>` says
-is the active user. No multi-identity-per-host support in v0.1.
+**Discovered during Phase 4 smoke test:** Your `gh` on `github.com` is currently
+logged in as **`jmprieur_microsoft`**, not `jmprieur`. The token providers
+return that identity from `gh api user`. Two implications:
 
-**Impact if wrong:** you'd need to `gh auth switch` between identities, which
-is awkward. If you confirm 1:1 works for now, great. If you actually need
-multi-identity-per-host (e.g. both `emu` and `proxima` on the same GHE host),
-flag it and I'll add `identity-per-source` in v0.1.5.
+1. **Initial sync against github.com will pull PRs assigned to `jmprieur_microsoft`.** This is probably what you want for review work — your Microsoft identity is the one your team @-mentions.
+2. **If you also have PRs assigned to `jmprieur` (your public/community identity) you want to track**, you'd need either `gh auth switch` (clunky) or multi-identity-per-host support (deferred to v0.1.5).
+
+**Default applied:** identity = whatever `gh auth status --hostname <host>` says is the active user.
+
+**Question for morning:** is it fine that github.com sync only sees `jmprieur_microsoft` assignments? Or do you also need `jmprieur`-as-public-identity coverage in v0.1?
 
 ### ❓ 4. Does ADO Copilot have a known service identity?
 
@@ -199,26 +202,70 @@ inbox.
 
 *Phase-by-phase notes on what I built, what I learned, and what I'd change.*
 
-### Phase 1 — Bootstrap (in progress)
+### Phase 1 — Bootstrap ✅
 
 **Goal:** runnable empty CLI with passing test runner, all infrastructure for later phases.
 
-**Done so far:**
+**Done:**
 - Repo at `D:\1es\pr-inbox`, branch renamed `master` → `main`.
 - Local git author = Jean-Marc; Co-authored-by Copilot trailer pattern.
-- `.gitignore`, `LICENSE` (MIT), `global.json` pinning .NET 10.0.202.
+- `.gitignore`, `.gitattributes`, `LICENSE` (MIT), `global.json` pinning .NET 10.0.202.
 - `Directory.Build.props` (nullable, implicit usings, warnings-as-errors).
 - `Directory.Packages.props` (CPM, all package versions centralized).
 - `NuGet.config` (nuget.org only — resolved the NU1507 CPM-with-multiple-sources block).
-- Solution `PrInbox.slnx` with 4 projects: `PrInbox.Cli` (global tool), `PrInbox.Core` (storage + domain), `PrInbox.Sources` (adapters), `PrInbox.Tests`.
+- Solution `PrInbox.slnx` with 4 projects.
 - First migration `001_initial.sql` with all 6 tables + indexes.
-- Stub `Program.cs` showing the FigletText banner.
-- Smoke test passing.
-- `README.md`, `ARCHITECTURE.md`, `AMBIGUITIES.md` (this file).
+- Stub `Program.cs` with FigletText banner.
+- README.md, ARCHITECTURE.md, AMBIGUITIES.md, BootstrapSmokeTests passing.
 
 **Lessons:**
-- .NET 10 produces `.slnx` (XML solution) by default; `dotnet sln add` works the same against it.
-- CPM + multiple registered NuGet sources requires `packageSourceMapping` explicitly (NU1507). A local `NuGet.config` resolves it without touching the machine-wide config.
-- Spectre.Console packages don't carry their own analyzers that would conflict with `TreatWarningsAsErrors`.
+- .NET 10 produces `.slnx` (XML solution) by default.
+- CPM + multiple NuGet sources requires `packageSourceMapping` explicitly (NU1507).
 
-**Next:** commit Phase 1, then Phase 2 (source contract + DTOs + fake source + characterization tests).
+### Phase 2 — Source contract ✅
+
+**Goal:** domain model + read-only contract + fake source + characterization tests.
+
+**Done:**
+- `PrIdentity` readonly record struct with display + stable formatters for all 3 sources.
+- Enum set: `PullRequestStatus`, `TrackingReason`, `ReviewerState`, `ThreadKind`, `BotKind`, `ReviewRunStatus`, `SyncRunStatus`.
+- `SourceCapabilities` record with 6 flags.
+- DTOs: `RemotePullRequest`, `RemotePullRequestDetail`, `RemoteThread`, `RemoteCommit`, `CompareResult`.
+- `IPrReadSource` interface (read-only by construction).
+- `FakePrReadSource` + builder; default capabilities mirror platform truths (ADO has no global inbox).
+- 18 tests added (19 total with the bootstrap smoke).
+
+### Phase 3 — Storage layer ✅
+
+**Goal:** SQLite-backed registry with migration runner and all repositories.
+
+**Done:**
+- `PrInboxDb` + `MigrationRunner` (embedded SQL, version-tracked, backup-before-migrate, idempotent).
+- `PullRequestRepository`, `PrSnapshotRepository` (with dedup), `ObservedThreadRepository` (preserves first_seen, advances last_seen, resolves), `ReviewRunRepository` (immutable), `SyncRunRepository`.
+- 12 tests added (33 total).
+- `InternalsVisibleTo PrInbox.Tests` added so embedded-migration internals are testable.
+
+**Lesson:**
+- Migrations must not declare `schema_version`; the runner owns it. First version of `001_initial.sql` did, and tests caught it on the second run.
+
+### Phase 4 — Credentials ✅
+
+**Goal:** token providers that delegate to `gh` and `az`. No secret storage anywhere.
+
+**Done:**
+- `ITokenProvider` + `TokenAcquisitionException` with human-actionable remediation messages.
+- `GhCliTokenProvider` shells out to `gh auth token --hostname <host>`; also implements `GetAuthenticatedIdentityAsync` via `gh api user`.
+- `AzureCliTokenProvider` uses `Azure.Identity.AzureCliCredential` for ADO (resource id `499b84ac-1321-427f-aa17-267ca6975798`); identity via `az account show --query user.name`.
+- `PrInboxConfig` JSON model (sources, ADO projects, bot overrides) with `LoadAsync`/`SaveAsync`. `PR_INBOX_CONFIG_PATH` env override for tests.
+- `--smoke-tokens` hidden flag wired through `Program.cs` for live verification.
+- 3 tests added for config round-trip (36 total).
+
+**Live smoke verification on Jean-Marc's machine:**
+- GitHub.com via `gh`: ✅ token length 40, identity **`jmprieur_microsoft`** (not `jmprieur`!)
+- Azure DevOps via `Azure.Identity`: ✅ JWT length 2622, identity `jmprieur@microsoft.com`
+
+**Lessons:**
+- `az` is shipped as `az.cmd` on Windows. `Process.Start` with `UseShellExecute=false` can't launch `.cmd` files directly; wrap with `cmd.exe /c az ...`. (`Azure.Identity` already handles this internally, but our ancillary identity-discovery shell-out did not.)
+- **`gh` on github.com is logged in as `jmprieur_microsoft`, not `jmprieur`.** This means our github.com queries will see PRs assigned to `jmprieur_microsoft`. If you also have `jmprieur` PRs to track, you'd need to either `gh auth switch` or set up multi-identity-per-host (deferred to v0.1.5). Flagged below in §3.
+
+**Next:** Phase 5 — GitHub adapter (Octokit-based, .com + GHE).
