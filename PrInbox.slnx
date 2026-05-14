@@ -1,0 +1,10 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/PrInbox.Cli/PrInbox.Cli.csproj" />
+    <Project Path="src/PrInbox.Core/PrInbox.Core.csproj" />
+    <Project Path="src/PrInbox.Sources/PrInbox.Sources.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/PrInbox.Tests/PrInbox.Tests.csproj" />
+  </Folder>
+</Solution>

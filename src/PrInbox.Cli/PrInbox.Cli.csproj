@@ -1,0 +1,39 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>PrInbox.Cli</RootNamespace>
+    <AssemblyName>pr-inbox</AssemblyName>
+
+    <!-- Global tool packaging -->
+    <PackAsTool>true</PackAsTool>
+    <ToolCommandName>pr-inbox</ToolCommandName>
+    <PackageId>JmPrieur.PrInbox</PackageId>
+    <Version>0.1.0-alpha</Version>
+    <Description>Personal PR review inbox across GitHub.com, GitHub Enterprise, and Azure DevOps. Aggregates assigned PRs, tracks per-PR review state across sessions, and bootstraps a Copilot review session with full context.</Description>
+    <PackageTags>github;ado;azure-devops;pr-review;copilot</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="..\..\README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\PrInbox.Core\PrInbox.Core.csproj" />
+    <ProjectReference Include="..\PrInbox.Sources\PrInbox.Sources.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Spectre.Console" />
+    <PackageReference Include="Spectre.Console.Cli" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
+    <PackageReference Include="Microsoft.Extensions.Configuration" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.Json" />
+    <PackageReference Include="Microsoft.Extensions.Logging" />
+    <PackageReference Include="Serilog" />
+    <PackageReference Include="Serilog.Extensions.Logging" />
+    <PackageReference Include="Serilog.Sinks.File" />
+  </ItemGroup>
+
+</Project>

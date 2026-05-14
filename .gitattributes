@@ -1,0 +1,33 @@
+# Default behavior: normalize all text files to LF in the repo,
+# Git will convert to CRLF on checkout on Windows.
+* text=auto eol=lf
+
+# Explicit text files
+*.cs       text eol=lf
+*.csproj   text eol=lf
+*.slnx     text eol=lf
+*.sln      text eol=lf
+*.props    text eol=lf
+*.targets  text eol=lf
+*.json     text eol=lf
+*.md       text eol=lf
+*.sql      text eol=lf
+*.yml      text eol=lf
+*.yaml     text eol=lf
+*.config   text eol=lf
+
+# Windows shell scripts keep CRLF
+*.ps1      text eol=crlf
+*.psm1     text eol=crlf
+*.cmd      text eol=crlf
+*.bat      text eol=crlf
+
+# Binary files
+*.png      binary
+*.jpg      binary
+*.gif      binary
+*.ico      binary
+*.dll      binary
+*.exe      binary
+*.snk      binary
+*.pfx      binary

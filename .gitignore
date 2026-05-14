@@ -1,0 +1,56 @@
+## Build output
+bin/
+obj/
+out/
+[Dd]ebug/
+[Rr]elease/
+x64/
+x86/
+[Aa][Rr][Mm]/
+[Aa][Rr][Mm]64/
+[Bb]uild/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+## Tool nuget cache
+.tools/
+.nuget/
+
+## IDE
+.vs/
+.idea/
+.vscode/launch.json
+.vscode/tasks.json
+*.swp
+
+## OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+## Local runtime state (must never be committed)
+**/pr-inbox.db
+**/pr-inbox.db-journal
+**/pr-inbox.db-wal
+**/pr-inbox.db-shm
+*.sqlite
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
+
+## User config and review-run artifacts (must never be committed)
+**/config.json
+**/config.local.json
+reviews/
+
+## Coverage and test artifacts
+coverage/
+*.coverage
+*.coveragexml
+TestResults/
+
+## Misc
+*.log
+launchSettings.json
