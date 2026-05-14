@@ -1,5 +1,56 @@
 # Ambiguities and open questions
 
+> **🌅 MORNING SUMMARY (for Jean-Marc, 2026-05-14)**
+>
+> **It works end-to-end against your real GitHub inbox.**
+>
+> Last night I built v0.1 of `pr-inbox` over 6 phases, each ending in a green
+> `dotnet test` and a clean git commit. The whole vertical slice is alive:
+>
+> ```
+> pr-inbox config init      ✅ seeded %APPDATA%\PrInbox\config.json
+> pr-inbox config doctor    ✅ gh auth verified, identity: jmprieur_microsoft
+> pr-inbox sync             ✅ pulled 60 real PRs from github.com in ~60s
+> pr-inbox list             ✅ triage table: churn / bot / open / reason
+> pr-inbox review <pr-id>   ✅ brief.md generated, ready for a Copilot session
+> ```
+>
+> **53 unit tests passing. 6 commits on `main`. ~3,800 lines of C# excluding docs.**
+>
+> **Three things stood out from the build:**
+>
+> 1. **Your `gh` identity on `github.com` is `jmprieur_microsoft`, not `jmprieur`.** I had assumed `jmprieur` for the public host. The token providers confirm this — `gh api user` returns `jmprieur_microsoft`. See §3 below — open question whether you also want `jmprieur` (public) tracked, which would need multi-identity-per-host support (v0.1.5).
+>
+> 2. **You have 60 PRs currently assigned for review.** That's a lot. The `list` triage view is going to want filters fast (`--ready`, `--needs-rereview`, `--stale`). Default sort is by last-synced-at; we may want to switch to churn-since-last-brief once enough briefs accumulate to make that signal real.
+>
+> 3. **ADO is not implemented.** I named the gap loudly — `SourceFactory.Build` throws `NotImplementedException` on `azure-devops` sources rather than silently dropping them. The transparency-architecture lesson fired here. Implementing the ADO adapter is the next obvious chunk and the design is sketched in §2 below.
+>
+> **The 60 real PRs you have are visible at:**
+> `C:\Users\jmprieur\AppData\Roaming\PrInbox\pr-inbox.db` (SQLite, sqlite3 / DB Browser-friendly)
+>
+> **A live review brief is at:**
+> `C:\Users\jmprieur\AppData\Roaming\PrInbox\reviews\gh.com_1ES-microsoft_ai-plugins_90\20260514T053211Z_2e49b0c422d5\brief.md`
+>
+> **Try it yourself:**
+> ```powershell
+> cd D:\1es\pr-inbox
+> dotnet run --project src\PrInbox.Cli\PrInbox.Cli.csproj --no-build -- list
+> dotnet run --project src\PrInbox.Cli\PrInbox.Cli.csproj --no-build -- review gh.com:<owner>/<repo>#<N>
+> ```
+> Or pack and install globally:
+> ```powershell
+> dotnet pack -c Release src\PrInbox.Cli\PrInbox.Cli.csproj
+> dotnet tool install --global --add-source src\PrInbox.Cli\bin\Release JmPrieur.PrInbox
+> ```
+>
+> **Open questions and discoveries are below.** The list grows during the build —
+> resolved items at the top, defaults applied in the middle, needs-your-input at
+> the bottom. The build journal (with phase-by-phase narrative) is at the end.
+>
+> — Bridge, 05:35 PDT
+>
+> ---
+
 *Read this first on wake-up. The list grows as I build — each item is something I
 either decided with a default (clearly named) or could not decide without you.
 Defaults are honest best-guesses, **not** silent assumptions.*
