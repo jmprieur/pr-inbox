@@ -14,4 +14,8 @@
     <PackageReference Include="Microsoft.Extensions.Logging" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="PrInbox.Tests" />
+  </ItemGroup>
+
 </Project>
