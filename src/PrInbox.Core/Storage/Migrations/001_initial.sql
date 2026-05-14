@@ -4,18 +4,11 @@
 -- All foreign-key references point at pull_requests.pr_identity (the display id).
 -- The stable_identity column holds the platform-id-based durable key for joins
 -- across repo/project renames.
+--
+-- The schema_version table is created and managed by MigrationRunner itself,
+-- not by individual migrations.
 
 PRAGMA foreign_keys = ON;
-
--- ---------------------------------------------------------------------------
--- Schema version table. Migrations are inserted in monotonic version order;
--- a startup check asserts the table reflects every embedded migration.
--- ---------------------------------------------------------------------------
-CREATE TABLE schema_version (
-  version       INTEGER PRIMARY KEY,
-  name          TEXT    NOT NULL,
-  applied_at    TEXT    NOT NULL
-);
 
 -- ---------------------------------------------------------------------------
 -- The current-row truth for every PR ever seen. Never hard-deleted; status

@@ -13,4 +13,8 @@
     <EmbeddedResource Include="Storage\Migrations\*.sql" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="PrInbox.Tests" />
+  </ItemGroup>
+
 </Project>
