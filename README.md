@@ -3,9 +3,10 @@
 > A personal command-line PR review inbox across **GitHub.com**, **GitHub Enterprise**, and **Azure DevOps**.
 > Aggregates assigned PRs, tracks per-PR review state across sessions, and bootstraps a Copilot review session with full context.
 
-[![Status: alpha](https://img.shields.io/badge/status-alpha-orange)](#status)
+[![Status: v0.2](https://img.shields.io/badge/status-v0.2-brightgreen)](#status)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 [![.NET 10](https://img.shields.io/badge/.NET-10.0-512BD4)](https://dotnet.microsoft.com/)
+[![Tests: 148](https://img.shields.io/badge/tests-148_passing-brightgreen)](#development)
 
 `pr-inbox` is the harness for review-at-scale. It does not review code itself —
 it tells you which PRs need attention, what changed since the last time you
@@ -33,21 +34,35 @@ The pain is:
 
 ## Status
 
-**Alpha — v0.1 in progress.** Scope:
+**v0.2 — working.** Daily-driver against ~60 real PRs across GitHub.com,
+GitHub Enterprise, and Azure DevOps.
+
+### CLI
 
 | Verb | Purpose | Status |
 |---|---|---|
-| `pr-inbox config` | Manage sources, identities, ADO projects | Pending |
-| `pr-inbox sync` | Pull PRs assigned to me across enabled sources; snapshot platform state | Pending |
-| `pr-inbox list` | Triage table: age, churn, bot comments, open threads, tracking reason | Pending |
-| `pr-inbox review <id>` | Generate immutable brief.md + recommended `copilot` command | Pending |
+| `pr-inbox config` | Manage sources, identities, ADO projects | ✅ Done |
+| `pr-inbox sync` | Pull PRs assigned to me across enabled sources; snapshot platform state | ✅ Done |
+| `pr-inbox list` | Triage table: age, churn, bot comments, open threads, tracking reason | ✅ Done |
+| `pr-inbox review <id>` | Generate immutable brief.md + spawn `copilot` review session | ✅ Done |
 
-**Out of scope for v0.1** (deferred to v0.2/v0.3): `curate`, `post`, `followup`,
-thread resolution, telemetry queries.
+### Web UI (`pr-inbox-web`, Blazor Server)
 
-**v0.1 is read-only against platforms by construction.** The source adapters
-implement `IPrReadSource` only — a future `IPrReviewPublisher` is a separate
-type the v0.1 binary cannot accidentally call.
+| Surface | Purpose | Status |
+|---|---|---|
+| Inbox page | Live PR list across sources, source-class chips, per-PR Ignore button, Show closed / ignored toggles | ✅ Done |
+| Review page | One-click "Review" launches a Windows Terminal tab running `agency copilot` with the brief pre-loaded; tab title = `<repo> #<N>` | ✅ Done |
+| Background sync | Fast pass (every 30s) + enrich pass + Option-C dual sweep (disappeared-diff + TTL re-enrich) so merged/closed PRs drop out of the inbox automatically | ✅ Done |
+| UI preferences | Source-filter + closed/ignored toggles persist in SQLite (`ui_preferences` table) | ✅ Done |
+
+### Publisher
+
+| Capability | Purpose | Status |
+|---|---|---|
+| `findings.yaml` watcher | Parses curated findings written by the review session; posts to GitHub / GHE / ADO via per-platform publishers | ✅ Done (dry-run default; per-finding idempotency) |
+
+**Out of scope** (deferred): `followup` verb, thread-resolution UI,
+convergence/asymmetry telemetry dashboards.
 
 ---
 
@@ -97,9 +112,16 @@ pr-inbox sync
 # 5. See what needs attention
 pr-inbox list
 
-# 6. Start a review session on a specific PR
+# 6. Start a review session on a specific PR (CLI path)
 pr-inbox review gh.com:agency-microsoft/playground#4248
 # Prints: brief path + recommended `copilot` invocation
+
+# 7. ...or use the web UI instead (recommended)
+dotnet run --project src/PrInbox.Web
+# Then open http://localhost:5xxx and click "Review" on any row.
+# Each click spawns a Windows Terminal tab running:
+#   agency copilot --plugin <plugin> --model <model> --agent <agent>
+# with the brief loaded in the run-directory cwd.
 ```
 
 ---
@@ -185,7 +207,9 @@ trusts when repos/projects rename.
 7. Prints the brief path and the recommended `copilot` command for you to run.
 
 Re-running `pr-inbox review <id>` **always** creates a new immutable run.
-A `--launch` flag that invokes `copilot` directly is deferred to v0.2.
+The Blazor web UI's "Review" button does the same work, then spawns
+`wt.exe` running `agency copilot` against the brief — so the review session
+opens in its own Windows Terminal tab, titled `<repo> #<PR-number>`.
 
 ---
 
@@ -222,20 +246,25 @@ Example:
 ```text
 pr-inbox/
 ├── src/
-│   ├── PrInbox.Cli/        # global tool entry point
-│   ├── PrInbox.Core/       # domain, storage, credentials
-│   └── PrInbox.Sources/    # GitHub + ADO adapters; fake source for tests
+│   ├── PrInbox.Cli/         # global tool entry point (pr-inbox verbs)
+│   ├── PrInbox.Core/        # domain, storage, migrations, credentials
+│   ├── PrInbox.Sources/     # GitHub + GHE + ADO read adapters; fake source
+│   ├── PrInbox.Publishers/  # GitHub + ADO review publishers (write side)
+│   └── PrInbox.Web/         # Blazor Server inbox + review launcher
 ├── tests/
-│   └── PrInbox.Tests/      # xUnit + FluentAssertions, in-memory SQLite
-├── README.md               # this file
-├── ARCHITECTURE.md         # design rationale + rubber-duck critique log
-├── AMBIGUITIES.md          # open design decisions (read first in the morning)
-├── LICENSE                 # MIT
-├── global.json             # pins .NET 10.0.202
-├── Directory.Build.props   # nullable, implicit usings, treat warnings as errors
-├── Directory.Packages.props# central package management
-├── NuGet.config            # nuget.org only
-└── PrInbox.slnx            # .NET 10 XML solution
+│   ├── PrInbox.Tests/             # xUnit + FluentAssertions, in-memory SQLite
+│   └── PrInbox.Publishers.Tests/  # publisher round-trip tests
+├── tools/
+│   └── launch-review.ps1    # spawned by ReviewLauncher inside each wt tab
+├── README.md                # this file
+├── ARCHITECTURE.md          # design rationale + rubber-duck critique log
+├── AMBIGUITIES.md           # open design decisions (read first in the morning)
+├── LICENSE                  # MIT
+├── global.json              # pins .NET 10.0.202
+├── Directory.Build.props    # nullable, implicit usings, treat warnings as errors
+├── Directory.Packages.props # central package management
+├── NuGet.config             # nuget.org only
+└── PrInbox.slnx             # .NET 10 XML solution
 ```
 
 ---
