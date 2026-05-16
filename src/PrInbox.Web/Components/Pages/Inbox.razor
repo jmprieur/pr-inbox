@@ -1,6 +1,7 @@
 @page "/"
 @implements IDisposable
 @inject InboxState State
+@inject ReviewRunStore Runs
 @inject IReviewLauncher Launcher
 @inject ILogger<Inbox> Log
 
@@ -31,6 +32,7 @@ else
                 <th>Threads</th>
                 <th>State</th>
                 <th>Last sync</th>
+                <th>Review</th>
                 <th></th>
             </tr>
         </thead>
@@ -65,6 +67,32 @@ else
                     </td>
                     <td class="muted">@RelativeTime(row.LastSyncedAt)</td>
                     <td>
+                        @{
+                            var run = _runMap.TryGetValue(row.Url, out var r) ? r : null;
+                        }
+                        @if (run is null)
+                        {
+                            <span class="muted">–</span>
+                        }
+                        else if (run.Findings is null)
+                        {
+                            <span class="badge enrich-basic" title="@run.RunDirectory">in progress</span>
+                        }
+                        else
+                        {
+                            <span class="findings-counts" title="@($"run #{run.RunId} · {run.RunDirectory}")">
+                                @if (run.CriticalCount > 0) { <span class="sev-critical">C:@run.CriticalCount</span> }
+                                @if (run.HighCount     > 0) { <span class="sev-high">H:@run.HighCount</span> }
+                                @if (run.MediumCount   > 0) { <span class="sev-medium">M:@run.MediumCount</span> }
+                                @if (run.LowCount      > 0) { <span class="sev-low">L:@run.LowCount</span> }
+                                @if (run.CriticalCount + run.HighCount + run.MediumCount + run.LowCount == 0)
+                                {
+                                    <span class="muted">clean</span>
+                                }
+                            </span>
+                        }
+                    </td>
+                    <td>
                         <button class="review" @onclick="() => OnReviewAsync(row)">Review</button>
                     </td>
                 </tr>
@@ -75,6 +103,7 @@ else
 
 @code {
     private IReadOnlyList<InboxRow> _rows = Array.Empty<InboxRow>();
+    private IReadOnlyDictionary<string, ReviewRun> _runMap = new Dictionary<string, ReviewRun>();
     private string? _lastLaunchMessage;
     private string RowCountLabel => $"{_rows.Count} PR(s)";
     private string LastSyncLabel => State.LastSyncMessage ?? "Loading...";
@@ -82,18 +111,20 @@ else
     protected override void OnInitialized()
     {
         State.Changed += OnStateChanged;
-        SnapshotRows();
+        Runs.Changed += OnStateChanged;
+        SnapshotAll();
     }
 
     private void OnStateChanged()
     {
-        SnapshotRows();
+        SnapshotAll();
         InvokeAsync(StateHasChanged);
     }
 
-    private void SnapshotRows()
+    private void SnapshotAll()
     {
         _rows = State.CurrentRows;
+        _runMap = Runs.Snapshot();
     }
 
     private async Task OnReviewAsync(InboxRow row)
@@ -143,5 +174,10 @@ else
         return $"{(int)delta.TotalDays}d ago";
     }
 
-    public void Dispose() => State.Changed -= OnStateChanged;
+    public void Dispose()
+    {
+        State.Changed -= OnStateChanged;
+        Runs.Changed -= OnStateChanged;
+    }
 }
+

@@ -102,3 +102,17 @@ button.review {
     cursor: pointer;
 }
 button.review:hover { background: rgba(93,164,255,0.12); }
+
+.findings-counts > span {
+    display: inline-block;
+    padding: 0.1rem 0.4rem;
+    border-radius: 3px;
+    font-size: 0.75rem;
+    font-weight: 700;
+    margin-right: 0.25rem;
+    color: #111;
+}
+.sev-critical { background: #d44; color: #fff; }
+.sev-high     { background: #d80; color: #111; }
+.sev-medium   { background: #ec3; color: #111; }
+.sev-low      { background: #6c6; color: #111; }

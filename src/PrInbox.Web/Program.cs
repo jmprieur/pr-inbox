@@ -10,6 +10,7 @@ builder.Services.AddRazorComponents()
 // pr-inbox singletons. The Web project drives SQLite + sync the same
 // way the CLI does; no shared state file beyond %APPDATA%\PrInbox.
 builder.Services.AddSingleton<InboxState>();
+builder.Services.AddSingleton<ReviewRunStore>();
 builder.Services.AddSingleton<IReviewLauncher, ReviewLauncher>();
 builder.Services.AddHostedService<InboxSyncHostedService>();
 
@@ -26,4 +27,11 @@ app.UseAntiforgery();
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
 
+// Re-attach watchers to in-flight runs so a restart doesn't lose findings.
+if (app.Services.GetRequiredService<IReviewLauncher>() is ReviewLauncher rl)
+{
+    rl.RehydrateInFlightRuns();
+}
+
 app.Run();
+
