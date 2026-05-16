@@ -30,13 +30,13 @@ public sealed class PullRequestRepository
               pr_identity, stable_identity, source_id, source_kind,
               display_repo, number, title, author_login, url,
               status, tracking_reason, identity_used,
-              first_seen_at, last_synced_at,
+              first_seen_at, last_synced_at, enrich_state,
               last_briefed_head_sha, last_review_run_head_sha, last_posted_review_head_sha
             ) VALUES (
               $prId, $stableId, $sourceId, $sourceKind,
               $displayRepo, $number, $title, $author, $url,
               $status, $tracking, $identityUsed,
-              $firstSeen, $lastSynced,
+              $firstSeen, $lastSynced, $enrichState,
               $lastBriefed, $lastReviewRun, $lastPosted
             )
             ON CONFLICT(stable_identity) DO UPDATE SET
@@ -50,7 +50,8 @@ public sealed class PullRequestRepository
               url           = excluded.url,
               status        = excluded.status,
               identity_used = excluded.identity_used,
-              last_synced_at= excluded.last_synced_at;
+              last_synced_at= excluded.last_synced_at,
+              enrich_state  = excluded.enrich_state;
 
             -- Record this (source, identity) binding for the PR. Idempotent:
             -- the first sync that discovered the PR seeded one row in
@@ -76,6 +77,7 @@ public sealed class PullRequestRepository
         cmd.Parameters.AddWithValue("$identityUsed", row.IdentityUsed);
         cmd.Parameters.AddWithValue("$firstSeen", FormatTimestamp(row.FirstSeenAt));
         cmd.Parameters.AddWithValue("$lastSynced", FormatTimestamp(row.LastSyncedAt));
+        cmd.Parameters.AddWithValue("$enrichState", row.EnrichState.ToDbValue());
         cmd.Parameters.AddWithValue("$lastBriefed", (object?)row.LastBriefedHeadSha ?? DBNull.Value);
         cmd.Parameters.AddWithValue("$lastReviewRun", (object?)row.LastReviewRunHeadSha ?? DBNull.Value);
         cmd.Parameters.AddWithValue("$lastPosted", (object?)row.LastPostedReviewHeadSha ?? DBNull.Value);
@@ -184,6 +186,68 @@ public sealed class PullRequestRepository
         await cmd.ExecuteNonQueryAsync(ct);
     }
 
+    /// <summary>
+    /// Active rows for a given (source, identity) that still need tier-3
+    /// enrichment. Scoped via <c>pr_source_bindings</c> so a runtime never
+    /// tries to enrich a PR that its identity cannot see.
+    /// </summary>
+    /// <remarks>
+    /// Filters:
+    /// <list type="bullet">
+    ///   <item>The binding <c>(pr_identity, source_id, identity_used)</c> exists,
+    ///         so the calling runtime is authorized for the PR.</item>
+    ///   <item><c>enrich_state = 'basic'</c> — needs enrichment now.</item>
+    ///   <item><c>status = 'open'</c> — closed/merged/inaccessible PRs are skipped.</item>
+    ///   <item><c>tracking_reason IN ('assigned','manually_added')</c> — PRs the
+    ///         user is currently expected to review.</item>
+    /// </list>
+    /// </remarks>
+    public async Task<IReadOnlyList<PullRequestRow>> ListNeedingEnrichmentAsync(
+        string sourceId, string identityUsed, CancellationToken ct)
+    {
+        var rows = new List<PullRequestRow>();
+        await using var conn = await _db.OpenAsync(ct);
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            SELECT pr.*
+            FROM pull_requests pr
+            INNER JOIN pr_source_bindings b
+              ON b.pr_identity = pr.pr_identity
+             AND b.source_id   = $sourceId
+             AND b.identity_used = $identityUsed
+            WHERE pr.enrich_state    = 'basic'
+              AND pr.status          = 'open'
+              AND pr.tracking_reason IN ('assigned','manually_added')
+            ORDER BY pr.last_synced_at DESC;
+            """;
+        cmd.Parameters.AddWithValue("$sourceId", sourceId);
+        cmd.Parameters.AddWithValue("$identityUsed", identityUsed);
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            rows.Add(MapRow(reader));
+        }
+        return rows;
+    }
+
+    /// <summary>
+    /// Mark a PR's <c>enrich_state</c> as <c>enriched</c>. Called by the
+    /// orchestrator after a successful tier-3 enrichment has persisted the
+    /// detail snapshot and threads.
+    /// </summary>
+    public async Task MarkEnrichedAsync(string url, CancellationToken ct)
+    {
+        await using var conn = await _db.OpenAsync(ct);
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            UPDATE pull_requests
+            SET enrich_state = 'enriched'
+            WHERE pr_identity = $id;
+            """;
+        cmd.Parameters.AddWithValue("$id", url);
+        await cmd.ExecuteNonQueryAsync(ct);
+    }
+
     internal static PullRequestRow MapRow(SqliteDataReader reader)
     {
         return new PullRequestRow(
@@ -202,6 +266,7 @@ public sealed class PullRequestRepository
             IdentityUsed: reader.GetString(reader.GetOrdinal("identity_used")),
             FirstSeenAt: DateTimeOffset.Parse(reader.GetString(reader.GetOrdinal("first_seen_at"))),
             LastSyncedAt: DateTimeOffset.Parse(reader.GetString(reader.GetOrdinal("last_synced_at"))),
+            EnrichState: EnrichStateExtensions.FromDbValue(reader.GetString(reader.GetOrdinal("enrich_state"))),
             LastBriefedHeadSha: GetStringOrNull(reader, "last_briefed_head_sha"),
             LastReviewRunHeadSha: GetStringOrNull(reader, "last_review_run_head_sha"),
             LastPostedReviewHeadSha: GetStringOrNull(reader, "last_posted_review_head_sha"));

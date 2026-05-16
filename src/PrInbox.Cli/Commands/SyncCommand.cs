@@ -10,18 +10,32 @@ namespace PrInbox.Cli.Commands;
 internal sealed class SyncSettings : CommandSettings
 {
     [CommandOption("--source <SOURCE_ID>")]
-    [Description("Limit sync to a single source id (e.g. gh.com).")]
+    [Description("Limit sync to a single source id (e.g. gh.com:emu).")]
     public string? SourceId { get; init; }
 
     [CommandOption("--config <PATH>")]
     [Description("Path to config.json. Defaults to %APPDATA%\\PrInbox\\config.json.")]
     public string? ConfigPath { get; init; }
+
+    [CommandOption("--fast")]
+    [Description("Run only tier-2 fast listing (no per-PR enrichment).")]
+    public bool Fast { get; init; }
+
+    [CommandOption("--enrich")]
+    [Description("Run only tier-3 enrichment on rows already in 'basic' state.")]
+    public bool Enrich { get; init; }
 }
 
 internal sealed class SyncCommand : AsyncCommand<SyncSettings>
 {
     public override async Task<int> ExecuteAsync(CommandContext context, SyncSettings settings)
     {
+        if (settings.Fast && settings.Enrich)
+        {
+            AnsiConsole.MarkupLine("[red]--fast and --enrich are mutually exclusive.[/] Omit both to run a full sync.");
+            return 1;
+        }
+
         var config = await PrInboxConfig.LoadAsync(settings.ConfigPath);
         if (config.Sources.Count == 0)
         {
@@ -60,7 +74,8 @@ internal sealed class SyncCommand : AsyncCommand<SyncSettings>
             }
         }
 
-        AnsiConsole.MarkupLine($"[bold]Syncing {runtimes.Count} source(s)...[/]");
+        var mode = settings.Fast ? "fast" : settings.Enrich ? "enrich" : "full";
+        AnsiConsole.MarkupLine($"[bold]Syncing {runtimes.Count} source(s) ({mode})...[/]");
         AnsiConsole.WriteLine();
 
         var results = new List<SyncResult>();
@@ -76,7 +91,11 @@ internal sealed class SyncCommand : AsyncCommand<SyncSettings>
                         var prefix = p.PrsTotal is not null ? $"{p.PrsSeen}/{p.PrsTotal} " : "";
                         ctx.Status($"[cyan]{Markup.Escape(rt.Source.SourceId)}[/]: {prefix}{Markup.Escape(p.Message)}");
                     });
-                    var result = await orchestrator.RunAsync(rt.Identity, progress, CancellationToken.None);
+                    var result = settings.Fast
+                        ? await orchestrator.RunFastAsync(rt.Identity, progress, CancellationToken.None)
+                        : settings.Enrich
+                            ? await orchestrator.RunEnrichAsync(rt.Identity, progress, CancellationToken.None)
+                            : await orchestrator.RunAsync(rt.Identity, progress, CancellationToken.None);
                     results.Add(result);
                 });
 

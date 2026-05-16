@@ -47,6 +47,7 @@ public class RepositoryRoundTripTests : IAsyncLifetime
             IdentityUsed: "jmprieur_public",
             FirstSeenAt: DateTimeOffset.Parse("2026-05-13T20:00:00Z"),
             LastSyncedAt: DateTimeOffset.Parse("2026-05-13T20:30:00Z"),
+            EnrichState: EnrichState.Basic,
             LastBriefedHeadSha: null,
             LastReviewRunHeadSha: null,
             LastPostedReviewHeadSha: null);
@@ -341,4 +342,98 @@ public class RepositoryRoundTripTests : IAsyncLifetime
         var count = Convert.ToInt64(await prCmd.ExecuteScalarAsync());
         count.Should().Be(1L);
     }
+
+    [Fact]
+    public async Task PullRequest_Upsert_Round_Trips_EnrichState()
+    {
+        var repo = new PullRequestRepository(_db);
+        var enrichedRow = SampleRow() with { EnrichState = EnrichState.Enriched };
+
+        await repo.UpsertAsync(enrichedRow, CancellationToken.None);
+        var fetched = await repo.GetAsync(enrichedRow.Identity.Url, CancellationToken.None);
+
+        fetched.Should().NotBeNull();
+        fetched!.EnrichState.Should().Be(EnrichState.Enriched);
+    }
+
+    [Fact]
+    public async Task MarkEnrichedAsync_Promotes_Row_From_Basic_To_Enriched()
+    {
+        var repo = new PullRequestRepository(_db);
+        var basicRow = SampleRow() with { EnrichState = EnrichState.Basic };
+        await repo.UpsertAsync(basicRow, CancellationToken.None);
+
+        await repo.MarkEnrichedAsync(basicRow.Identity.Url, CancellationToken.None);
+
+        var fetched = await repo.GetAsync(basicRow.Identity.Url, CancellationToken.None);
+        fetched!.EnrichState.Should().Be(EnrichState.Enriched);
+    }
+
+    [Fact]
+    public async Task ListNeedingEnrichment_Scopes_By_Source_And_Identity_And_Excludes_Enriched_And_Stale()
+    {
+        var repo = new PullRequestRepository(_db);
+
+        // PR 1: open + assigned + basic + bound to (emu, jmprieur_microsoft) — INCLUDED
+        var rowEmuBasic = SampleRow(new PrIdentity("https://github.com/o/r/pull/1", "gh.com:1#1")) with
+        {
+            SourceId = "gh.com:emu",
+            IdentityUsed = "jmprieur_microsoft",
+            EnrichState = EnrichState.Basic,
+            Status = PullRequestStatus.Open,
+            TrackingReason = TrackingReason.Assigned,
+        };
+        await repo.UpsertAsync(rowEmuBasic, CancellationToken.None);
+
+        // PR 2: same source+identity but already 'enriched' — EXCLUDED
+        var rowEmuEnriched = SampleRow(new PrIdentity("https://github.com/o/r/pull/2", "gh.com:1#2")) with
+        {
+            SourceId = "gh.com:emu",
+            IdentityUsed = "jmprieur_microsoft",
+            EnrichState = EnrichState.Enriched,
+            Status = PullRequestStatus.Open,
+            TrackingReason = TrackingReason.Assigned,
+        };
+        await repo.UpsertAsync(rowEmuEnriched, CancellationToken.None);
+
+        // PR 3: basic but bound to a different identity — EXCLUDED for EMU caller
+        var rowPublicBasic = SampleRow(new PrIdentity("https://github.com/o/r/pull/3", "gh.com:1#3")) with
+        {
+            SourceId = "gh.com:public",
+            IdentityUsed = "jmprieur",
+            EnrichState = EnrichState.Basic,
+            Status = PullRequestStatus.Open,
+            TrackingReason = TrackingReason.Assigned,
+        };
+        await repo.UpsertAsync(rowPublicBasic, CancellationToken.None);
+
+        // PR 4: basic + correct binding but closed — EXCLUDED
+        var rowEmuClosed = SampleRow(new PrIdentity("https://github.com/o/r/pull/4", "gh.com:1#4")) with
+        {
+            SourceId = "gh.com:emu",
+            IdentityUsed = "jmprieur_microsoft",
+            EnrichState = EnrichState.Basic,
+            Status = PullRequestStatus.Closed,
+            TrackingReason = TrackingReason.Assigned,
+        };
+        await repo.UpsertAsync(rowEmuClosed, CancellationToken.None);
+
+        // PR 5: basic + correct binding but previously_assigned — EXCLUDED
+        var rowEmuPrev = SampleRow(new PrIdentity("https://github.com/o/r/pull/5", "gh.com:1#5")) with
+        {
+            SourceId = "gh.com:emu",
+            IdentityUsed = "jmprieur_microsoft",
+            EnrichState = EnrichState.Basic,
+            Status = PullRequestStatus.Open,
+            TrackingReason = TrackingReason.PreviouslyAssigned,
+        };
+        await repo.UpsertAsync(rowEmuPrev, CancellationToken.None);
+
+        var candidates = await repo.ListNeedingEnrichmentAsync(
+            "gh.com:emu", "jmprieur_microsoft", CancellationToken.None);
+
+        candidates.Should().ContainSingle();
+        candidates[0].Identity.Url.Should().Be("https://github.com/o/r/pull/1");
+    }
 }
+

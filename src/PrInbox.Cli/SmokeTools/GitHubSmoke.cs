@@ -26,8 +26,12 @@ internal static class GitHubSmoke
 
         try
         {
-            AnsiConsole.Markup("[grey]Fetching review inbox...[/] ");
-            var inbox = await source.GetReviewInboxAsync(CancellationToken.None);
+            AnsiConsole.Markup("[grey]Fetching review inbox (fast)...[/] ");
+            var inbox = new List<PrInbox.Core.Models.RemotePullRequest>();
+            await foreach (var pr in source.ListAssignedFastAsync(CancellationToken.None))
+            {
+                inbox.Add(pr);
+            }
             AnsiConsole.MarkupLine($"[green]{inbox.Count} PR(s)[/]");
 
             if (inbox.Count == 0)
@@ -58,17 +62,18 @@ internal static class GitHubSmoke
             }
             AnsiConsole.WriteLine();
 
-            // Pick the first PR and exercise detail / threads / commits.
+            // Pick the first PR and exercise enrichment.
             var sample = inbox[0];
-            AnsiConsole.MarkupLine($"[bold]Detail for [cyan]{Markup.Escape(sample.Identity.Url)}[/][/]");
+            AnsiConsole.MarkupLine($"[bold]Enrichment for [cyan]{Markup.Escape(sample.Identity.Url)}[/][/]");
 
-            var detail = await source.GetPullRequestDetailAsync(sample.Identity, CancellationToken.None);
+            var bundle = await source.EnrichAsync(sample.Identity, CancellationToken.None);
+            var detail = bundle.Detail;
             AnsiConsole.MarkupLine($"  head: [white]{detail.HeadSha[..Math.Min(12, detail.HeadSha.Length)]}[/]");
             AnsiConsole.MarkupLine($"  base: [white]{detail.BaseSha[..Math.Min(12, detail.BaseSha.Length)]}[/]");
             AnsiConsole.MarkupLine($"  commits: [white]{detail.OrderedCommitShas.Count}[/]");
             AnsiConsole.MarkupLine($"  reviewer state: [white]{detail.ReviewerState}[/]");
 
-            var threads = await source.GetThreadsAsync(sample.Identity, CancellationToken.None);
+            var threads = bundle.Threads;
             var bots = threads.Count(t => t.IsBot);
             AnsiConsole.MarkupLine($"  threads: [white]{threads.Count}[/] (bot: [white]{bots}[/])");
 

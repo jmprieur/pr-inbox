@@ -27,20 +27,21 @@ public sealed class FakePrReadSource : IPrReadSource
     public SourceKind Kind { get; }
     public SourceCapabilities Capabilities { get; }
 
-    public Task<IReadOnlyList<RemotePullRequest>> GetReviewInboxAsync(CancellationToken ct)
+    public async IAsyncEnumerable<RemotePullRequest> ListAssignedFastAsync(
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
     {
-        var list = _prs.Values.Select(p => p.PullRequest).ToList();
-        return Task.FromResult<IReadOnlyList<RemotePullRequest>>(list);
+        foreach (var pr in _prs.Values.Select(p => p.PullRequest))
+        {
+            ct.ThrowIfCancellationRequested();
+            yield return pr;
+        }
+        await Task.CompletedTask;
     }
 
-    public Task<RemotePullRequestDetail> GetPullRequestDetailAsync(PrIdentity id, CancellationToken ct)
+    public Task<PrEnrichmentBundle> EnrichAsync(PrIdentity id, CancellationToken ct)
     {
-        return Task.FromResult(GetOrThrow(id).Detail);
-    }
-
-    public Task<IReadOnlyList<RemoteThread>> GetThreadsAsync(PrIdentity id, CancellationToken ct)
-    {
-        return Task.FromResult(GetOrThrow(id).Threads);
+        var pr = GetOrThrow(id);
+        return Task.FromResult(new PrEnrichmentBundle(pr.Detail, pr.Threads));
     }
 
     public Task<IReadOnlyList<RemoteCommit>> GetCommitsAsync(PrIdentity id, CancellationToken ct)

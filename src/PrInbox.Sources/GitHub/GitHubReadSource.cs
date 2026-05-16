@@ -51,12 +51,13 @@ public sealed class GitHubReadSource : IPrReadSource
         SupportsStableRepoIds: true,
         SupportsForcePushDetection: true);
 
-    public async Task<IReadOnlyList<RemotePullRequest>> GetReviewInboxAsync(CancellationToken ct)
+    public async IAsyncEnumerable<RemotePullRequest> ListAssignedFastAsync(
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
     {
         var client = await CreateClientAsync(ct);
-        var results = new List<RemotePullRequest>();
         var page = 1;
         const int perPage = 50;
+        var emitted = 0;
 
         while (true)
         {
@@ -79,25 +80,31 @@ public sealed class GitHubReadSource : IPrReadSource
 
             foreach (var item in searchResult.Items)
             {
-                results.Add(MapSearchItem(item));
+                yield return MapSearchItem(item);
+                emitted++;
             }
 
-            if (searchResult.Items.Count < perPage || results.Count >= searchResult.TotalCount)
+            if (searchResult.Items.Count < perPage || emitted >= searchResult.TotalCount)
             {
-                break;
+                yield break;
             }
             page++;
             if (page > 20)
             {
                 _logger.LogWarning("Hit safety cap of 20 pages while paging review inbox.");
-                break;
+                yield break;
             }
         }
-
-        return results;
     }
 
-    public async Task<RemotePullRequestDetail> GetPullRequestDetailAsync(PrIdentity id, CancellationToken ct)
+    public async Task<PrEnrichmentBundle> EnrichAsync(PrIdentity id, CancellationToken ct)
+    {
+        var detail = await FetchDetailAsync(id, ct);
+        var threads = await FetchThreadsAsync(id, ct);
+        return new PrEnrichmentBundle(detail, threads);
+    }
+
+    private async Task<RemotePullRequestDetail> FetchDetailAsync(PrIdentity id, CancellationToken ct)
     {
         var (owner, repo, number) = ParseUrl(id.Url);
         var client = await CreateClientAsync(ct);
@@ -144,7 +151,7 @@ public sealed class GitHubReadSource : IPrReadSource
             }));
     }
 
-    public async Task<IReadOnlyList<RemoteThread>> GetThreadsAsync(PrIdentity id, CancellationToken ct)
+    private async Task<IReadOnlyList<RemoteThread>> FetchThreadsAsync(PrIdentity id, CancellationToken ct)
     {
         var (owner, repo, number) = ParseUrl(id.Url);
         var client = await CreateClientAsync(ct);

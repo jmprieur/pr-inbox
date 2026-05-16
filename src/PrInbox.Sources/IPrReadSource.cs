@@ -12,6 +12,15 @@ namespace PrInbox.Sources;
 /// separate type, so v0.1 code cannot accidentally mutate platform state.
 /// </para>
 /// <para>
+/// The contract is split into two progressive-fetch tiers:
+/// <list type="bullet">
+///   <item><see cref="ListAssignedFastAsync"/> — tier-2: cheap, one call per
+///         source, streams PR-list entries as they become available.</item>
+///   <item><see cref="EnrichAsync"/> — tier-3: one bundled call per PR
+///         (detail + threads).</item>
+/// </list>
+/// </para>
+/// <para>
 /// Implementations are responsible for:
 /// <list type="bullet">
 ///   <item>Token acquisition (via the credential delegation layer).</item>
@@ -25,8 +34,8 @@ namespace PrInbox.Sources;
 public interface IPrReadSource
 {
     /// <summary>
-    /// Stable identifier for this source instance (e.g. <c>gh.com</c>,
-    /// <c>ghe.contoso.com</c>, <c>ado:mseng</c>).
+    /// Stable identifier for this source instance (e.g. <c>gh.com:emu</c>,
+    /// <c>ghe.proxima</c>, <c>ado:mseng</c>).
     /// </summary>
     string SourceId { get; }
 
@@ -42,26 +51,27 @@ public interface IPrReadSource
     SourceCapabilities Capabilities { get; }
 
     /// <summary>
-    /// All PRs where the authenticated user is currently a requested reviewer.
+    /// Tier-2 fast listing: streams every PR where the authenticated user is
+    /// currently a requested reviewer. Items yield as the source's search
+    /// pages return; consumers may render the inbox incrementally.
+    /// </summary>
+    /// <remarks>
     /// For ADO (which has no global reviewer inbox), implementations enumerate
-    /// the configured (org, project) pairs.
-    /// </summary>
-    Task<IReadOnlyList<RemotePullRequest>> GetReviewInboxAsync(CancellationToken ct);
+    /// the configured (org, project) pairs. The enumeration completes when
+    /// all pages/projects have been exhausted.
+    /// </remarks>
+    IAsyncEnumerable<RemotePullRequest> ListAssignedFastAsync(CancellationToken ct);
 
     /// <summary>
-    /// Full detail for a single PR, including head/base SHAs, ordered commit
-    /// SHAs, and reviewer state.
+    /// Tier-3 enrichment: returns full detail (head/base SHAs, ordered commits,
+    /// reviewer state) plus all observed threads for a single PR, bundled into
+    /// a single bundle so the orchestrator can persist them atomically.
     /// </summary>
-    Task<RemotePullRequestDetail> GetPullRequestDetailAsync(PrIdentity id, CancellationToken ct);
+    Task<PrEnrichmentBundle> EnrichAsync(PrIdentity id, CancellationToken ct);
 
     /// <summary>
-    /// All threads (inline comments, issue comments, review bodies, ADO threads)
-    /// on a PR, with bot classification set.
-    /// </summary>
-    Task<IReadOnlyList<RemoteThread>> GetThreadsAsync(PrIdentity id, CancellationToken ct);
-
-    /// <summary>
-    /// Commits on a PR's head branch, ordered newest-first.
+    /// Commits on a PR's head branch, ordered newest-first. Defined for
+    /// future force-push detection; not yet consumed by the orchestrator.
     /// </summary>
     Task<IReadOnlyList<RemoteCommit>> GetCommitsAsync(PrIdentity id, CancellationToken ct);
 

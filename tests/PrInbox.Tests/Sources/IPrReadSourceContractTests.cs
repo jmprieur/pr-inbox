@@ -20,36 +20,42 @@ public class IPrReadSourceContractTests
         Stable: "gh.com:100#2000");
 
     [Fact]
-    public async Task GetReviewInbox_Returns_All_Configured_Prs()
+    public async Task ListAssignedFast_Streams_All_Configured_Prs()
     {
         var source = BuildSourceWithTwoPrs();
 
-        var inbox = await source.GetReviewInboxAsync(CancellationToken.None);
+        var inbox = new List<RemotePullRequest>();
+        await foreach (var pr in source.ListAssignedFastAsync(CancellationToken.None))
+        {
+            inbox.Add(pr);
+        }
 
         inbox.Should().HaveCount(2);
         inbox.Select(p => p.Identity).Should().BeEquivalentTo(new[] { IdAlpha, IdBeta });
     }
 
     [Fact]
-    public async Task GetPullRequestDetail_Returns_Snapshot_Data_For_Known_Pr()
+    public async Task Enrich_Returns_Detail_And_Threads_For_Known_Pr()
     {
         var source = BuildSourceWithTwoPrs();
 
-        var detail = await source.GetPullRequestDetailAsync(IdAlpha, CancellationToken.None);
+        var bundle = await source.EnrichAsync(IdAlpha, CancellationToken.None);
 
-        detail.Identity.Should().Be(IdAlpha);
-        detail.HeadSha.Should().Be("abc1234567890aaa");
-        detail.BaseSha.Should().Be("base000000000000");
-        detail.OrderedCommitShas.Should().HaveCount(3);
+        bundle.Detail.Identity.Should().Be(IdAlpha);
+        bundle.Detail.HeadSha.Should().Be("abc1234567890aaa");
+        bundle.Detail.BaseSha.Should().Be("base000000000000");
+        bundle.Detail.OrderedCommitShas.Should().HaveCount(3);
+        bundle.Threads.Should().HaveCount(2);
+        bundle.Threads.Should().ContainSingle(t => t.IsBot && t.BotKind == BotKind.CopilotReview);
     }
 
     [Fact]
-    public async Task GetPullRequestDetail_Throws_For_Unknown_Pr()
+    public async Task Enrich_Throws_For_Unknown_Pr()
     {
         var source = BuildSourceWithTwoPrs();
         var unknown = new PrIdentity("https://github.com/owner/repo/pull/999", "gh.com:100#999000");
 
-        Func<Task> act = () => source.GetPullRequestDetailAsync(unknown, CancellationToken.None);
+        Func<Task> act = () => source.EnrichAsync(unknown, CancellationToken.None);
 
         await act.Should().ThrowAsync<KeyNotFoundException>();
     }
@@ -82,14 +88,14 @@ public class IPrReadSourceContractTests
     }
 
     [Fact]
-    public async Task GetThreads_Returns_Configured_Threads_With_Bot_Flag_Preserved()
+    public async Task GetThreads_Via_Enrich_Returns_Configured_Threads_With_Bot_Flag_Preserved()
     {
         var source = BuildSourceWithTwoPrs();
 
-        var threads = await source.GetThreadsAsync(IdAlpha, CancellationToken.None);
+        var bundle = await source.EnrichAsync(IdAlpha, CancellationToken.None);
 
-        threads.Should().HaveCount(2);
-        threads.Should().ContainSingle(t => t.IsBot && t.BotKind == BotKind.CopilotReview);
+        bundle.Threads.Should().HaveCount(2);
+        bundle.Threads.Should().ContainSingle(t => t.IsBot && t.BotKind == BotKind.CopilotReview);
     }
 
     [Fact]

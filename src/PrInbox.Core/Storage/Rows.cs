@@ -19,6 +19,7 @@ public sealed record PullRequestRow(
     string IdentityUsed,
     DateTimeOffset FirstSeenAt,
     DateTimeOffset LastSyncedAt,
+    EnrichState EnrichState,
     string? LastBriefedHeadSha,
     string? LastReviewRunHeadSha,
     string? LastPostedReviewHeadSha);

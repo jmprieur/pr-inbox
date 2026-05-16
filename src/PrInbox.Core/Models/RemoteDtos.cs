@@ -31,6 +31,15 @@ public sealed record RemotePullRequestDetail(
     string RawMetadataJson);
 
 /// <summary>
+/// Bundled result of a single tier-3 enrichment call for one PR: per-PR
+/// detail plus threads. Sources should fetch both in one logical call so the
+/// orchestrator can perform an enrichment as an atomic operation per PR.
+/// </summary>
+public sealed record PrEnrichmentBundle(
+    RemotePullRequestDetail Detail,
+    IReadOnlyList<RemoteThread> Threads);
+
+/// <summary>
 /// A single conversation thread on a PR (inline comment, issue comment,
 /// review body, or ADO thread).
 /// </summary>

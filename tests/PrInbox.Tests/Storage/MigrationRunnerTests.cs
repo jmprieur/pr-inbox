@@ -18,6 +18,7 @@ public class MigrationRunnerTests
         migrations[0].Sql.Should().Contain("CREATE TABLE pull_requests");
 
         migrations.Should().Contain(m => m.Version == 2 && m.Name == "url_as_identity");
+        migrations.Should().Contain(m => m.Version == 3 && m.Name == "enrich_state");
     }
 
     [Fact]
@@ -43,6 +44,7 @@ public class MigrationRunnerTests
         }
         rows.Should().Contain(r => r.version == 1 && r.name == "initial");
         rows.Should().Contain(r => r.version == 2 && r.name == "url_as_identity");
+        rows.Should().Contain(r => r.version == 3 && r.name == "enrich_state");
     }
 
     [Fact]
@@ -183,6 +185,68 @@ public class MigrationRunnerTests
         bUrl.Should().Be("https://github.com/agency-microsoft/playground/pull/4248");
         bSource.Should().Be("gh.com");
         bIdentity.Should().Be("jmprieur_public");
+    }
+
+    [Fact]
+    public async Task Migration_003_Backfills_All_Existing_Rows_To_Basic()
+    {
+        // Apply 001 + 002 manually, seed a row with a snapshot (which under a
+        // permissive "had-snapshot=>enriched" rule would falsely be marked
+        // enriched). Then apply 003 and assert the row is 'basic' — we do not
+        // infer enrichment success from snapshot existence because old sync
+        // code wrote snapshots before threads.
+        var conn = PrInboxDb.InMemoryConnectionString($"mig-{Guid.NewGuid():N}");
+        var db = new PrInboxDb(conn);
+        await using var keepAlive = await db.OpenAsync();
+
+        var all = MigrationRunner.LoadEmbeddedMigrations();
+        var m001 = all.Single(m => m.Version == 1);
+        var m002 = all.Single(m => m.Version == 2);
+        await ExecuteMigrationDirectlyAsync(keepAlive, m001);
+        await ExecuteMigrationDirectlyAsync(keepAlive, m002);
+
+        // Seed a v2-shape row with a snapshot.
+        await ExecuteAsync(keepAlive, """
+            INSERT INTO pull_requests (
+              pr_identity, stable_identity, source_id, source_kind, display_repo, number,
+              title, author_login, url, status, tracking_reason, identity_used,
+              first_seen_at, last_synced_at
+            ) VALUES (
+              'https://github.com/owner/repo/pull/1',
+              'gh.com:100#1', 'gh.com:emu', 'github', 'owner/repo', 1,
+              'Sample', 'octocat',
+              'https://github.com/owner/repo/pull/1',
+              'open', 'assigned', 'jmprieur_microsoft',
+              '2026-05-13T20:00:00Z', '2026-05-13T20:30:00Z'
+            );
+            """);
+        await ExecuteAsync(keepAlive, """
+            INSERT INTO pr_snapshots (
+              pr_identity, synced_at, head_sha, base_sha, ordered_commit_shas, pr_state
+            ) VALUES (
+              'https://github.com/owner/repo/pull/1',
+              '2026-05-13T20:30:00Z', 'abc', 'base', '["abc"]', 'open'
+            );
+            """);
+
+        // Pre-seed schema_version to mark 001 and 002 already applied; then
+        // ask runner to apply remaining migrations (003+).
+        await ExecuteAsync(keepAlive, """
+            CREATE TABLE schema_version (
+              version    INTEGER PRIMARY KEY,
+              name       TEXT    NOT NULL,
+              applied_at TEXT    NOT NULL
+            );
+            """);
+        await ExecuteAsync(keepAlive,
+            "INSERT INTO schema_version (version, name, applied_at) VALUES (1, 'initial', '2026-05-13T20:00:00Z'), (2, 'url_as_identity', '2026-05-13T20:00:00Z');");
+
+        var runner = new MigrationRunner();
+        await runner.MigrateAsync(conn);
+
+        var enrichState = await ScalarStringAsync(keepAlive,
+            "SELECT enrich_state FROM pull_requests WHERE stable_identity = 'gh.com:100#1';");
+        enrichState.Should().Be("basic", "all existing rows are conservatively marked 'basic' so the next enrich pass refreshes them — snapshot presence does not imply threads were also fetched.");
     }
 
     private static async Task ExecuteMigrationDirectlyAsync(
