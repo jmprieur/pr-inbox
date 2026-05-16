@@ -1,0 +1,147 @@
+@page "/"
+@implements IDisposable
+@inject InboxState State
+@inject IReviewLauncher Launcher
+@inject ILogger<Inbox> Log
+
+<h1>Pull requests assigned to me</h1>
+
+<div class="toolbar">
+    <span class="muted">@RowCountLabel</span>
+    <span class="muted">@LastSyncLabel</span>
+    @if (!string.IsNullOrEmpty(_lastLaunchMessage))
+    {
+        <span class="muted">@_lastLaunchMessage</span>
+    }
+</div>
+
+@if (_rows.Count == 0)
+{
+    <p class="empty">No PRs yet. The first fast-sync runs on startup; check back in a few seconds.</p>
+}
+else
+{
+    <table class="pr-table">
+        <thead>
+            <tr>
+                <th>Source</th>
+                <th>Repo / PR</th>
+                <th>Title</th>
+                <th>Author</th>
+                <th>Threads</th>
+                <th>State</th>
+                <th>Last sync</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var row in _rows)
+            {
+                <tr>
+                    <td><span class="badge @SourceClass(row)">@SourceLabel(row)</span></td>
+                    <td>
+                        <a href="@row.Url" target="_blank" rel="noopener">
+                            @row.DisplayRepo #@row.Number
+                        </a>
+                    </td>
+                    <td class="title">@(row.Title ?? "")</td>
+                    <td>@(row.AuthorLogin ?? "")</td>
+                    <td>
+                        @if (row.OpenThreadCount == 0)
+                        {
+                            <span class="muted">–</span>
+                        }
+                        else
+                        {
+                            <span>@row.OpenThreadCount</span>
+                            @if (row.UnresolvedBotCount > 0)
+                            {
+                                <span class="muted"> (@row.UnresolvedBotCount bot)</span>
+                            }
+                        }
+                    </td>
+                    <td>
+                        <span class="badge @EnrichClass(row.EnrichState)">@row.EnrichState.ToString().ToLowerInvariant()</span>
+                    </td>
+                    <td class="muted">@RelativeTime(row.LastSyncedAt)</td>
+                    <td>
+                        <button class="review" @onclick="() => OnReviewAsync(row)">Review</button>
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+@code {
+    private IReadOnlyList<InboxRow> _rows = Array.Empty<InboxRow>();
+    private string? _lastLaunchMessage;
+    private string RowCountLabel => $"{_rows.Count} PR(s)";
+    private string LastSyncLabel => State.LastSyncMessage ?? "Loading...";
+
+    protected override void OnInitialized()
+    {
+        State.Changed += OnStateChanged;
+        SnapshotRows();
+    }
+
+    private void OnStateChanged()
+    {
+        SnapshotRows();
+        InvokeAsync(StateHasChanged);
+    }
+
+    private void SnapshotRows()
+    {
+        _rows = State.CurrentRows;
+    }
+
+    private async Task OnReviewAsync(InboxRow row)
+    {
+        try
+        {
+            _lastLaunchMessage = await Launcher.LaunchAsync(row.Url, CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            Log.LogError(ex, "Review launcher threw");
+            _lastLaunchMessage = $"Launcher error: {ex.Message}";
+        }
+    }
+
+    private static string SourceLabel(InboxRow row) => row.SourceId switch
+    {
+        "gh.com:emu"    => "EMU",
+        "gh.com:public" => "public",
+        var id when id.StartsWith("ghe.", StringComparison.Ordinal)  => "proxima",
+        var id when id.StartsWith("ado:", StringComparison.Ordinal)  => "ado",
+        _ => row.SourceId,
+    };
+
+    private static string SourceClass(InboxRow row) => row.SourceId switch
+    {
+        "gh.com:emu"    => "src-emu",
+        "gh.com:public" => "src-public",
+        var id when id.StartsWith("ghe.", StringComparison.Ordinal) => "src-ghe",
+        var id when id.StartsWith("ado:", StringComparison.Ordinal) => "src-ado",
+        _ => "src-other",
+    };
+
+    private static string EnrichClass(EnrichState s) => s switch
+    {
+        EnrichState.Enriched => "enrich-enriched",
+        EnrichState.Basic    => "enrich-basic",
+        _                    => "enrich-unsynced",
+    };
+
+    private static string RelativeTime(DateTimeOffset when)
+    {
+        var delta = DateTimeOffset.UtcNow - when;
+        if (delta.TotalSeconds < 60) return "just now";
+        if (delta.TotalMinutes < 60) return $"{(int)delta.TotalMinutes}m ago";
+        if (delta.TotalHours   < 24) return $"{(int)delta.TotalHours}h ago";
+        return $"{(int)delta.TotalDays}d ago";
+    }
+
+    public void Dispose() => State.Changed -= OnStateChanged;
+}

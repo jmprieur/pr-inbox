@@ -1,0 +1,12 @@
+@inherits LayoutComponentBase
+@inject IHostEnvironment Hosting
+
+<div class="page">
+    <header class="topbar">
+        <span class="brand">pr-inbox</span>
+        <span class="hint">@Hosting.EnvironmentName</span>
+    </header>
+    <main>
+        @Body
+    </main>
+</div>

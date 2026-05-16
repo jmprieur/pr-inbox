@@ -1,0 +1,104 @@
+:root {
+    --bg: #0f1115;
+    --fg: #e6e6e6;
+    --muted: #8b8d93;
+    --line: #2a2d35;
+    --accent: #5da4ff;
+    --card: #181b22;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+    margin: 0;
+    padding: 0;
+    background: var(--bg);
+    color: var(--fg);
+    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    font-size: 14px;
+    line-height: 1.4;
+}
+
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+.page { max-width: 1200px; margin: 0 auto; padding: 1.5rem; }
+
+.topbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    border-bottom: 1px solid var(--line);
+    padding-bottom: 0.5rem;
+    margin-bottom: 1rem;
+}
+.topbar .brand { font-weight: 600; font-size: 1.2rem; }
+.topbar .hint  { color: var(--muted); font-size: 0.85rem; }
+
+h1 { font-size: 1.4rem; margin: 0 0 0.5rem 0; }
+
+.toolbar {
+    display: flex;
+    gap: 1rem;
+    margin-bottom: 0.75rem;
+    flex-wrap: wrap;
+}
+
+.muted { color: var(--muted); }
+.empty { color: var(--muted); padding: 1rem 0; }
+
+.pr-table {
+    width: 100%;
+    border-collapse: collapse;
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    overflow: hidden;
+}
+.pr-table th, .pr-table td {
+    text-align: left;
+    padding: 0.45rem 0.6rem;
+    border-bottom: 1px solid var(--line);
+    vertical-align: top;
+}
+.pr-table th {
+    background: #1f232c;
+    color: var(--muted);
+    font-weight: 500;
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+.pr-table tr:last-child td { border-bottom: none; }
+
+.title { max-width: 360px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.badge {
+    display: inline-block;
+    padding: 0.1rem 0.45rem;
+    border-radius: 3px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    background: #2a2d35;
+    color: var(--fg);
+}
+.src-emu    { background: #2d5b8c; }
+.src-public { background: #4a4a4a; }
+.src-ghe    { background: #4d6f3e; }
+.src-ado    { background: #6f4d8c; }
+.src-other  { background: #444; }
+
+.enrich-enriched { background: #2e6b4f; }
+.enrich-basic    { background: #6b6b2e; }
+.enrich-unsynced { background: #6b3a2e; }
+
+button.review {
+    background: transparent;
+    color: var(--accent);
+    border: 1px solid var(--accent);
+    padding: 0.2rem 0.6rem;
+    border-radius: 3px;
+    font-size: 0.85rem;
+    cursor: pointer;
+}
+button.review:hover { background: rgba(93,164,255,0.12); }
