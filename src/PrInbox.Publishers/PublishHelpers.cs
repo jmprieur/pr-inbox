@@ -8,7 +8,12 @@ namespace PrInbox.Publishers;
 /// Helpers shared by all <see cref="IPrReviewPublisher"/> implementations.
 /// Stateless, pure functions only.
 /// </summary>
-internal static class PublishHelpers
+/// <remarks>
+/// Also consumed by the Web UI's Review page to render the exact text
+/// that will land on the platform (preview-as-you-pick), so the methods
+/// here are the single source of truth for what gets posted.
+/// </remarks>
+public static class PublishHelpers
 {
     /// <summary>
     /// Build the per-finding fingerprint stored in <c>posted_reviews</c>.
@@ -67,14 +72,15 @@ internal static class PublishHelpers
     /// Compose the inline-comment body for a single anchorable finding
     /// (header line + body + suggested-inline code block if any).
     /// </summary>
+    /// <remarks>
+    /// Deliberately omits any "found by: model A, model B" attribution —
+    /// per <c>posting-style.md</c>, comments stand on their own and
+    /// don't disclose how the review was produced.
+    /// </remarks>
     public static string ComposeInlineCommentBody(FindingToPost finding)
     {
         var sb = new StringBuilder();
         sb.AppendLine($"**[{finding.Severity.ToString().ToLowerInvariant()}]** {finding.Title}");
-        var foundBy = finding.FoundBy.Count > 0
-            ? $"_found by: {string.Join(", ", finding.FoundBy)}_"
-            : null;
-        if (foundBy is not null) sb.AppendLine(foundBy);
         sb.AppendLine();
         sb.AppendLine(finding.Body.TrimEnd());
         if (!string.IsNullOrWhiteSpace(finding.SuggestedInline))

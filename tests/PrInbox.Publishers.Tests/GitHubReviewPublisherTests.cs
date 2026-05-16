@@ -210,7 +210,7 @@ public sealed class GitHubReviewPublisherTests
             PrUrl: url,
             RunId: 7,
             HeadShaAtAuthoring: headSha,
-            ReviewBodyHeader: "**Automated review from PrInbox**",
+            ReviewBodyHeader: "Findings: 1 (1 critical, 0 high, 0 medium, 0 low).",
             Findings: findings,
             DryRun: dryRun,
             ValidateRemoteState: validateRemoteState);

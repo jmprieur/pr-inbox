@@ -50,15 +50,18 @@ public sealed class PublishHelpersTests
                 Title: "Refactor opportunity", Body: "Could extract method.", SuggestedInline: null),
         };
         var body = PublishHelpers.ComposeReviewBody(
-            header: "**Automated review from PrInbox**",
+            header: "Findings: 1 (0 critical, 1 high, 0 medium, 0 low).",
             nonAnchorable: na,
             headSha: "abcdef1234567890");
 
-        body.Should().Contain("Automated review from PrInbox");
+        body.Should().Contain("Findings: 1");
         body.Should().Contain("abcdef12");                       // short sha
         body.Should().Contain("Non-anchorable findings");
         body.Should().Contain("src/Bar.cs:17");
         body.Should().Contain("Refactor opportunity");
+        // Posting-style: never disclose how the review was produced.
+        body.Should().NotContain("PrInbox");
+        body.Should().NotContain("dual-model");
     }
 
     [Fact]
@@ -74,6 +77,9 @@ public sealed class PublishHelpersTests
         text.Should().Contain("Concatenated SQL.");
         text.Should().Contain("```suggestion");
         text.Should().Contain("AddWithValue");
+        // Posting-style: never disclose how the finding was found.
+        text.Should().NotContain("found by");
+        text.Should().NotContain("opus");
     }
 
     private static FindingToPost MakeFinding(

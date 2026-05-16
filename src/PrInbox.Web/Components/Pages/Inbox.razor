@@ -138,18 +138,35 @@ else
                         }
                         else
                         {
-                            <a class="findings-counts findings-link"
-                               href="@($"/review?url={Uri.EscapeDataString(row.Url)}")"
-                               title="@($"run #{run.RunId} · {run.RunDirectory}")">
-                                @if (run.CriticalCount > 0) { <span class="sev-critical">C:@run.CriticalCount</span> }
-                                @if (run.HighCount     > 0) { <span class="sev-high">H:@run.HighCount</span> }
-                                @if (run.MediumCount   > 0) { <span class="sev-medium">M:@run.MediumCount</span> }
-                                @if (run.LowCount      > 0) { <span class="sev-low">L:@run.LowCount</span> }
-                                @if (run.CriticalCount + run.HighCount + run.MediumCount + run.LowCount == 0)
+                            var total = run.CriticalCount + run.HighCount + run.MediumCount + run.LowCount;
+                            <span class="findings-counts"
+                                  title="@($"run #{run.RunId} · {run.RunDirectory}")">
+                                @if (run.CriticalCount > 0)
                                 {
-                                    <span class="muted">clean</span>
+                                    <a class="findings-link sev-critical"
+                                       href="@($"/review?url={Uri.EscapeDataString(row.Url)}&show=C")">C:@run.CriticalCount</a>
                                 }
-                            </a>
+                                @if (run.HighCount > 0)
+                                {
+                                    <a class="findings-link sev-high"
+                                       href="@($"/review?url={Uri.EscapeDataString(row.Url)}&show=H")">H:@run.HighCount</a>
+                                }
+                                @if (run.MediumCount > 0)
+                                {
+                                    <a class="findings-link sev-medium"
+                                       href="@($"/review?url={Uri.EscapeDataString(row.Url)}&show=M")">M:@run.MediumCount</a>
+                                }
+                                @if (run.LowCount > 0)
+                                {
+                                    <a class="findings-link sev-low"
+                                       href="@($"/review?url={Uri.EscapeDataString(row.Url)}&show=L")">L:@run.LowCount</a>
+                                }
+                                @if (total == 0)
+                                {
+                                    <a class="findings-link muted"
+                                       href="@($"/review?url={Uri.EscapeDataString(row.Url)}")">clean</a>
+                                }
+                            </span>
                         }
                     </td>
                     <td class="row-actions">

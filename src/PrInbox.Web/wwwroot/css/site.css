@@ -133,7 +133,8 @@ button.review {
 }
 button.review:hover { background: rgba(93,164,255,0.12); }
 
-.findings-counts > span {
+.findings-counts > span,
+.findings-counts > a {
     display: inline-block;
     padding: 0.1rem 0.4rem;
     border-radius: 3px;
@@ -163,6 +164,34 @@ button.review:hover { background: rgba(93,164,255,0.12); }
     align-items: center;
     gap: 0.25rem;
     cursor: pointer;
+}
+
+/* Per-finding preview row + top-of-page review-body preview. The
+   <pre> shows the exact text that will land on GitHub so what-you-see
+   is what-gets-posted. */
+.preview-row td { padding-top: 0; border-top: 0; }
+.preview-row details > summary {
+    cursor: pointer;
+    padding: 0.15rem 0;
+    font-size: 0.85rem;
+}
+.review-body-preview {
+    margin: 1rem 0;
+}
+.review-body-preview > summary {
+    cursor: pointer;
+    padding: 0.25rem 0;
+}
+.comment-preview {
+    background: rgba(127, 127, 127, 0.08);
+    border-left: 3px solid rgba(127, 127, 127, 0.3);
+    padding: 0.6rem 0.8rem;
+    margin: 0.4rem 0 0.6rem 0;
+    font-family: ui-monospace, Consolas, monospace;
+    font-size: 0.85rem;
+    white-space: pre-wrap;
+    word-break: break-word;
+    overflow-x: auto;
 }
 
 .findings-table {

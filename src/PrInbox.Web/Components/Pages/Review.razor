@@ -54,7 +54,6 @@ else
                 <th>Sev</th>
                 <th>File · line</th>
                 <th>Title</th>
-                <th>Found by</th>
                 <th>Anchor</th>
             </tr>
         </thead>
@@ -69,12 +68,25 @@ else
                     <td><span class="@SevClass(f.Severity)">@f.Severity.ToString().ToLowerInvariant()</span></td>
                     <td><code>@f.File:@(f.Line?.ToString() ?? "?")</code></td>
                     <td>@f.Title</td>
-                    <td class="muted">@(string.Join(", ", f.FoundBy))</td>
                     <td class="muted">@(f.DiffAnchorable ? "inline" : "body-only")</td>
+                </tr>
+                <tr class="preview-row">
+                    <td></td>
+                    <td colspan="4">
+                        <details>
+                            <summary class="muted">Preview comment</summary>
+                            <pre class="comment-preview">@PublishHelpers.ComposeInlineCommentBody(ToPostable(f))</pre>
+                        </details>
+                    </td>
                 </tr>
             }
         </tbody>
     </table>
+
+    <details class="review-body-preview">
+        <summary class="muted">Preview review body (@SelectedCount() selected)</summary>
+        <pre class="comment-preview">@BuildReviewBodyPreview()</pre>
+    </details>
 
     <div class="post-row">
         <label><input type="checkbox" @bind="_dryRun" /> <strong>Dry run</strong> (recommended; no network)</label>
@@ -132,6 +144,9 @@ else
     [SupplyParameterFromQuery(Name = "url")]
     public string? Url { get; set; }
 
+    [SupplyParameterFromQuery(Name = "show")]
+    public string? Show { get; set; }
+
     private ReviewRun? _run;
     private HashSet<string> _selected = new();
     private bool _showCritical = true;
@@ -145,12 +160,35 @@ else
     protected override void OnInitialized()
     {
         Runs.Changed += OnRunsChanged;
+        ApplyShowOverride();
         RefreshRun();
     }
 
     protected override void OnParametersSet()
     {
+        ApplyShowOverride();
         RefreshRun();
+    }
+
+    /// <summary>
+    /// Force-enable any severity filter named in <c>?show=</c>. So clicking
+    /// an L badge in the inbox doesn't land you on a page where the Low
+    /// filter is unchecked and the finding you came for is invisible.
+    /// Accepts any combination of C/H/M/L (case-insensitive).
+    /// </summary>
+    private void ApplyShowOverride()
+    {
+        if (string.IsNullOrEmpty(Show)) return;
+        foreach (var ch in Show)
+        {
+            switch (char.ToUpperInvariant(ch))
+            {
+                case 'C': _showCritical = true; break;
+                case 'H': _showHigh = true; break;
+                case 'M': _showMedium = true; break;
+                case 'L': _showLow = true; break;
+            }
+        }
     }
 
     private void OnRunsChanged()
@@ -233,17 +271,27 @@ else
         }
     }
 
+    private int SelectedCount() => _selected.Count;
+
+    private string BuildReviewBodyPreview()
+    {
+        if (_run?.Findings is null) return string.Empty;
+        var picks = _run.Findings.Findings.Where(f => _selected.Contains(f.Id)).ToList();
+        if (picks.Count == 0) return "(select at least one finding to preview the review body)";
+        var nonAnchorable = picks.Where(p => !p.DiffAnchorable).Select(ToPostable).ToArray();
+        return PublishHelpers.ComposeReviewBody(
+            header: BuildReviewBodyHeader(picks),
+            nonAnchorable: nonAnchorable,
+            headSha: _run.HeadSha);
+    }
+
     private string BuildReviewBodyHeader(IReadOnlyList<Finding> picks)
     {
         var c = picks.Count(p => p.Severity == FindingSeverity.Critical);
         var h = picks.Count(p => p.Severity == FindingSeverity.High);
         var m = picks.Count(p => p.Severity == FindingSeverity.Medium);
         var l = picks.Count(p => p.Severity == FindingSeverity.Low);
-        var doc = _run!.Findings!;
-        var models = doc.Models is not null && doc.Models.Count > 0
-            ? string.Join(", ", doc.Models) : "dual-model-review";
-        return $"**Automated review from PrInbox ({models})**\n\n" +
-               $"Findings posted: {picks.Count} ({c} critical, {h} high, {m} medium, {l} low).";
+        return $"Findings: {picks.Count} ({c} critical, {h} high, {m} medium, {l} low).";
     }
 
     private static FindingToPost ToPostable(Finding f) => new(
