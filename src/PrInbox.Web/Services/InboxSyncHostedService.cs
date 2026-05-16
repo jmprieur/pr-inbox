@@ -150,7 +150,22 @@ public sealed class InboxSyncHostedService : BackgroundService
             {
                 var orchestrator = new SyncOrchestrator(rt.Source, prRepo, snapRepo, threadRepo, syncRunRepo);
                 var progress = new Progress<SyncProgress>();
-                await orchestrator.RunFastAsync(rt.Identity, progress, ct);
+                var result = await orchestrator.RunFastAsync(rt.Identity, progress, ct);
+
+                // Sweep A: anything we still think is open but the source
+                // didn't return this pass. Cap protects rate limits.
+                if (result.SeenUrls is not null && result.Status != SyncRunStatus.Failed)
+                {
+                    try
+                    {
+                        await orchestrator.RunDisappearedSweepAsync(
+                            rt.Identity, result.SeenUrls, cap: 20, ct);
+                    }
+                    catch (Exception ex)
+                    {
+                        _log.LogDebug(ex, "Disappeared sweep of {SourceId} failed", rt.Source.SourceId);
+                    }
+                }
             }
             catch (Exception ex)
             {
@@ -175,6 +190,18 @@ public sealed class InboxSyncHostedService : BackgroundService
                 var orchestrator = new SyncOrchestrator(rt.Source, prRepo, snapRepo, threadRepo, syncRunRepo);
                 var progress = new Progress<SyncProgress>();
                 await orchestrator.RunEnrichAsync(rt.Identity, progress, ct);
+
+                // Sweep B: re-enrich the oldest-swept open rows this
+                // source owns, catching state drift on PRs that never
+                // leave the fast-sync result set.
+                try
+                {
+                    await orchestrator.RunTtlSweepAsync(rt.Identity, n: 10, ct);
+                }
+                catch (Exception ex)
+                {
+                    _log.LogDebug(ex, "TTL sweep of {SourceId} failed", rt.Source.SourceId);
+                }
             }
             catch (Exception ex)
             {

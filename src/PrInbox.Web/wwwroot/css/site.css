@@ -214,3 +214,69 @@ button.review:hover { background: rgba(93,164,255,0.12); }
 .post-result-ok    { border-color: #2e6b4f; }
 .post-result-dry   { border-color: #6b6b2e; }
 .post-result-error { border-color: #b33; }
+
+/* ---------- v0.2 post-v1 UI: chips + ignore + disappeared ---------- */
+
+.source-chips {
+    display: inline-flex;
+    gap: 0.25rem;
+    align-items: center;
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 0.15rem;
+    background: var(--card);
+}
+.source-chips .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    padding: 0.1rem 0.5rem;
+    border-radius: 3px;
+    font-size: 0.85rem;
+    cursor: pointer;
+    user-select: none;
+    color: var(--muted);
+}
+.source-chips .chip.on  { color: var(--fg); background: rgba(93, 164, 255, 0.10); }
+.source-chips .chip.off { opacity: 0.55; }
+.source-chips .chip input[type=checkbox] {
+    margin: 0;
+    accent-color: var(--accent);
+}
+
+.show-ignored, .show-closed {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    color: var(--muted);
+    font-size: 0.9rem;
+    cursor: pointer;
+}
+
+.row-actions {
+    display: flex;
+    gap: 0.25rem;
+    flex-wrap: nowrap;
+    white-space: nowrap;
+}
+button.ignore {
+    background: transparent;
+    color: var(--muted);
+    border: 1px solid var(--line);
+    border-radius: 3px;
+    font-size: 0.8rem;
+    padding: 0.15rem 0.45rem;
+    cursor: pointer;
+}
+button.ignore:hover {
+    color: var(--fg);
+    border-color: var(--accent);
+}
+
+tr.row-hidden { opacity: 0.55; }
+tr.row-hidden td.title { font-style: italic; }
+
+.disappeared {
+    font-size: 0.85em;
+    font-style: italic;
+}

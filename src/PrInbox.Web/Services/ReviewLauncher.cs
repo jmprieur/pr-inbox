@@ -63,8 +63,25 @@ public sealed class ReviewLauncher : IReviewLauncher, IAsyncDisposable
             return ex.Message;
         }
 
+        // Build a "<repo> #<number>" title for the wt tab so the user can
+        // tell multiple in-flight reviews apart at a glance. Fall back to
+        // a generic title if the row is unexpectedly missing.
+        string tabTitle = "pr-inbox review";
+        try
+        {
+            var row = await prRepo.GetAsync(brief.PrUrl, ct);
+            if (row is not null)
+            {
+                tabTitle = $"{row.DisplayRepo} #{row.Number}";
+            }
+        }
+        catch (Exception ex)
+        {
+            _log.LogDebug(ex, "Could not resolve repo/number for {Url}; using default tab title.", brief.PrUrl);
+        }
+
         StartWatcher(brief.PrUrl, brief.RunDirectory, brief.RunId, brief.HeadSha);
-        SpawnConsole(brief.RunDirectory);
+        SpawnConsole(brief.RunDirectory, tabTitle);
 
         return $"Review run #{brief.RunId} opened in a new window. Findings will land in {brief.RunDirectory}\\findings.yaml.";
     }
@@ -155,7 +172,7 @@ public sealed class ReviewLauncher : IReviewLauncher, IAsyncDisposable
         _watchers[prUrl] = watcher;
     }
 
-    private void SpawnConsole(string runDir)
+    private void SpawnConsole(string runDir, string tabTitle)
     {
         var ps1 = FindLauncherScript();
         if (ps1 is null)
@@ -174,12 +191,18 @@ public sealed class ReviewLauncher : IReviewLauncher, IAsyncDisposable
             $" -Agent \"{rl.Agent}\"" +
             (string.IsNullOrEmpty(mcps) ? "" : $" -Mcps \"{mcps}\"");
 
+        // Strip embedded quotes from the tab title so wt doesn't mis-parse
+        // the command line. Falls back to the generic title on empty.
+        var safeTitle = string.IsNullOrWhiteSpace(tabTitle)
+            ? "pr-inbox review"
+            : tabTitle.Replace("\"", "");
+
         var wt = ResolveOnPath("wt.exe");
         try
         {
             if (wt is not null)
             {
-                var args = $"-w 0 nt --title \"pr-inbox review\" -d \"{runDir}\" pwsh -NoExit -File \"{ps1}\" {launcherArgs}";
+                var args = $"-w 0 nt --title \"{safeTitle}\" -d \"{runDir}\" pwsh -NoExit -File \"{ps1}\" {launcherArgs}";
                 Process.Start(new ProcessStartInfo
                 {
                     FileName = wt,
@@ -189,8 +212,9 @@ public sealed class ReviewLauncher : IReviewLauncher, IAsyncDisposable
                 return;
             }
 
-            // Fallback: open a fresh pwsh window via cmd /c start.
-            var fallbackArgs = $"/c start \"\" pwsh -NoExit -File \"{ps1}\" {launcherArgs}";
+            // Fallback: open a fresh pwsh window via cmd /c start. The
+            // start title is used as the new window's title bar text.
+            var fallbackArgs = $"/c start \"{safeTitle}\" pwsh -NoExit -File \"{ps1}\" {launcherArgs}";
             Process.Start(new ProcessStartInfo
             {
                 FileName = "cmd.exe",

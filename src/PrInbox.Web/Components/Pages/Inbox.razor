@@ -1,11 +1,18 @@
 @page "/"
 @rendermode InteractiveServer
 @implements IDisposable
+@using System.Text.Json
+@using System.Text.RegularExpressions
+@using PrInbox.Core.Credentials
 @using PrInbox.Core.Models
+@using PrInbox.Core.Storage
 @inject InboxState State
 @inject ReviewRunStore Runs
 @inject IReviewLauncher Launcher
 @inject InboxSyncHostedService Sync
+@inject PullRequestRepository PrRepo
+@inject UiPreferencesRepository Prefs
+@inject PrInboxConfig Config
 @inject ILogger<Inbox> Log
 
 <h1>Pull requests assigned to me</h1>
@@ -16,9 +23,28 @@
     <button class="refresh" @onclick="OnRefreshAsync" disabled="@_refreshing">
         @(_refreshing ? "Refreshing..." : "Refresh")
     </button>
+
+    <div class="source-chips" role="group" aria-label="Source filter">
+        @foreach (var chip in SourceChips)
+        {
+            <label class="chip @(chip.Class) @(IsSourceEnabled(chip.Class) ? "on" : "off")">
+                <input type="checkbox"
+                       checked="@IsSourceEnabled(chip.Class)"
+                       @onchange="@(e => OnSourceChipToggleAsync(chip.Class, (bool)e.Value!))" />
+                @chip.Label
+            </label>
+        }
+    </div>
+
     <label class="show-closed">
-        <input type="checkbox" @bind="_showClosed" />
+        <input type="checkbox" checked="@_showClosed"
+               @onchange="@(e => OnShowClosedToggleAsync((bool)e.Value!))" />
         Show closed / merged
+    </label>
+    <label class="show-ignored">
+        <input type="checkbox" checked="@_showIgnored"
+               @onchange="@(e => OnShowIgnoredToggleAsync((bool)e.Value!))" />
+        Show ignored
     </label>
     @if (!string.IsNullOrEmpty(_lastLaunchMessage))
     {
@@ -37,7 +63,7 @@
     }
     else
     {
-        <p class="empty">No open PRs. Toggle "Show closed / merged" to see @_rows.Count cached row(s).</p>
+        <p class="empty">No rows match the current filters. Try toggling "Show closed / merged" or "Show ignored", or re-enabling a source chip.</p>
     }
 }
 else
@@ -59,7 +85,7 @@ else
         <tbody>
             @foreach (var row in visible)
             {
-                <tr>
+                <tr class="@(RowIsHidden(row) ? "row-hidden" : "")">
                     <td><span class="badge @SourceClass(row)">@SourceLabel(row)</span></td>
                     <td>
                         <a href="@row.Url" target="_blank" rel="noopener">
@@ -84,6 +110,12 @@ else
                     </td>
                     <td>
                         <span class="badge @StatusClass(row.Status)">@StatusLabel(row.Status)</span>
+                        @if (row.DisappearedAt is not null && row.Status == PullRequestStatus.Open)
+                        {
+                            <span class="muted disappeared" title="No longer in your review queue (still open upstream).">
+                                · gone
+                            </span>
+                        }
                     </td>
                     <td class="muted" title="@EnrichTooltip(row.EnrichState)">
                         @RelativeTime(row.LastSyncedAt)
@@ -120,8 +152,12 @@ else
                             </a>
                         }
                     </td>
-                    <td>
+                    <td class="row-actions">
                         <button class="review" @onclick="() => OnReviewAsync(row)">Review</button>
+                        <button class="ignore" title="@(row.IsIgnored ? "Unignore this PR" : "Ignore this PR")"
+                                @onclick="() => OnToggleIgnoreAsync(row)">
+                            @(row.IsIgnored ? "Unignore" : "Ignore")
+                        </button>
                     </td>
                 </tr>
             }
@@ -130,29 +166,204 @@ else
 }
 
 @code {
+    // Visible chip definitions. Class corresponds to the value returned by
+    // SourceClass(row). The persisted source_filter pref is a JSON array of
+    // these class strings.
+    private record SourceChip(string Class, string Label);
+    private static readonly SourceChip[] SourceChips = new[]
+    {
+        new SourceChip("src-emu",    "EMU"),
+        new SourceChip("src-public", "public"),
+        new SourceChip("src-ghe",    "proxima"),
+        new SourceChip("src-ado",    "ADO"),
+    };
+
+    private const string PrefShowClosed   = "inbox.show_closed";
+    private const string PrefShowIgnored  = "inbox.show_ignored";
+    private const string PrefSourceFilter = "inbox.source_filter";
+
     private IReadOnlyList<InboxRow> _rows = Array.Empty<InboxRow>();
     private IReadOnlyDictionary<string, ReviewRun> _runMap = new Dictionary<string, ReviewRun>();
     private string? _lastLaunchMessage;
     private bool _showClosed;
+    private bool _showIgnored;
     private bool _refreshing;
 
-    private string RowCountLabel =>
-        _showClosed
-            ? $"{_rows.Count} PR(s)"
-            : $"{VisibleRows.Count} open · {_rows.Count} total";
+    // Source classes that are currently enabled. Default = all known
+    // chips on; loaded from prefs in OnInitializedAsync.
+    private HashSet<string> _enabledSources =
+        new(SourceChips.Select(c => c.Class), StringComparer.OrdinalIgnoreCase);
+
+    // Compiled IgnoredRepos regex list. Invalid patterns are dropped with
+    // a debug log; we never crash the page over bad config.
+    private List<Regex> _ignoredRepoRegexes = new();
+
+    private string RowCountLabel
+    {
+        get
+        {
+            var visible = VisibleRows.Count;
+            return visible == _rows.Count
+                ? $"{_rows.Count} PR(s)"
+                : $"{visible} shown · {_rows.Count} total";
+        }
+    }
 
     private string LastSyncLabel => State.LastSyncMessage ?? "Loading...";
 
-    private IReadOnlyList<InboxRow> VisibleRows =>
-        _showClosed
-            ? _rows
-            : _rows.Where(r => r.Status == PullRequestStatus.Open).ToArray();
+    private bool IsSourceEnabled(string sourceClass) => _enabledSources.Contains(sourceClass);
 
-    protected override void OnInitialized()
+    private bool RowMatchesIgnoredRepoRegex(InboxRow row)
+    {
+        if (_ignoredRepoRegexes.Count == 0) return false;
+        foreach (var re in _ignoredRepoRegexes)
+        {
+            try { if (re.IsMatch(row.DisplayRepo)) return true; }
+            catch { /* runtime regex error — ignore the pattern */ }
+        }
+        return false;
+    }
+
+    private bool RowIsHidden(InboxRow row) =>
+        row.IsIgnored || RowMatchesIgnoredRepoRegex(row);
+
+    private IReadOnlyList<InboxRow> VisibleRows
+    {
+        get
+        {
+            var query = _rows.AsEnumerable();
+
+            if (!_showClosed)
+            {
+                query = query.Where(r => r.Status == PullRequestStatus.Open);
+            }
+
+            // Source chips. If every chip is enabled, skip the filter; that
+            // keeps rows with unknown sources visible.
+            if (_enabledSources.Count < SourceChips.Length)
+            {
+                query = query.Where(r => _enabledSources.Contains(SourceClass(r)));
+            }
+
+            // disappeared_at: hide PRs that left the review queue but are
+            // still upstream-open. Toggled in via "Show ignored" since the
+            // semantics overlap ("I don't want to see this PR").
+            if (!_showIgnored)
+            {
+                query = query.Where(r =>
+                    !(r.DisappearedAt is not null && r.Status == PullRequestStatus.Open));
+            }
+
+            // Ignore filter — combined per-PR flag + config regex list.
+            if (!_showIgnored)
+            {
+                query = query.Where(r => !RowIsHidden(r));
+            }
+
+            return query.ToArray();
+        }
+    }
+
+    protected override async Task OnInitializedAsync()
     {
         State.Changed += OnStateChanged;
         Runs.Changed += OnStateChanged;
+        await LoadPrefsAsync();
+        CompileIgnoredRepoRegexes();
         SnapshotAll();
+    }
+
+    private async Task LoadPrefsAsync()
+    {
+        try
+        {
+            _showClosed  = await Prefs.GetBoolAsync(PrefShowClosed, defaultValue: false);
+            _showIgnored = await Prefs.GetBoolAsync(PrefShowIgnored, defaultValue: false);
+
+            var rawSources = await Prefs.GetAsync(PrefSourceFilter);
+            if (!string.IsNullOrWhiteSpace(rawSources))
+            {
+                try
+                {
+                    var arr = JsonSerializer.Deserialize<string[]>(rawSources);
+                    if (arr is not null && arr.Length > 0)
+                    {
+                        _enabledSources = new HashSet<string>(arr, StringComparer.OrdinalIgnoreCase);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Log.LogDebug(ex, "Could not parse {Key}; falling back to defaults.", PrefSourceFilter);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.LogWarning(ex, "Loading UI prefs failed; using defaults.");
+        }
+    }
+
+    private void CompileIgnoredRepoRegexes()
+    {
+        _ignoredRepoRegexes.Clear();
+        foreach (var pattern in Config.IgnoredRepos ?? new())
+        {
+            if (string.IsNullOrWhiteSpace(pattern)) continue;
+            try
+            {
+                _ignoredRepoRegexes.Add(new Regex(pattern,
+                    RegexOptions.Compiled | RegexOptions.CultureInvariant | RegexOptions.IgnoreCase));
+            }
+            catch (Exception ex)
+            {
+                Log.LogWarning(ex, "Ignoring invalid IgnoredRepos regex '{Pattern}'.", pattern);
+            }
+        }
+    }
+
+    private async Task OnShowClosedToggleAsync(bool value)
+    {
+        _showClosed = value;
+        try { await Prefs.SetBoolAsync(PrefShowClosed, value); }
+        catch (Exception ex) { Log.LogDebug(ex, "Persist {Key} failed.", PrefShowClosed); }
+    }
+
+    private async Task OnShowIgnoredToggleAsync(bool value)
+    {
+        _showIgnored = value;
+        try { await Prefs.SetBoolAsync(PrefShowIgnored, value); }
+        catch (Exception ex) { Log.LogDebug(ex, "Persist {Key} failed.", PrefShowIgnored); }
+    }
+
+    private async Task OnSourceChipToggleAsync(string sourceClass, bool enabled)
+    {
+        if (enabled) _enabledSources.Add(sourceClass);
+        else _enabledSources.Remove(sourceClass);
+        try
+        {
+            await Prefs.SetAsync(PrefSourceFilter,
+                JsonSerializer.Serialize(_enabledSources.ToArray()));
+        }
+        catch (Exception ex) { Log.LogDebug(ex, "Persist {Key} failed.", PrefSourceFilter); }
+    }
+
+    private async Task OnToggleIgnoreAsync(InboxRow row)
+    {
+        var next = !row.IsIgnored;
+        try
+        {
+            await PrRepo.SetIgnoredAsync(row.Url, next, CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            Log.LogError(ex, "SetIgnored({Url},{Next}) failed", row.Url, next);
+            _lastLaunchMessage = $"Could not update ignore state: {ex.Message}";
+            return;
+        }
+        // Push the new row through InboxState so the page (and any other
+        // open inbox tab) sees it immediately, without waiting for the
+        // next sync cycle to re-snapshot.
+        State.Upsert(row with { IsIgnored = next });
     }
 
     private void OnStateChanged()
@@ -261,4 +472,3 @@ else
         Runs.Changed -= OnStateChanged;
     }
 }
-

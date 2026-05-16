@@ -144,7 +144,92 @@ public sealed class SyncOrchestrator
             }
         }
 
-        return new SyncResult(runId, _source.SourceId, finalStatus, prsSeen, prsFailed, finalError);
+        return new SyncResult(runId, _source.SourceId, finalStatus, prsSeen, prsFailed, finalError, seenIdentities);
+    }
+
+    /// <summary>
+    /// Re-evaluates PRs that we still consider <c>status='open'</c> for the
+    /// given (source, identity) but which did <em>not</em> show up in the
+    /// most recent fast pass (the &quot;disappeared&quot; set). Calls
+    /// <see cref="IPrReadSource.EnrichAsync"/> on up to <paramref name="cap"/>
+    /// of them: the new status is persisted to <c>pull_requests.status</c>,
+    /// and rows that remain <c>open</c> have <c>disappeared_at</c> stamped
+    /// so the UI can hide them as "no longer in your queue".
+    /// </summary>
+    public async Task RunDisappearedSweepAsync(
+        string identityUsed,
+        IReadOnlyCollection<string> seenUrls,
+        int cap,
+        CancellationToken ct)
+    {
+        if (cap <= 0) return;
+        var seen = seenUrls as ISet<string> ?? new HashSet<string>(seenUrls, StringComparer.OrdinalIgnoreCase);
+        var dbOpen = await _pullRequests.ListOpenUrlsByIdentityAsync(_source.SourceId, identityUsed, ct);
+        var disappeared = dbOpen.Where(u => !seen.Contains(u)).Take(cap).ToList();
+        if (disappeared.Count == 0)
+        {
+            _logger.LogDebug("Disappeared sweep ({SourceId}/{Identity}): no candidates.",
+                _source.SourceId, identityUsed);
+            return;
+        }
+        _logger.LogInformation("Disappeared sweep ({SourceId}/{Identity}): re-enriching {Count} PR(s).",
+            _source.SourceId, identityUsed, disappeared.Count);
+        foreach (var url in disappeared)
+        {
+            ct.ThrowIfCancellationRequested();
+            try
+            {
+                var row = await _pullRequests.GetAsync(url, ct);
+                if (row is null) continue;
+                await EnrichOneAsync(row, ct);
+                // EnrichOneAsync just persisted any new status. Re-read the row.
+                var updated = await _pullRequests.GetAsync(url, ct);
+                if (updated is not null && updated.Status == PullRequestStatus.Open)
+                {
+                    await _pullRequests.SetDisappearedAtAsync(url, DateTimeOffset.UtcNow, ct);
+                }
+            }
+            catch (OperationCanceledException) { throw; }
+            catch (Exception ex)
+            {
+                // Common case: the user no longer has access to the PR.
+                // Mark inaccessible so the UI can stop tracking it.
+                _logger.LogDebug(ex, "Disappeared-sweep enrich failed for {Url}; marking inaccessible.", url);
+                try { await _pullRequests.MarkInaccessibleAsync(url, ct); } catch { }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Periodic verification sweep: re-enrich up to <paramref name="n"/>
+    /// of the open, non-ignored rows owned by (source, identity), starting
+    /// with the ones whose <c>last_swept_at</c> is oldest. Catches PRs
+    /// whose state changed without ever leaving the fast-sync result set
+    /// (e.g. merged-and-immediately-reopened, or status drift on ADO).
+    /// </summary>
+    public async Task RunTtlSweepAsync(string identityUsed, int n, CancellationToken ct)
+    {
+        if (n <= 0) return;
+        var candidates = await _pullRequests.ListOldestSweptOpenAsync(
+            _source.SourceId, identityUsed, n, ct);
+        if (candidates.Count == 0) return;
+        _logger.LogDebug("TTL sweep ({SourceId}/{Identity}): re-enriching {Count} PR(s).",
+            _source.SourceId, identityUsed, candidates.Count);
+        var now = DateTimeOffset.UtcNow;
+        foreach (var row in candidates)
+        {
+            ct.ThrowIfCancellationRequested();
+            try
+            {
+                await EnrichOneAsync(row, ct);
+            }
+            catch (OperationCanceledException) { throw; }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "TTL-sweep enrich failed for {Url}.", row.Identity.Url);
+            }
+            try { await _pullRequests.MarkSweptAsync(row.Identity.Url, now, ct); } catch { }
+        }
     }
 
     /// <summary>
@@ -269,6 +354,14 @@ public sealed class SyncOrchestrator
 
         await _threads.UpsertManyAsync(row.Identity, bundle.Threads, enrichedAt, ct);
         await _pullRequests.MarkEnrichedAsync(row.Identity.Url, ct);
+
+        // Propagate the latest platform status to pull_requests.status so
+        // PRs that have been merged/closed since the last fast pass don't
+        // remain stuck at 'open' in the inbox.
+        if (bundle.Detail.Status != row.Status)
+        {
+            await _pullRequests.UpdateStatusAsync(row.Identity.Url, bundle.Detail.Status, ct);
+        }
     }
 
     private async Task ReconcileMissingPrsAsync(string sourceId, HashSet<string> seen, CancellationToken ct)
@@ -283,9 +376,29 @@ public sealed class SyncOrchestrator
                 await _pullRequests.MarkPreviouslyAssignedAsync(row.Identity.Url, ct);
             }
         }
+
+        // Clear stale disappeared_at for PRs that reappeared in this fast
+        // pass. (If a row was previously stamped, but it now shows up in
+        // the list again, the user is once more a requested reviewer.)
+        foreach (var url in seen)
+        {
+            try { await _pullRequests.SetDisappearedAtAsync(url, null, ct); } catch { }
+        }
     }
 }
 
 public sealed record SyncProgress(string SourceId, string Message, int PrsSeen, int? PrsTotal);
 
-public sealed record SyncResult(long RunId, string SourceId, SyncRunStatus Status, int PrsSeen, int PrsFailed, string? Error);
+/// <summary>
+/// Outcome of a single sync run. <see cref="SeenUrls"/> is populated only
+/// by <see cref="SyncOrchestrator.RunFastAsync"/>; callers can diff it
+/// against the DB's known-open URLs to drive the disappeared sweep.
+/// </summary>
+public sealed record SyncResult(
+    long RunId,
+    string SourceId,
+    SyncRunStatus Status,
+    int PrsSeen,
+    int PrsFailed,
+    string? Error,
+    IReadOnlyCollection<string>? SeenUrls = null);

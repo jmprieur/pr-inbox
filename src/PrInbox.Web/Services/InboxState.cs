@@ -21,7 +21,9 @@ public sealed record InboxRow(
     EnrichState EnrichState,
     DateTimeOffset LastSyncedAt,
     int OpenThreadCount,
-    int UnresolvedBotCount)
+    int UnresolvedBotCount,
+    bool IsIgnored = false,
+    DateTimeOffset? DisappearedAt = null)
 {
     public static InboxRow FromRow(PullRequestRow row, int openThreads, int unresolvedBot) => new(
         row.Url,
@@ -36,7 +38,9 @@ public sealed record InboxRow(
         row.EnrichState,
         row.LastSyncedAt,
         openThreads,
-        unresolvedBot);
+        unresolvedBot,
+        row.IsIgnored,
+        row.DisappearedAt);
 }
 
 /// <summary>

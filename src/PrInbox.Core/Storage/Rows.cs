@@ -22,7 +22,10 @@ public sealed record PullRequestRow(
     EnrichState EnrichState,
     string? LastBriefedHeadSha,
     string? LastReviewRunHeadSha,
-    string? LastPostedReviewHeadSha);
+    string? LastPostedReviewHeadSha,
+    bool IsIgnored = false,
+    DateTimeOffset? DisappearedAt = null,
+    DateTimeOffset? LastSweptAt = null);
 
 /// <summary>
 /// Row from <c>pr_snapshots</c>. Append-only.

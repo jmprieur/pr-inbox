@@ -180,6 +180,148 @@ public class SyncOrchestratorTests : IAsyncLifetime
         afterDowngrade.EnrichState.Should().Be(EnrichState.Basic);
     }
 
+    [Fact]
+    public async Task RunFast_Result_Includes_SeenUrls()
+    {
+        var source = BuildFakeSource("gh.com:emu", out var idAlpha);
+        var orch = new SyncOrchestrator(source, _prs, _snaps, _threads, _syncRuns);
+
+        var result = await orch.RunFastAsync("jmprieur_microsoft", progress: null, CancellationToken.None);
+
+        result.SeenUrls.Should().NotBeNull();
+        result.SeenUrls!.Should().Contain(idAlpha.Url);
+        result.SeenUrls.Should().HaveCount(2);
+    }
+
+    [Fact]
+    public async Task RunEnrich_Propagates_Detail_Status_To_PullRequests_Status()
+    {
+        // Initial fast pass marks the PR as open. The detail then reports
+        // "merged" — RunEnrich should propagate the new status.
+        var idAlpha = new PrIdentity("https://github.com/owner/repo/pull/1", "gh.com:100#1000");
+        var prOpen = BuildBasicPr(idAlpha, DateTimeOffset.Parse("2026-05-13T10:00:00Z"));
+        var detailMerged = BuildDetail(idAlpha) with { Status = PullRequestStatus.Merged };
+
+        var source = new FakePrReadSourceBuilder("gh.com:emu", SourceKind.GitHub)
+            .WithPullRequest(prOpen, detailMerged)
+            .Build();
+        var orch = new SyncOrchestrator(source, _prs, _snaps, _threads, _syncRuns);
+
+        await orch.RunFastAsync("jmprieur_microsoft", progress: null, CancellationToken.None);
+        await orch.RunEnrichAsync("jmprieur_microsoft", progress: null, CancellationToken.None);
+
+        var row = await _prs.GetAsync(idAlpha.Url, CancellationToken.None);
+        row!.Status.Should().Be(PullRequestStatus.Merged);
+    }
+
+    [Fact]
+    public async Task RunDisappearedSweep_Stamps_DisappearedAt_When_Still_Open()
+    {
+        // Seed: one PR in the DB as open, bound to (source, identity).
+        // The sweep is told that PR did NOT appear in the latest fast pass.
+        // Enrich still reports it as open -> stamp disappeared_at.
+        var idAlpha = new PrIdentity("https://github.com/owner/repo/pull/1", "gh.com:100#1000");
+        var source = new FakePrReadSourceBuilder("gh.com:emu", SourceKind.GitHub)
+            .WithPullRequest(
+                BuildBasicPr(idAlpha, DateTimeOffset.Parse("2026-05-13T10:00:00Z")),
+                BuildDetail(idAlpha))
+            .Build();
+        var orch = new SyncOrchestrator(source, _prs, _snaps, _threads, _syncRuns);
+        await orch.RunFastAsync("jmprieur_microsoft", progress: null, CancellationToken.None);
+
+        await orch.RunDisappearedSweepAsync(
+            "jmprieur_microsoft",
+            seenUrls: new HashSet<string>(),
+            cap: 5,
+            CancellationToken.None);
+
+        var row = await _prs.GetAsync(idAlpha.Url, CancellationToken.None);
+        row!.Status.Should().Be(PullRequestStatus.Open);
+        row.DisappearedAt.Should().NotBeNull();
+    }
+
+    [Fact]
+    public async Task RunDisappearedSweep_Updates_Status_When_Now_Merged_And_Clears_Disappeared()
+    {
+        // Seed: PR is open in DB. Enrich now reports merged. After the
+        // sweep, status should be 'merged' and disappeared_at should NOT
+        // be set (the row isn't "still open" any more).
+        var idAlpha = new PrIdentity("https://github.com/owner/repo/pull/2", "gh.com:100#2000");
+        var source = new FakePrReadSourceBuilder("gh.com:emu", SourceKind.GitHub)
+            .WithPullRequest(
+                BuildBasicPr(idAlpha, DateTimeOffset.Parse("2026-05-13T10:00:00Z")),
+                BuildDetail(idAlpha) with { Status = PullRequestStatus.Merged })
+            .Build();
+        var orch = new SyncOrchestrator(source, _prs, _snaps, _threads, _syncRuns);
+        await orch.RunFastAsync("jmprieur_microsoft", progress: null, CancellationToken.None);
+
+        await orch.RunDisappearedSweepAsync(
+            "jmprieur_microsoft",
+            seenUrls: new HashSet<string>(),
+            cap: 5,
+            CancellationToken.None);
+
+        var row = await _prs.GetAsync(idAlpha.Url, CancellationToken.None);
+        row!.Status.Should().Be(PullRequestStatus.Merged);
+        row.DisappearedAt.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task RunDisappearedSweep_Skips_Urls_That_Were_Seen()
+    {
+        // Seed two PRs. Tell the sweep one of them was seen. Only the
+        // other should be touched.
+        var idAlpha = new PrIdentity("https://github.com/owner/repo/pull/3", "gh.com:100#3000");
+        var idBeta  = new PrIdentity("https://github.com/owner/repo/pull/4", "gh.com:100#4000");
+
+        var source = new FakePrReadSourceBuilder("gh.com:emu", SourceKind.GitHub)
+            .WithPullRequest(BuildBasicPr(idAlpha, DateTimeOffset.Parse("2026-05-13T10:00:00Z")),
+                             BuildDetail(idAlpha))
+            .WithPullRequest(BuildBasicPr(idBeta, DateTimeOffset.Parse("2026-05-13T10:00:00Z")),
+                             BuildDetail(idBeta) with { Status = PullRequestStatus.Merged })
+            .Build();
+        var orch = new SyncOrchestrator(source, _prs, _snaps, _threads, _syncRuns);
+        await orch.RunFastAsync("jmprieur_microsoft", progress: null, CancellationToken.None);
+
+        await orch.RunDisappearedSweepAsync(
+            "jmprieur_microsoft",
+            seenUrls: new HashSet<string> { idAlpha.Url },
+            cap: 5,
+            CancellationToken.None);
+
+        // alpha untouched (still open, no disappeared stamp).
+        var alpha = await _prs.GetAsync(idAlpha.Url, CancellationToken.None);
+        alpha!.Status.Should().Be(PullRequestStatus.Open);
+        alpha.DisappearedAt.Should().BeNull();
+
+        // beta got re-enriched and learned it's merged.
+        var beta = await _prs.GetAsync(idBeta.Url, CancellationToken.None);
+        beta!.Status.Should().Be(PullRequestStatus.Merged);
+    }
+
+    [Fact]
+    public async Task RunTtlSweep_Stamps_LastSweptAt_On_Oldest_Open_Rows()
+    {
+        var idAlpha = new PrIdentity("https://github.com/owner/repo/pull/5", "gh.com:100#5000");
+        var idBeta  = new PrIdentity("https://github.com/owner/repo/pull/6", "gh.com:100#6000");
+
+        var source = new FakePrReadSourceBuilder("gh.com:emu", SourceKind.GitHub)
+            .WithPullRequest(BuildBasicPr(idAlpha, DateTimeOffset.Parse("2026-05-13T10:00:00Z")),
+                             BuildDetail(idAlpha))
+            .WithPullRequest(BuildBasicPr(idBeta, DateTimeOffset.Parse("2026-05-13T11:00:00Z")),
+                             BuildDetail(idBeta))
+            .Build();
+        var orch = new SyncOrchestrator(source, _prs, _snaps, _threads, _syncRuns);
+        await orch.RunFastAsync("jmprieur_microsoft", progress: null, CancellationToken.None);
+
+        await orch.RunTtlSweepAsync("jmprieur_microsoft", n: 2, CancellationToken.None);
+
+        var alpha = await _prs.GetAsync(idAlpha.Url, CancellationToken.None);
+        var beta  = await _prs.GetAsync(idBeta.Url, CancellationToken.None);
+        alpha!.LastSweptAt.Should().NotBeNull();
+        beta!.LastSweptAt.Should().NotBeNull();
+    }
+
     private static FakePrReadSource BuildFakeSource(string sourceId, out PrIdentity idAlpha)
     {
         idAlpha = new PrIdentity("https://github.com/owner/repo/pull/1", "gh.com:100#1000");

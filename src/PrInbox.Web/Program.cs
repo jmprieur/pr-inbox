@@ -32,6 +32,7 @@ builder.Services.AddSingleton(bootDb);
 builder.Services.AddSingleton(bootCfg);
 builder.Services.AddSingleton(sp => new PullRequestRepository(sp.GetRequiredService<PrInboxDb>()));
 builder.Services.AddSingleton(sp => new PostedReviewRepository(sp.GetRequiredService<PrInboxDb>()));
+builder.Services.AddSingleton(sp => new UiPreferencesRepository(sp.GetRequiredService<PrInboxDb>()));
 
 builder.Services.AddHttpClient("publisher", c => c.Timeout = TimeSpan.FromSeconds(30));
 builder.Services.AddSingleton<IPublisherSelector>(sp =>
