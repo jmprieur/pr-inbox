@@ -8,10 +8,13 @@
     <PackageReference Include="Microsoft.Data.Sqlite" />
     <PackageReference Include="Microsoft.Extensions.Logging" />
     <PackageReference Include="Azure.Identity" />
+    <PackageReference Include="YamlDotNet" />
+    <PackageReference Include="JsonSchema.Net" />
   </ItemGroup>
 
   <ItemGroup>
     <EmbeddedResource Include="Storage\Migrations\*.sql" />
+    <EmbeddedResource Include="Findings\findings.schema.json" />
   </ItemGroup>
 
   <ItemGroup>

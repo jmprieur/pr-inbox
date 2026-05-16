@@ -1,0 +1,116 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pr-inbox.local/schemas/findings.schema.json",
+  "title": "pr-inbox findings",
+  "description": "Output of the dual-model-review agent, consumed by pr-inbox-web. v1.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "pr_url", "head_sha", "generated_at_utc", "findings"],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 1,
+      "description": "Schema version. Future versions bump this integer."
+    },
+    "pr_url": {
+      "type": "string",
+      "format": "uri",
+      "description": "Canonical PR URL the review targets."
+    },
+    "pr_stable_identity": {
+      "type": "string",
+      "description": "Platform stable identity for rename-safe routing. Optional but recommended."
+    },
+    "head_sha": {
+      "type": "string",
+      "pattern": "^[0-9a-fA-F]{7,40}$",
+      "description": "HEAD SHA the review was run against. Used for staleness checks before posting."
+    },
+    "base_sha": {
+      "type": "string",
+      "pattern": "^[0-9a-fA-F]{7,40}$"
+    },
+    "generated_at_utc": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Wall-clock time the file was written by the agent."
+    },
+    "models": {
+      "type": "array",
+      "items": { "type": "string" },
+      "minItems": 1,
+      "description": "Model identifiers used by the review (e.g. opus-4.7, gpt-5.5)."
+    },
+    "asymmetry": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "Diagnostic breakdown of model agreement. Free-shape so future tools can extend without a schema bump.",
+      "properties": {
+        "both_found": { "type": "integer", "minimum": 0 },
+        "opus_only": { "type": "integer", "minimum": 0 },
+        "gpt_only":  { "type": "integer", "minimum": 0 }
+      }
+    },
+    "findings": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/Finding" }
+    }
+  },
+  "$defs": {
+    "Finding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "severity", "confidence", "file", "title"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Stable per-document id (e.g. f01). Used by pr-inbox-web to track per-finding 'posted' state."
+        },
+        "severity": {
+          "type": "string",
+          "enum": ["critical", "high", "medium", "low"]
+        },
+        "confidence": {
+          "type": "string",
+          "enum": ["high", "medium", "low"]
+        },
+        "found_by": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Which models found this. Order is informational; uniqueness is not enforced by schema."
+        },
+        "file": {
+          "type": "string",
+          "description": "Repo-relative file path."
+        },
+        "line": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "line_end": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "diff_anchorable": {
+          "type": "boolean",
+          "default": false,
+          "description": "True when the finding's (file, line) sits inside the diff and is safe to post inline."
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "description": "One-line summary; renders as the finding header in pr-inbox-web."
+        },
+        "body": {
+          "type": "string",
+          "description": "Multi-line markdown explanation. The body posted as the PR comment."
+        },
+        "suggested_inline": {
+          "type": "string",
+          "description": "Optional GitHub ```suggestion code block, including the fence."
+        }
+      }
+    }
+  }
+}
