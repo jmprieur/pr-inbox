@@ -21,22 +21,30 @@
     Agent id. Defaults to security-toolkit:dual-model-review.
 
 .PARAMETER Plugin
-    --plugin argument. Defaults to local:d:/1es/playground/plugins/security-toolkit.
+    --plugin argument. Defaults to
+    github:1ES-microsoft/ai-plugins:plugins/security-toolkit
+    (fetched once and cached by agency).
 
 .PARAMETER Model
     --model argument. Defaults to claude-opus-4.7-xhigh.
+
+.PARAMETER Mcps
+    Comma-separated list of MCP servers to enable. Defaults to
+    'workiq,teams'. Each entry becomes one --mcp flag.
 #>
 
 param(
     [Parameter(Mandatory = $true)] [string] $RunDirectory,
     [string] $Agent  = $env:PRINBOX_REVIEW_AGENT,
     [string] $Plugin = $env:PRINBOX_REVIEW_PLUGIN,
-    [string] $Model  = $env:PRINBOX_REVIEW_MODEL
+    [string] $Model  = $env:PRINBOX_REVIEW_MODEL,
+    [string] $Mcps   = $env:PRINBOX_REVIEW_MCPS
 )
 
 if (-not $Agent)  { $Agent  = 'security-toolkit:dual-model-review' }
-if (-not $Plugin) { $Plugin = 'local:d:/1es/playground/plugins/security-toolkit' }
+if (-not $Plugin) { $Plugin = 'github:1ES-microsoft/ai-plugins:plugins/security-toolkit' }
 if (-not $Model)  { $Model  = 'claude-opus-4.7-xhigh' }
+if (-not $Mcps)   { $Mcps   = 'workiq,teams' }
 
 $ErrorActionPreference = 'Stop'
 
@@ -56,6 +64,17 @@ try {
     $copied = $false
 }
 
+# Expand the MCP list into a flat array of --mcp / <name> tokens
+# so agency receives them as repeated flags.
+$mcpArgs = @()
+foreach ($m in ($Mcps -split ',')) {
+    $m = $m.Trim()
+    if ($m) {
+        $mcpArgs += '--mcp'
+        $mcpArgs += $m
+    }
+}
+
 Write-Host ''
 Write-Host '------------------------------------------------------------' -ForegroundColor DarkGray
 if ($copied) {
@@ -68,13 +87,12 @@ if ($copied) {
 Write-Host (' Agent:    ' + $Agent)  -ForegroundColor DarkGray
 Write-Host (' Plugin:   ' + $Plugin) -ForegroundColor DarkGray
 Write-Host (' Model:    ' + $Model)  -ForegroundColor DarkGray
+Write-Host (' MCPs:     ' + $Mcps)   -ForegroundColor DarkGray
 Write-Host (' Findings: ' + $findingsPath) -ForegroundColor DarkGray
 Write-Host '------------------------------------------------------------' -ForegroundColor DarkGray
 Write-Host ''
 
-& agency copilot `
-    --mcp workiq `
-    --mcp teams `
+& agency copilot @mcpArgs `
     --plugin $Plugin `
     --model $Model `
     --agent $Agent

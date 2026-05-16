@@ -18,6 +18,22 @@ public sealed class PrInboxConfig
     public BotConfig Bots { get; init; } = new();
 
     /// <summary>
+    /// Defaults for the in-app Review launcher (which spawns
+    /// <c>agency copilot</c> in a new Windows Terminal tab). Each field
+    /// has a sensible built-in default; absent / null fields fall
+    /// through to those defaults.
+    /// </summary>
+    public ReviewLauncherSettings ReviewLauncher { get; init; } = new();
+
+    /// <summary>
+    /// Regex patterns. Any PR whose display repo (e.g.
+    /// <c>1ES/Spmi</c>) fully matches one of these is hidden from the
+    /// inbox by default. Toggle "Show ignored" in the UI to reveal.
+    /// Data is still synced; this is a UI-level filter.
+    /// </summary>
+    public List<string> IgnoredRepos { get; init; } = new();
+
+    /// <summary>
     /// Returns the path used by <see cref="LoadOrCreateAsync"/> when no
     /// override is supplied. Honors the optional environment variable
     /// <c>PR_INBOX_CONFIG_PATH</c> for tests.
@@ -127,4 +143,34 @@ public sealed class AdoProjectConfig
 public sealed class BotConfig
 {
     public List<string> ExtraLogins { get; init; } = new();
+}
+
+/// <summary>
+/// Defaults the Web UI uses when spawning <c>agency copilot</c> for a
+/// review. Each field is overridable; falls through to the matching
+/// <c>PRINBOX_REVIEW_*</c> environment variable if the config value is
+/// empty.
+/// </summary>
+public sealed class ReviewLauncherSettings
+{
+    /// <summary>
+    /// Plugin spec passed to <c>agency copilot --plugin &lt;...&gt;</c>.
+    /// Default fetches the security-toolkit plugin directly from GitHub
+    /// (cached by agency after first use). Examples:
+    /// <list type="bullet">
+    ///   <item><c>github:1ES-microsoft/ai-plugins:plugins/security-toolkit</c></item>
+    ///   <item><c>local:d:/1es/ai-plugins/plugins/security-toolkit</c></item>
+    ///   <item><c>ado-git:&lt;org&gt;/&lt;project&gt;/&lt;repo&gt;:&lt;path&gt;</c></item>
+    /// </list>
+    /// </summary>
+    public string Plugin { get; init; } = "github:1ES-microsoft/ai-plugins:plugins/security-toolkit";
+
+    /// <summary>Model id passed to <c>agency copilot --model</c>.</summary>
+    public string Model { get; init; } = "claude-opus-4.7-xhigh";
+
+    /// <summary>Agent id passed to <c>agency copilot --agent</c>.</summary>
+    public string Agent { get; init; } = "security-toolkit:dual-model-review";
+
+    /// <summary>MCP servers to enable (each becomes one <c>--mcp</c> flag).</summary>
+    public List<string> AdditionalMcps { get; init; } = new() { "workiq", "teams" };
 }

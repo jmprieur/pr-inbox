@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using PrInbox.Core.Credentials;
 using PrInbox.Core.Reviewing;
 using PrInbox.Core.Storage;
 
@@ -36,13 +37,15 @@ public sealed class ReviewLauncher : IReviewLauncher, IAsyncDisposable
     private readonly ReviewRunStore _runs;
     private readonly ILogger<ReviewLauncher> _log;
     private readonly ILoggerFactory _logFactory;
+    private readonly PrInboxConfig _config;
     private readonly ConcurrentDictionary<string, FindingsWatcher> _watchers = new(StringComparer.OrdinalIgnoreCase);
 
-    public ReviewLauncher(ReviewRunStore runs, ILogger<ReviewLauncher> log, ILoggerFactory logFactory)
+    public ReviewLauncher(ReviewRunStore runs, ILogger<ReviewLauncher> log, ILoggerFactory logFactory, PrInboxConfig config)
     {
         _runs = runs;
         _log = log;
         _logFactory = logFactory;
+        _config = config;
     }
 
     public async Task<string> LaunchAsync(string prUrl, CancellationToken ct)
@@ -161,12 +164,22 @@ public sealed class ReviewLauncher : IReviewLauncher, IAsyncDisposable
             return;
         }
 
+        var rl = _config.ReviewLauncher;
+        var mcps = string.Join(",", rl.AdditionalMcps ?? new());
+        // Quote values defensively in case a user puts spaces in them.
+        var launcherArgs =
+            $"-RunDirectory \"{runDir}\"" +
+            $" -Plugin \"{rl.Plugin}\"" +
+            $" -Model \"{rl.Model}\"" +
+            $" -Agent \"{rl.Agent}\"" +
+            (string.IsNullOrEmpty(mcps) ? "" : $" -Mcps \"{mcps}\"");
+
         var wt = ResolveOnPath("wt.exe");
         try
         {
             if (wt is not null)
             {
-                var args = $"-w 0 nt --title \"pr-inbox review\" -d \"{runDir}\" pwsh -NoExit -File \"{ps1}\" -RunDirectory \"{runDir}\"";
+                var args = $"-w 0 nt --title \"pr-inbox review\" -d \"{runDir}\" pwsh -NoExit -File \"{ps1}\" {launcherArgs}";
                 Process.Start(new ProcessStartInfo
                 {
                     FileName = wt,
@@ -177,7 +190,7 @@ public sealed class ReviewLauncher : IReviewLauncher, IAsyncDisposable
             }
 
             // Fallback: open a fresh pwsh window via cmd /c start.
-            var fallbackArgs = $"/c start \"\" pwsh -NoExit -File \"{ps1}\" -RunDirectory \"{runDir}\"";
+            var fallbackArgs = $"/c start \"\" pwsh -NoExit -File \"{ps1}\" {launcherArgs}";
             Process.Start(new ProcessStartInfo
             {
                 FileName = "cmd.exe",
