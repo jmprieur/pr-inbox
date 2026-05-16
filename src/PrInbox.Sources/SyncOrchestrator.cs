@@ -166,6 +166,7 @@ public sealed class SyncOrchestrator
             var candidates = await _pullRequests.ListNeedingEnrichmentAsync(_source.SourceId, identityUsed, ct);
             progress?.Report(new SyncProgress(_source.SourceId, $"Enriching: {candidates.Count} PR(s)", 0, candidates.Count));
 
+            string? firstError = null;
             foreach (var row in candidates)
             {
                 ct.ThrowIfCancellationRequested();
@@ -179,6 +180,7 @@ public sealed class SyncOrchestrator
                 catch (Exception ex)
                 {
                     prsFailed++;
+                    firstError ??= $"{ex.GetType().Name}: {ex.Message}";
                     _logger.LogWarning(ex, "Enrich failed for {Pr}: {Message}", row.Identity.Url, ex.Message);
                 }
             }
@@ -186,6 +188,10 @@ public sealed class SyncOrchestrator
             finalStatus = prsFailed == 0
                 ? SyncRunStatus.Ok
                 : (prsFailed < (prsSeen + prsFailed) ? SyncRunStatus.Partial : SyncRunStatus.Failed);
+            if (finalError is null && firstError is not null)
+            {
+                finalError = firstError;
+            }
         }
         catch (OperationCanceledException)
         {

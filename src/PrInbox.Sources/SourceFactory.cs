@@ -1,5 +1,6 @@
 using PrInbox.Core.Credentials;
 using PrInbox.Core.Models;
+using PrInbox.Sources.AzureDevOps;
 using PrInbox.Sources.GitHub;
 
 namespace PrInbox.Sources;
@@ -44,12 +45,32 @@ public sealed class SourceFactory
                 }
                 case SourceConfigKind.AzureDevOps:
                 {
-                    throw new NotImplementedException(
-                        $"Azure DevOps source '{sc.Id}' is configured but the ADO adapter is not yet implemented in v0.1. " +
-                        "GitHub sources work; ADO will land in v0.1.5. See AMBIGUITIES.md.");
+                    // Legacy: a SourceConfig with kind=ado is treated as a hint
+                    // to enumerate config.Ado.Projects below. We do not register
+                    // a runtime here. (Older configs may still carry this entry.)
+                    break;
                 }
             }
         }
+
+        // ADO sources are declared as (org, project) pairs in AdoConfig.
+        // Each pair becomes a separate runtime source with id ado:{org}/{project}.
+        foreach (var p in config.Ado.Projects)
+        {
+            if (string.IsNullOrWhiteSpace(p.Org) || string.IsNullOrWhiteSpace(p.Project))
+            {
+                throw new InvalidOperationException("ADO project entry has empty org or project name.");
+            }
+            var sourceId = $"ado:{p.Org}/{p.Project}";
+            var tokenProvider = new AzureCliTokenProvider(sourceId);
+            var source = new AzureDevOpsReadSource(sourceId, p.Org, p.Project, tokenProvider, botDetector);
+            // Identity for ADO is a single per-machine az login; we tag it as
+            // "azure-cli" rather than calling out to az synchronously at factory
+            // time. Per-binding identity disambiguation only matters when the
+            // same source has multiple identities, which doesn't apply to ADO.
+            result.Add(new RuntimeSource(source, tokenProvider, "azure-cli"));
+        }
+
         return result;
     }
 }

@@ -52,17 +52,7 @@ internal sealed class SyncCommand : AsyncCommand<SyncSettings>
         var syncRunRepo = new SyncRunRepository(db);
 
         var sourceFactory = new SourceFactory();
-        IReadOnlyList<RuntimeSource> runtimes;
-        try
-        {
-            runtimes = sourceFactory.Build(config);
-        }
-        catch (NotImplementedException ex)
-        {
-            AnsiConsole.MarkupLine($"[yellow]{Markup.Escape(ex.Message)}[/]");
-            AnsiConsole.MarkupLine("[grey]Proceeding with the GitHub sources that ARE supported.[/]");
-            runtimes = sourceFactory.Build(SkipAdoSources(config));
-        }
+        IReadOnlyList<RuntimeSource> runtimes = sourceFactory.Build(config);
 
         if (settings.SourceId is not null)
         {
@@ -118,15 +108,4 @@ internal sealed class SyncCommand : AsyncCommand<SyncSettings>
             : "[green]Sync completed.[/]");
         return anyFailed ? 1 : 0;
     }
-
-    private static PrInboxConfig SkipAdoSources(PrInboxConfig config) =>
-        new()
-        {
-            SchemaVersion = config.SchemaVersion,
-            Sources = config.Sources
-                .Where(s => s.Kind != SourceConfigKind.AzureDevOps)
-                .ToList(),
-            Ado = config.Ado,
-            Bots = config.Bots,
-        };
 }

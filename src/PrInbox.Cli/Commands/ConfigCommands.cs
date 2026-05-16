@@ -70,7 +70,6 @@ internal sealed class ConfigDoctorCommand : AsyncCommand<ConfigDoctorSettings>
             {
                 AnsiConsole.MarkupLine($"  - {Markup.Escape(p.Org)}/{Markup.Escape(p.Project)}");
             }
-            AnsiConsole.MarkupLine("[yellow]Note: the ADO source adapter is not yet implemented in v0.1.[/]");
         }
 
         return allOk ? 0 : 1;
