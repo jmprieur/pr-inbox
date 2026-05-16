@@ -257,4 +257,19 @@ public class BriefServiceTests
         Assert.Null(callout);
         Assert.Equal(string.Empty, suffix);
     }
+
+    [Fact]
+    public void Output_Contract_References_Posting_Style_Sidecar()
+    {
+        var pr = MakePr();
+        var snap = MakeSnapshot();
+
+        var md = BriefService.BuildBriefMarkdown(pr, snap,
+            openThreads: Array.Empty<ObservedThreadRow>(),
+            recentBotThreads: Array.Empty<ObservedThreadRow>(),
+            priorRuns: Array.Empty<ReviewRunRow>(),
+            runDir: @"C:\runs\x");
+
+        Assert.Contains("./posting-style.md", md);
+    }
 }

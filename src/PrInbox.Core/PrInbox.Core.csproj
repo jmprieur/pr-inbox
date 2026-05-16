@@ -15,6 +15,7 @@
   <ItemGroup>
     <EmbeddedResource Include="Storage\Migrations\*.sql" />
     <EmbeddedResource Include="Findings\findings.schema.json" />
+    <EmbeddedResource Include="Reviewing\posting-style.md" />
   </ItemGroup>
 
   <ItemGroup>

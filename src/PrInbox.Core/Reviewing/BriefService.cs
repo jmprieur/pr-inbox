@@ -117,14 +117,19 @@ public sealed class BriefService
         var brief = BuildBriefMarkdown(row, snapshot, openThreads, recentBotThreads, priorRuns, runDir);
         await File.WriteAllTextAsync(briefPath, brief, ct);
 
-        // Copy the findings schema next to the brief so the agent can
-        // resolve it via `./findings.schema.json` from the run directory
-        // (the brief's cwd). Single source of truth: PrInbox.Core's embedded
-        // resource. If copy fails (sandboxed FS, etc.) the brief still wins —
-        // worst case the agent loses schema validation, not the review itself.
+        // Copy the findings schema and posting-style sidecar next to the
+        // brief so the agent can resolve them via `./findings.schema.json`
+        // and `./posting-style.md` from the run directory (the brief's
+        // cwd). Single source of truth: PrInbox.Core's embedded resources.
+        // If a copy fails (sandboxed FS, etc.) the brief still wins — worst
+        // case the agent loses schema validation or style guidance, not the
+        // review itself.
         try
         {
-            await CopyEmbeddedSchemaAsync(Path.Combine(runDir, "findings.schema.json"), ct);
+            await CopyEmbeddedResourceAsync("findings.schema.json",
+                Path.Combine(runDir, "findings.schema.json"), ct);
+            await CopyEmbeddedResourceAsync("posting-style.md",
+                Path.Combine(runDir, "posting-style.md"), ct);
         }
         catch (IOException)
         {
@@ -188,11 +193,12 @@ public sealed class BriefService
         return sb.ToString();
     }
 
-    private static async Task CopyEmbeddedSchemaAsync(string destPath, CancellationToken ct)
+    private static async Task CopyEmbeddedResourceAsync(
+        string resourceSuffix, string destPath, CancellationToken ct)
     {
         var asm = typeof(BriefService).Assembly;
         var name = asm.GetManifestResourceNames()
-            .FirstOrDefault(n => n.EndsWith("findings.schema.json", StringComparison.Ordinal));
+            .FirstOrDefault(n => n.EndsWith(resourceSuffix, StringComparison.Ordinal));
         if (name is null) return;
         await using var src = asm.GetManifestResourceStream(name);
         if (src is null) return;
@@ -366,6 +372,8 @@ public sealed class BriefService
         sb.AppendLine($"Write `findings.yaml` (schema v1, see `./findings.schema.json` next to this brief) to this run directory:");
         sb.AppendLine();
         sb.AppendLine($"`{runDir}`");
+        sb.AppendLine();
+        sb.AppendLine("Follow the posting conventions in `./posting-style.md` (sibling) for comment location, tone, and code suggestions.");
         sb.AppendLine();
         sb.AppendLine($"Before writing, verify PR HEAD is still `{snapshot.HeadSha}`. If not, re-run `pr-inbox review {pr.Identity.Url}`.");
         sb.AppendLine();
