@@ -73,6 +73,26 @@ public sealed record ReviewRunRow(
     string? Notes);
 
 /// <summary>
+/// Row from <c>posted_reviews</c>. Written only by the publisher project.
+/// Append-only; one row per successful "publish" call. Identifies which
+/// findings landed remotely so subsequent posts don't duplicate them.
+/// </summary>
+public sealed record PostedReviewRow(
+    long Id,
+    PrIdentity Identity,
+    long? ReviewRunId,
+    string PlatformReviewId,
+    string? ReviewUrl,
+    DateTimeOffset PostedAt,
+    string HeadShaAtPost,
+    string IdentityUsed,
+    int InlineCount,
+    bool BodyPresent,
+    IReadOnlyList<string> FindingIds,
+    IReadOnlyList<string> FindingFingerprints,
+    bool DryRun);
+
+/// <summary>
 /// Row from <c>sync_runs</c>. Created with <see cref="SyncRunStatus.Running"/>
 /// and finalized with status + completed_at + prs_seen + optional error.
 /// </summary>

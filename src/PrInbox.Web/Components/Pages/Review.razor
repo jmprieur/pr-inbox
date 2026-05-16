@@ -1,0 +1,280 @@
+@page "/review"
+@rendermode InteractiveServer
+@using System.Collections.Generic
+@using PrInbox.Core.Findings
+@using PrInbox.Publishers
+@using PrInbox.Web.Services
+@inject ReviewRunStore Runs
+@inject ReviewPublishOrchestrator Orchestrator
+@inject IJSRuntime Js
+@inject ILogger<Review> Log
+@inject NavigationManager Nav
+@implements IDisposable
+
+<h1>Review findings</h1>
+
+@if (string.IsNullOrWhiteSpace(Url))
+{
+    <p class="empty">Missing <code>?url=</code> parameter.</p>
+    return;
+}
+
+<div class="toolbar">
+    <a href="/" class="muted">← back to inbox</a>
+    <span>&nbsp;·&nbsp;</span>
+    <a href="@Url" target="_blank" rel="noopener">@Url</a>
+</div>
+
+@if (_run is null)
+{
+    <p class="empty">No active review run for this PR. Launch one from the inbox first.</p>
+}
+else if (_run.Findings is null)
+{
+    <p class="empty">Review in progress · waiting for <code>findings.yaml</code> in @_run.RunDirectory</p>
+}
+else if (_run.Findings.Findings.Count == 0)
+{
+    <p class="empty">No findings reported — the agent ran clean.</p>
+}
+else
+{
+    <div class="severity-filters">
+        <span class="muted">Filter:</span>
+        <label><input type="checkbox" @bind="_showCritical" /> <span class="sev-critical">critical</span></label>
+        <label><input type="checkbox" @bind="_showHigh" /> <span class="sev-high">high</span></label>
+        <label><input type="checkbox" @bind="_showMedium" /> <span class="sev-medium">medium</span></label>
+        <label><input type="checkbox" @bind="_showLow" /> <span class="sev-low">low</span></label>
+    </div>
+
+    <table class="findings-table">
+        <thead>
+            <tr>
+                <th></th>
+                <th>Sev</th>
+                <th>File · line</th>
+                <th>Title</th>
+                <th>Found by</th>
+                <th>Anchor</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var f in VisibleFindings())
+            {
+                var fid = f.Id;
+                <tr>
+                    <td><input type="checkbox"
+                               checked="@_selected.Contains(fid)"
+                               @onchange="@(e => ToggleSelected(fid, (bool)e.Value!))" /></td>
+                    <td><span class="@SevClass(f.Severity)">@f.Severity.ToString().ToLowerInvariant()</span></td>
+                    <td><code>@f.File:@(f.Line?.ToString() ?? "?")</code></td>
+                    <td>@f.Title</td>
+                    <td class="muted">@(string.Join(", ", f.FoundBy))</td>
+                    <td class="muted">@(f.DiffAnchorable ? "inline" : "body-only")</td>
+                </tr>
+            }
+        </tbody>
+    </table>
+
+    <div class="post-row">
+        <label><input type="checkbox" @bind="_dryRun" /> <strong>Dry run</strong> (recommended; no network)</label>
+        <button class="review" disabled="@(_posting || _selected.Count == 0)"
+                @onclick="OnPostSelected">
+            @(_posting ? "Posting..." : (_dryRun ? $"Plan {_selected.Count} (dry-run)" : $"Post {_selected.Count} live"))
+        </button>
+    </div>
+}
+
+@if (_result is not null)
+{
+    <div class="@ResultClass(_result)">
+        <h3>@(_result.Posted ? "Posted" : (_dryRun ? "Dry-run plan" : "Failed"))</h3>
+        <ul>
+            <li>Inline comments: <strong>@_result.InlineCount</strong></li>
+            <li>Body-only entries: <strong>@_result.BodyOnlyCount</strong></li>
+            <li>Skipped (already posted): <strong>@_result.SkippedAsAlreadyPosted</strong></li>
+            @if (!string.IsNullOrEmpty(_result.PlatformReviewId))
+            {
+                <li>Platform review id: <code>@_result.PlatformReviewId</code></li>
+            }
+            @if (!string.IsNullOrEmpty(_result.ReviewUrl))
+            {
+                <li>Review URL: <a href="@_result.ReviewUrl" target="_blank" rel="noopener">@_result.ReviewUrl</a></li>
+            }
+            <li>Identity used: <code>@_result.IdentityUsed</code></li>
+            @if (_result.HeadChanged)
+            {
+                <li>⚠ HEAD changed since brief — posted against @_result.HeadShaAtPost</li>
+            }
+        </ul>
+        @if (_result.Warnings.Count > 0)
+        {
+            <details>
+                <summary>Warnings (@_result.Warnings.Count)</summary>
+                <ul>
+                    @foreach (var w in _result.Warnings) { <li>@w</li> }
+                </ul>
+            </details>
+        }
+        @if (_result.Errors.Count > 0)
+        {
+            <details open>
+                <summary>Errors (@_result.Errors.Count)</summary>
+                <ul>
+                    @foreach (var e in _result.Errors) { <li>@e</li> }
+                </ul>
+            </details>
+        }
+    </div>
+}
+
+@code {
+    [SupplyParameterFromQuery(Name = "url")]
+    public string? Url { get; set; }
+
+    private ReviewRun? _run;
+    private HashSet<string> _selected = new();
+    private bool _showCritical = true;
+    private bool _showHigh = true;
+    private bool _showMedium = false;
+    private bool _showLow = false;
+    private bool _dryRun = true;
+    private bool _posting;
+    private PublishResult? _result;
+
+    protected override void OnInitialized()
+    {
+        Runs.Changed += OnRunsChanged;
+        RefreshRun();
+    }
+
+    protected override void OnParametersSet()
+    {
+        RefreshRun();
+    }
+
+    private void OnRunsChanged()
+    {
+        RefreshRun();
+        InvokeAsync(StateHasChanged);
+    }
+
+    private void RefreshRun()
+    {
+        if (string.IsNullOrEmpty(Url)) { _run = null; return; }
+        Runs.Snapshot().TryGetValue(Url, out _run);
+        // Default: select all currently-visible findings.
+        if (_run?.Findings is not null && _selected.Count == 0)
+        {
+            foreach (var f in VisibleFindings())
+            {
+                if (!string.IsNullOrEmpty(f.Id)) _selected.Add(f.Id);
+            }
+        }
+    }
+
+    private IEnumerable<Finding> VisibleFindings()
+    {
+        if (_run?.Findings is null) return Array.Empty<Finding>();
+        return _run.Findings.Findings.Where(f => f.Severity switch
+        {
+            FindingSeverity.Critical => _showCritical,
+            FindingSeverity.High => _showHigh,
+            FindingSeverity.Medium => _showMedium,
+            FindingSeverity.Low => _showLow,
+            _ => true,
+        });
+    }
+
+    private void ToggleSelected(string id, bool isChecked)
+    {
+        if (string.IsNullOrEmpty(id)) return;
+        if (isChecked) _selected.Add(id); else _selected.Remove(id);
+    }
+
+    private async Task OnPostSelected()
+    {
+        if (_run?.Findings is null || string.IsNullOrEmpty(Url)) return;
+        var picks = _run.Findings.Findings.Where(f => _selected.Contains(f.Id)).ToList();
+        if (picks.Count == 0) return;
+
+        if (!_dryRun)
+        {
+            var ok = await Js.InvokeAsync<bool>("confirm",
+                $"Post {picks.Count} finding(s) live to {Url}? This cannot be undone.");
+            if (!ok) return;
+        }
+
+        _posting = true;
+        _result = null;
+        StateHasChanged();
+        try
+        {
+            var publishRequest = new PublishRequest(
+                PrUrl: Url,
+                RunId: _run.RunId,
+                HeadShaAtAuthoring: _run.HeadSha,
+                ReviewBodyHeader: BuildReviewBodyHeader(picks),
+                Findings: picks.Select(ToPostable).ToArray(),
+                DryRun: _dryRun,
+                ValidateRemoteState: !_dryRun);
+
+            _result = await Orchestrator.PublishAsync(publishRequest, CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            Log.LogError(ex, "PublishAsync threw");
+            _result = PublishResult.Failure("unknown", ex.Message);
+        }
+        finally
+        {
+            _posting = false;
+            StateHasChanged();
+        }
+    }
+
+    private string BuildReviewBodyHeader(IReadOnlyList<Finding> picks)
+    {
+        var c = picks.Count(p => p.Severity == FindingSeverity.Critical);
+        var h = picks.Count(p => p.Severity == FindingSeverity.High);
+        var m = picks.Count(p => p.Severity == FindingSeverity.Medium);
+        var l = picks.Count(p => p.Severity == FindingSeverity.Low);
+        var doc = _run!.Findings!;
+        var models = doc.Models is not null && doc.Models.Count > 0
+            ? string.Join(", ", doc.Models) : "dual-model-review";
+        return $"**Automated review from PrInbox ({models})**\n\n" +
+               $"Findings posted: {picks.Count} ({c} critical, {h} high, {m} medium, {l} low).";
+    }
+
+    private static FindingToPost ToPostable(Finding f) => new(
+        Id: f.Id,
+        Severity: f.Severity,
+        Confidence: f.Confidence,
+        FoundBy: f.FoundBy,
+        File: f.File,
+        Line: f.Line ?? 0,
+        LineEnd: f.LineEnd,
+        DiffAnchorable: f.DiffAnchorable,
+        Title: f.Title,
+        Body: f.Body ?? "",
+        SuggestedInline: f.SuggestedInline);
+
+    private static string SevClass(FindingSeverity s) => s switch
+    {
+        FindingSeverity.Critical => "sev-critical",
+        FindingSeverity.High => "sev-high",
+        FindingSeverity.Medium => "sev-medium",
+        FindingSeverity.Low => "sev-low",
+        _ => "muted",
+    };
+
+    private string ResultClass(PublishResult r) =>
+        r.Errors.Count > 0 ? "post-result post-result-error" :
+        r.Posted ? "post-result post-result-ok" :
+        "post-result post-result-dry";
+
+    public void Dispose()
+    {
+        Runs.Changed -= OnRunsChanged;
+    }
+}

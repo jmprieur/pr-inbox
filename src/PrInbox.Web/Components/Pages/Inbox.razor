@@ -1,4 +1,5 @@
 @page "/"
+@rendermode InteractiveServer
 @implements IDisposable
 @inject InboxState State
 @inject ReviewRunStore Runs
@@ -80,7 +81,9 @@ else
                         }
                         else
                         {
-                            <span class="findings-counts" title="@($"run #{run.RunId} · {run.RunDirectory}")">
+                            <a class="findings-counts findings-link"
+                               href="@($"/review?url={Uri.EscapeDataString(row.Url)}")"
+                               title="@($"run #{run.RunId} · {run.RunDirectory}")">
                                 @if (run.CriticalCount > 0) { <span class="sev-critical">C:@run.CriticalCount</span> }
                                 @if (run.HighCount     > 0) { <span class="sev-high">H:@run.HighCount</span> }
                                 @if (run.MediumCount   > 0) { <span class="sev-medium">M:@run.MediumCount</span> }
@@ -89,7 +92,7 @@ else
                                 {
                                     <span class="muted">clean</span>
                                 }
-                            </span>
+                            </a>
                         }
                     </td>
                     <td>

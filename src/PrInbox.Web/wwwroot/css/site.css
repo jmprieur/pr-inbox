@@ -112,7 +112,75 @@ button.review:hover { background: rgba(93,164,255,0.12); }
     margin-right: 0.25rem;
     color: #111;
 }
+.findings-link { text-decoration: none; }
+.findings-link:hover { text-decoration: none; filter: brightness(1.15); }
+
 .sev-critical { background: #d44; color: #fff; }
 .sev-high     { background: #d80; color: #111; }
 .sev-medium   { background: #ec3; color: #111; }
 .sev-low      { background: #6c6; color: #111; }
+
+/* --- review page --- */
+.severity-filters {
+    display: flex;
+    gap: 0.75rem;
+    align-items: center;
+    margin: 0.5rem 0 1rem 0;
+    flex-wrap: wrap;
+}
+.severity-filters label {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    cursor: pointer;
+}
+
+.findings-table {
+    width: 100%;
+    border-collapse: collapse;
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    overflow: hidden;
+    margin-bottom: 1rem;
+}
+.findings-table th, .findings-table td {
+    text-align: left;
+    padding: 0.45rem 0.6rem;
+    border-bottom: 1px solid var(--line);
+    vertical-align: top;
+}
+.findings-table th { color: var(--muted); font-weight: 500; font-size: 0.85rem; }
+.findings-table tr:last-child td { border-bottom: none; }
+.findings-table .sev-critical,
+.findings-table .sev-high,
+.findings-table .sev-medium,
+.findings-table .sev-low {
+    display: inline-block;
+    padding: 0.1rem 0.4rem;
+    border-radius: 3px;
+    font-size: 0.75rem;
+    font-weight: 700;
+}
+
+.post-row {
+    display: flex;
+    gap: 1rem;
+    align-items: center;
+    padding: 0.5rem 0;
+    border-top: 1px solid var(--line);
+    margin-bottom: 1rem;
+}
+
+.post-result {
+    padding: 0.75rem 1rem;
+    border-radius: 4px;
+    border: 1px solid var(--line);
+    background: var(--card);
+    margin-top: 1rem;
+}
+.post-result h3 { margin: 0 0 0.5rem 0; font-size: 1rem; }
+.post-result ul { margin: 0; padding-left: 1.25rem; }
+.post-result-ok    { border-color: #2e6b4f; }
+.post-result-dry   { border-color: #6b6b2e; }
+.post-result-error { border-color: #b33; }

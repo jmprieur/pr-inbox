@@ -95,8 +95,14 @@ public sealed class ReviewLauncher : IReviewLauncher, IAsyncDisposable
                     try
                     {
                         using var doc = System.Text.Json.JsonDocument.Parse(File.ReadAllText(metaPath));
-                        var prUrl = doc.RootElement.GetProperty("pr_url").GetString() ?? "";
-                        var head  = doc.RootElement.GetProperty("head_sha").GetString() ?? "";
+                        // Newer metadata.json uses pr_url; older revisions only had url.
+                        string prUrl =
+                            (doc.RootElement.TryGetProperty("pr_url", out var pu) ? pu.GetString() : null)
+                            ?? (doc.RootElement.TryGetProperty("url", out var u) ? u.GetString() : null)
+                            ?? "";
+                        string head =
+                            (doc.RootElement.TryGetProperty("head_sha", out var hs) ? hs.GetString() : null) ?? "";
+                        if (string.IsNullOrEmpty(prUrl)) continue;
                         var created = Directory.GetCreationTimeUtc(runDir);
 
                         if (!latestByPr.TryGetValue(prUrl, out var existing) || created > existing.created)
