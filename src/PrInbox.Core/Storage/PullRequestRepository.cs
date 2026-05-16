@@ -51,8 +51,18 @@ public sealed class PullRequestRepository
               status        = excluded.status,
               identity_used = excluded.identity_used,
               last_synced_at= excluded.last_synced_at;
+
+            -- Record this (source, identity) binding for the PR. Idempotent:
+            -- the first sync that discovered the PR seeded one row in
+            -- migration 002; subsequent discoveries by other identities
+            -- accumulate more rows without affecting the main row.
+            INSERT OR IGNORE INTO pr_source_bindings (
+              pr_identity, source_id, identity_used, discovered_at
+            ) VALUES (
+              $prId, $sourceId, $identityUsed, $lastSynced
+            );
             """;
-        cmd.Parameters.AddWithValue("$prId", row.Identity.Display);
+        cmd.Parameters.AddWithValue("$prId", row.Identity.Url);
         cmd.Parameters.AddWithValue("$stableId", row.Identity.Stable);
         cmd.Parameters.AddWithValue("$sourceId", row.SourceId);
         cmd.Parameters.AddWithValue("$sourceKind", row.SourceKind.ToDbValue());
@@ -178,7 +188,7 @@ public sealed class PullRequestRepository
     {
         return new PullRequestRow(
             Identity: new PrIdentity(
-                Display: reader.GetString(reader.GetOrdinal("pr_identity")),
+                Url: reader.GetString(reader.GetOrdinal("pr_identity")),
                 Stable: reader.GetString(reader.GetOrdinal("stable_identity"))),
             SourceKind: SourceKindExtensions.FromDbValue(reader.GetString(reader.GetOrdinal("source_kind"))),
             SourceId: reader.GetString(reader.GetOrdinal("source_id")),

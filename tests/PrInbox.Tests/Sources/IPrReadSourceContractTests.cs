@@ -12,11 +12,11 @@ namespace PrInbox.Tests.Sources;
 public class IPrReadSourceContractTests
 {
     private static readonly PrIdentity IdAlpha = new(
-        Display: "gh.com:owner/repo#1",
+        Url: "https://github.com/owner/repo/pull/1",
         Stable: "gh.com:100#1000");
 
     private static readonly PrIdentity IdBeta = new(
-        Display: "gh.com:owner/repo#2",
+        Url: "https://github.com/owner/repo/pull/2",
         Stable: "gh.com:100#2000");
 
     [Fact]
@@ -47,7 +47,7 @@ public class IPrReadSourceContractTests
     public async Task GetPullRequestDetail_Throws_For_Unknown_Pr()
     {
         var source = BuildSourceWithTwoPrs();
-        var unknown = new PrIdentity("gh.com:owner/repo#999", "gh.com:100#999000");
+        var unknown = new PrIdentity("https://github.com/owner/repo/pull/999", "gh.com:100#999000");
 
         Func<Task> act = () => source.GetPullRequestDetailAsync(unknown, CancellationToken.None);
 

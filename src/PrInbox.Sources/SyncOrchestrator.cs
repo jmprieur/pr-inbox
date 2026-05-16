@@ -56,7 +56,7 @@ public sealed class SyncOrchestrator
             foreach (var pr in inbox)
             {
                 ct.ThrowIfCancellationRequested();
-                seenIdentities.Add(pr.Identity.Display);
+                seenIdentities.Add(pr.Identity.Url);
                 progress?.Report(new SyncProgress(_source.SourceId, $"#{pr.Number} {pr.DisplayRepo}", prsSeen, inbox.Count));
 
                 try
@@ -67,7 +67,7 @@ public sealed class SyncOrchestrator
                 catch (Exception ex)
                 {
                     prsFailed++;
-                    _logger.LogWarning(ex, "Failed to sync PR {Pr}: {Message}", pr.Identity.Display, ex.Message);
+                    _logger.LogWarning(ex, "Failed to sync PR {Pr}: {Message}", pr.Identity.Url, ex.Message);
                 }
             }
 
@@ -106,7 +106,7 @@ public sealed class SyncOrchestrator
 
     private async Task SyncOnePullRequestAsync(RemotePullRequest pr, string identityUsed, DateTimeOffset syncedAt, CancellationToken ct)
     {
-        var existing = await _pullRequests.GetAsync(pr.Identity.Display, ct);
+        var existing = await _pullRequests.GetAsync(pr.Identity.Url, ct);
 
         var row = new PullRequestRow(
             Identity: pr.Identity,
@@ -147,10 +147,10 @@ public sealed class SyncOrchestrator
         foreach (var row in allActive)
         {
             if (row.SourceId != sourceId) continue;
-            if (seen.Contains(row.Identity.Display)) continue;
+            if (seen.Contains(row.Identity.Url)) continue;
             if (row.TrackingReason == TrackingReason.Assigned)
             {
-                await _pullRequests.MarkPreviouslyAssignedAsync(row.Identity.Display, ct);
+                await _pullRequests.MarkPreviouslyAssignedAsync(row.Identity.Url, ct);
             }
         }
     }

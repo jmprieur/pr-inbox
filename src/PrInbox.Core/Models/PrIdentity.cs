@@ -1,33 +1,33 @@
 namespace PrInbox.Core.Models;
 
 /// <summary>
-/// Stable identifier for a pull request across sources, with a display form
-/// suitable for command-line use and a durable form keyed on platform IDs.
+/// Stable identifier for a pull request. Two related fields:
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>Display identity</b> (<see cref="Display"/>) is the human-readable
-/// form used on the command line and in joins: e.g.
-/// <c>gh.com:agency-microsoft/playground#4248</c>.
+/// <see cref="Url"/> — the canonical PR URL (e.g.
+/// <c>https://github.com/owner/repo/pull/42</c>). Used as the lookup key
+/// everywhere in storage and on the wire. Produced by
+/// <see cref="PrUrl.Canonicalize(string)"/>.
 /// </para>
 /// <para>
-/// <b>Stable identity</b> (<see cref="Stable"/>) is the durable form
-/// keyed on platform-immutable IDs: numeric repo and PR IDs for GitHub,
-/// project + repo GUIDs for Azure DevOps. This survives repo / project
-/// renames.
+/// <see cref="Stable"/> — the platform-id-based durable form
+/// (e.g. <c>gh.com:&lt;repoId&gt;#&lt;prId&gt;</c>). Survives repo / project
+/// renames; used by the upsert as the conflict target.
 /// </para>
 /// <para>
-/// Both forms are stored on every <c>pull_requests</c> row.
+/// Both fields are stored on every <c>pull_requests</c> row. The SQL
+/// column historically named <c>pr_identity</c> holds <see cref="Url"/>.
 /// </para>
 /// </remarks>
-public readonly record struct PrIdentity(string Display, string Stable)
+public readonly record struct PrIdentity(string Url, string Stable)
 {
-    /// <summary>Throws <see cref="ArgumentException"/> if either form is null or empty.</summary>
+    /// <summary>Throws <see cref="ArgumentException"/> if either field is null or empty.</summary>
     public void Validate()
     {
-        if (string.IsNullOrWhiteSpace(Display))
+        if (string.IsNullOrWhiteSpace(Url))
         {
-            throw new ArgumentException("PrIdentity.Display is required.", nameof(Display));
+            throw new ArgumentException("PrIdentity.Url is required.", nameof(Url));
         }
         if (string.IsNullOrWhiteSpace(Stable))
         {
@@ -36,25 +36,25 @@ public readonly record struct PrIdentity(string Display, string Stable)
     }
 
     /// <summary>
-    /// Build a GitHub.com display identity, e.g.
-    /// <c>gh.com:owner/repo#N</c>.
+    /// Build a canonical GitHub.com PR URL, e.g.
+    /// <c>https://github.com/owner/repo/pull/N</c>.
     /// </summary>
-    public static string FormatGitHubDisplay(string owner, string repo, int number)
-        => $"gh.com:{owner}/{repo}#{number}";
+    public static string FormatGitHubUrl(string owner, string repo, int number)
+        => $"https://github.com/{owner}/{repo}/pull/{number}";
 
     /// <summary>
-    /// Build a GHE display identity, e.g.
-    /// <c>ghe.&lt;host&gt;:owner/repo#N</c>.
+    /// Build a canonical GHE PR URL, e.g.
+    /// <c>https://&lt;host&gt;/owner/repo/pull/N</c>.
     /// </summary>
-    public static string FormatGheDisplay(string host, string owner, string repo, int number)
-        => $"ghe.{host}:{owner}/{repo}#{number}";
+    public static string FormatGheUrl(string host, string owner, string repo, int number)
+        => $"https://{host}/{owner}/{repo}/pull/{number}";
 
     /// <summary>
-    /// Build an ADO display identity, e.g.
-    /// <c>ado:org/project/repo#N</c>.
+    /// Build a canonical ADO PR URL, e.g.
+    /// <c>https://dev.azure.com/org/project/_git/repo/pullrequest/N</c>.
     /// </summary>
-    public static string FormatAdoDisplay(string org, string project, string repo, int number)
-        => $"ado:{org}/{project}/{repo}#{number}";
+    public static string FormatAdoUrl(string org, string project, string repo, int number)
+        => $"https://dev.azure.com/{org}/{project}/_git/{repo}/pullrequest/{number}";
 
     /// <summary>
     /// Build a GitHub stable identity, e.g.
@@ -77,5 +77,5 @@ public readonly record struct PrIdentity(string Display, string Stable)
     public static string FormatAdoStable(string org, Guid projectId, Guid repoId, int number)
         => $"ado:{org}/{projectId:D}/{repoId:D}#{number}";
 
-    public override string ToString() => Display;
+    public override string ToString() => Url;
 }

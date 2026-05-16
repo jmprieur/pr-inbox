@@ -3,16 +3,17 @@ using PrInbox.Core.Models;
 namespace PrInbox.Tests.Sources;
 
 /// <summary>
-/// Verifies <see cref="PrIdentity"/> formatting helpers produce the
-/// expected canonical strings for each source kind.
+/// Verifies <see cref="PrIdentity"/> URL helpers produce the canonical
+/// PR URL for each source kind, and that the type's structural invariants
+/// (validation, equality, ToString) hold.
 /// </summary>
 public class PrIdentityFormatTests
 {
     [Fact]
-    public void GitHub_Display_Has_Expected_Shape()
+    public void GitHub_Url_Has_Expected_Shape()
     {
-        var display = PrIdentity.FormatGitHubDisplay("agency-microsoft", "playground", 4248);
-        display.Should().Be("gh.com:agency-microsoft/playground#4248");
+        var url = PrIdentity.FormatGitHubUrl("agency-microsoft", "playground", 4248);
+        url.Should().Be("https://github.com/agency-microsoft/playground/pull/4248");
     }
 
     [Fact]
@@ -23,10 +24,10 @@ public class PrIdentityFormatTests
     }
 
     [Fact]
-    public void Ghe_Display_Includes_Host()
+    public void Ghe_Url_Includes_Host()
     {
-        var display = PrIdentity.FormatGheDisplay("github.contoso.com", "foo", "bar", 812);
-        display.Should().Be("ghe.github.contoso.com:foo/bar#812");
+        var url = PrIdentity.FormatGheUrl("github.contoso.com", "foo", "bar", 812);
+        url.Should().Be("https://github.contoso.com/foo/bar/pull/812");
     }
 
     [Fact]
@@ -37,10 +38,10 @@ public class PrIdentityFormatTests
     }
 
     [Fact]
-    public void Ado_Display_Has_Org_Project_Repo_Number()
+    public void Ado_Url_Has_Org_Project_Repo_Number()
     {
-        var display = PrIdentity.FormatAdoDisplay("mseng", "Context", "Private", 1234);
-        display.Should().Be("ado:mseng/Context/Private#1234");
+        var url = PrIdentity.FormatAdoUrl("mseng", "Context", "Private", 1234);
+        url.Should().Be("https://dev.azure.com/mseng/Context/_git/Private/pullrequest/1234");
     }
 
     [Fact]
@@ -53,17 +54,17 @@ public class PrIdentityFormatTests
     }
 
     [Fact]
-    public void Validate_Rejects_Empty_Display()
+    public void Validate_Rejects_Empty_Url()
     {
-        var id = new PrIdentity(Display: "", Stable: "gh.com:1#2");
+        var id = new PrIdentity(Url: "", Stable: "gh.com:1#2");
         var act = id.Validate;
-        act.Should().Throw<ArgumentException>().WithParameterName("Display");
+        act.Should().Throw<ArgumentException>().WithParameterName("Url");
     }
 
     [Fact]
     public void Validate_Rejects_Empty_Stable()
     {
-        var id = new PrIdentity(Display: "gh.com:o/r#1", Stable: "");
+        var id = new PrIdentity(Url: "https://github.com/o/r/pull/1", Stable: "");
         var act = id.Validate;
         act.Should().Throw<ArgumentException>().WithParameterName("Stable");
     }
@@ -71,16 +72,16 @@ public class PrIdentityFormatTests
     [Fact]
     public void Equality_Is_Structural()
     {
-        var a = new PrIdentity("gh.com:o/r#1", "gh.com:1#2");
-        var b = new PrIdentity("gh.com:o/r#1", "gh.com:1#2");
+        var a = new PrIdentity("https://github.com/o/r/pull/1", "gh.com:1#2");
+        var b = new PrIdentity("https://github.com/o/r/pull/1", "gh.com:1#2");
         a.Should().Be(b);
         a.GetHashCode().Should().Be(b.GetHashCode());
     }
 
     [Fact]
-    public void ToString_Returns_Display()
+    public void ToString_Returns_Url()
     {
-        var id = new PrIdentity("gh.com:o/r#1", "gh.com:1#2");
-        id.ToString().Should().Be("gh.com:o/r#1");
+        var id = new PrIdentity("https://github.com/o/r/pull/1", "gh.com:1#2");
+        id.ToString().Should().Be("https://github.com/o/r/pull/1");
     }
 }

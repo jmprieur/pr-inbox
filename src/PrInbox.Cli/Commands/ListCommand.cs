@@ -69,7 +69,7 @@ internal sealed class ListCommand : AsyncCommand<ListSettings>
             var newBots = await threadRepo.GetBotThreadsSinceAsync(row.Identity, lastBriefedAt, CancellationToken.None);
 
             table.AddRow(
-                Markup.Escape(row.Identity.Display),
+                Markup.Escape(row.Identity.Url),
                 Markup.Escape(Truncate(row.Title ?? "(no title)", 60)),
                 FormatAge(now - row.LastSyncedAt),
                 churn,

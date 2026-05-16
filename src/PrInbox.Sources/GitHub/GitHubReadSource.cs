@@ -99,7 +99,7 @@ public sealed class GitHubReadSource : IPrReadSource
 
     public async Task<RemotePullRequestDetail> GetPullRequestDetailAsync(PrIdentity id, CancellationToken ct)
     {
-        var (owner, repo, number) = ParseDisplayIdentity(id.Display);
+        var (owner, repo, number) = ParseUrl(id.Url);
         var client = await CreateClientAsync(ct);
 
         var pr = await client.PullRequest.Get(owner, repo, number);
@@ -146,7 +146,7 @@ public sealed class GitHubReadSource : IPrReadSource
 
     public async Task<IReadOnlyList<RemoteThread>> GetThreadsAsync(PrIdentity id, CancellationToken ct)
     {
-        var (owner, repo, number) = ParseDisplayIdentity(id.Display);
+        var (owner, repo, number) = ParseUrl(id.Url);
         var client = await CreateClientAsync(ct);
 
         var result = new List<RemoteThread>();
@@ -208,7 +208,7 @@ public sealed class GitHubReadSource : IPrReadSource
 
     public async Task<IReadOnlyList<RemoteCommit>> GetCommitsAsync(PrIdentity id, CancellationToken ct)
     {
-        var (owner, repo, number) = ParseDisplayIdentity(id.Display);
+        var (owner, repo, number) = ParseUrl(id.Url);
         var client = await CreateClientAsync(ct);
         var commits = await client.PullRequest.Commits(owner, repo, number);
         return commits
@@ -228,7 +228,7 @@ public sealed class GitHubReadSource : IPrReadSource
             return new CompareResult(false, 0, 0);
         }
 
-        var (owner, repo, _) = ParseDisplayIdentity(id.Display);
+        var (owner, repo, _) = ParseUrl(id.Url);
         var client = await CreateClientAsync(ct);
 
         try
@@ -265,52 +265,36 @@ public sealed class GitHubReadSource : IPrReadSource
 
     private RemotePullRequest MapSearchItem(Issue item)
     {
-        var (owner, repo) = ParseRepoFromIssueUrl(item.HtmlUrl);
-        var display = _isEnterprise
-            ? PrIdentity.FormatGheDisplay(_hostname, owner, repo, item.Number)
-            : PrIdentity.FormatGitHubDisplay(owner, repo, item.Number);
+        var canonicalUrl = PrUrl.Canonicalize(item.HtmlUrl);
+        var components = PrUrl.Parse(canonicalUrl);
         var stable = _isEnterprise
             ? PrIdentity.FormatGheStable(_hostname, item.Repository?.Id ?? 0L, item.Id)
             : PrIdentity.FormatGitHubStable(item.Repository?.Id ?? 0L, item.Id);
 
         return new RemotePullRequest(
-            Identity: new PrIdentity(display, stable),
+            Identity: new PrIdentity(canonicalUrl, stable),
             SourceKind: Kind,
             SourceId: SourceId,
-            DisplayRepo: $"{owner}/{repo}",
+            DisplayRepo: $"{components.Owner}/{components.Repo}",
             Number: item.Number,
             Title: item.Title,
             AuthorLogin: item.User?.Login,
-            Url: item.HtmlUrl,
+            Url: canonicalUrl,
             Status: item.State.Value == ItemState.Open ? PullRequestStatus.Open : PullRequestStatus.Closed,
             LastUpdated: item.UpdatedAt ?? item.CreatedAt);
     }
 
-    internal static (string owner, string repo, int number) ParseDisplayIdentity(string display)
+    /// <summary>
+    /// Convenience: parse a canonical PR URL into (owner, repo, number) for
+    /// the GitHub REST API. Throws if <paramref name="url"/> is not a
+    /// recognized GitHub/GHE URL.
+    /// </summary>
+    internal static (string owner, string repo, int number) ParseUrl(string url)
     {
-        // gh.com:owner/repo#N   or   ghe.<host>:owner/repo#N
-        var colonIdx = display.IndexOf(':');
-        if (colonIdx < 0) throw new FormatException($"Invalid display identity '{display}'.");
-        var hashIdx = display.IndexOf('#', colonIdx);
-        if (hashIdx < 0) throw new FormatException($"Invalid display identity '{display}'.");
-
-        var ownerAndRepo = display[(colonIdx + 1)..hashIdx];
-        var slashIdx = ownerAndRepo.IndexOf('/');
-        if (slashIdx < 0) throw new FormatException($"Invalid display identity '{display}'.");
-
-        var owner = ownerAndRepo[..slashIdx];
-        var repo = ownerAndRepo[(slashIdx + 1)..];
-        var number = int.Parse(display[(hashIdx + 1)..]);
-        return (owner, repo, number);
-    }
-
-    private static (string owner, string repo) ParseRepoFromIssueUrl(string htmlUrl)
-    {
-        // https://github.com/owner/repo/pull/N  or  https://ghe.host/owner/repo/pull/N
-        var uri = new Uri(htmlUrl);
-        var segments = uri.AbsolutePath.Trim('/').Split('/');
-        if (segments.Length < 2) throw new FormatException($"Unrecognized PR URL '{htmlUrl}'.");
-        return (segments[0], segments[1]);
+        var c = PrUrl.Parse(url);
+        if (c.Platform == PrPlatform.AzureDevOps)
+            throw new FormatException($"GitHubReadSource cannot handle ADO URL '{url}'.");
+        return (c.Owner, c.Repo, c.Number);
     }
 
     private static PullRequestStatus MapPrStatus(PullRequest pr)

@@ -63,17 +63,37 @@ public sealed class MigrationRunner
                 backupPath, pending.Count);
         }
 
+        // Disable foreign keys for the duration of migration application so
+        // multi-step backfills (e.g. updating a parent PK after its children)
+        // can run in any order without tripping referential integrity.
+        // Re-enabled in the finally block. Microsoft.Data.Sqlite enables FKs
+        // by default on Open, so this is normally a no-op without our flip.
+        await SetForeignKeysAsync(conn, enabled: false, ct);
         var count = 0;
-        foreach (var migration in pending)
+        try
         {
-            ct.ThrowIfCancellationRequested();
-            await ApplyMigrationAsync(conn, migration, ct);
-            count++;
+            foreach (var migration in pending)
+            {
+                ct.ThrowIfCancellationRequested();
+                await ApplyMigrationAsync(conn, migration, ct);
+                count++;
+            }
+        }
+        finally
+        {
+            await SetForeignKeysAsync(conn, enabled: true, ct);
         }
 
         _logger.LogInformation("Applied {Count} migration(s). Latest version: {Version}.",
             count, pending[^1].Version);
         return count;
+    }
+
+    private static async Task SetForeignKeysAsync(SqliteConnection conn, bool enabled, CancellationToken ct)
+    {
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = enabled ? "PRAGMA foreign_keys = ON;" : "PRAGMA foreign_keys = OFF;";
+        await cmd.ExecuteNonQueryAsync(ct);
     }
 
     private static async Task EnsureSchemaVersionTableAsync(SqliteConnection conn, CancellationToken ct)

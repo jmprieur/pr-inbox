@@ -94,24 +94,31 @@ public class BotDetectorTests
 public class GitHubReadSourceParseTests
 {
     [Theory]
-    [InlineData("gh.com:agency-microsoft/playground#4248", "agency-microsoft", "playground", 4248)]
-    [InlineData("ghe.contoso.com:org/repo-name#12", "org", "repo-name", 12)]
-    public void ParseDisplayIdentity_Splits_Correctly(string display, string owner, string repo, int number)
+    [InlineData("https://github.com/agency-microsoft/playground/pull/4248", "agency-microsoft", "playground", 4248)]
+    [InlineData("https://ghe.contoso.com/org/repo-name/pull/12", "org", "repo-name", 12)]
+    public void ParseUrl_Splits_Correctly(string url, string owner, string repo, int number)
     {
         var (parsedOwner, parsedRepo, parsedNumber) =
-            GitHubReadSource.ParseDisplayIdentity(display);
+            GitHubReadSource.ParseUrl(url);
         parsedOwner.Should().Be(owner);
         parsedRepo.Should().Be(repo);
         parsedNumber.Should().Be(number);
     }
 
     [Theory]
-    [InlineData("no-colon")]
-    [InlineData("gh.com:noslash#5")]
-    [InlineData("gh.com:owner/repo")]
-    public void ParseDisplayIdentity_Throws_On_Malformed_Input(string input)
+    [InlineData("not-a-url")]
+    [InlineData("https://github.com/owner/repo")]
+    [InlineData("https://github.com/owner/repo/issues/5")]
+    public void ParseUrl_Throws_On_Malformed_Input(string input)
     {
-        var act = () => GitHubReadSource.ParseDisplayIdentity(input);
+        var act = () => GitHubReadSource.ParseUrl(input);
+        act.Should().Throw<FormatException>();
+    }
+
+    [Fact]
+    public void ParseUrl_Throws_For_AzureDevOps_Url()
+    {
+        var act = () => GitHubReadSource.ParseUrl("https://dev.azure.com/mseng/Context/_git/Private/pullrequest/1234");
         act.Should().Throw<FormatException>();
     }
 }

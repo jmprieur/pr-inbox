@@ -71,7 +71,7 @@ public sealed class FakePrReadSource : IPrReadSource
     private FakePr GetOrThrow(PrIdentity id) =>
         _prs.TryGetValue(id, out var pr)
             ? pr
-            : throw new KeyNotFoundException($"FakePrReadSource has no PR with identity '{id.Display}'.");
+            : throw new KeyNotFoundException($"FakePrReadSource has no PR with identity '{id.Url}'.");
 }
 
 /// <summary>

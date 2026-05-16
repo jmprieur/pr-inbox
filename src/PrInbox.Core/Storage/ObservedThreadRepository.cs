@@ -55,7 +55,7 @@ public sealed class ObservedThreadRepository
                       resolved_at   = COALESCE(observed_threads.resolved_at, excluded.resolved_at),
                       raw_json      = excluded.raw_json;
                     """;
-                cmd.Parameters.AddWithValue("$prId", identity.Display);
+                cmd.Parameters.AddWithValue("$prId", identity.Url);
                 cmd.Parameters.AddWithValue("$threadId", thread.PlatformThreadId);
                 cmd.Parameters.AddWithValue("$kind", thread.Kind.ToString());
                 cmd.Parameters.AddWithValue("$author", (object?)thread.AuthorLogin ?? DBNull.Value);
@@ -93,7 +93,7 @@ public sealed class ObservedThreadRepository
             WHERE pr_identity = $id AND resolved_at IS NULL
             ORDER BY first_seen_at ASC;
             """;
-        cmd.Parameters.AddWithValue("$id", identity.Display);
+        cmd.Parameters.AddWithValue("$id", identity.Url);
         await using var reader = await cmd.ExecuteReaderAsync(ct);
         while (await reader.ReadAsync(ct))
         {
@@ -119,7 +119,7 @@ public sealed class ObservedThreadRepository
             WHERE pr_identity = $id AND is_bot = 1 AND first_seen_at >= $since
             ORDER BY first_seen_at ASC;
             """;
-        cmd.Parameters.AddWithValue("$id", identity.Display);
+        cmd.Parameters.AddWithValue("$id", identity.Url);
         cmd.Parameters.AddWithValue("$since",
             PullRequestRepository.FormatTimestamp(since));
         await using var reader = await cmd.ExecuteReaderAsync(ct);

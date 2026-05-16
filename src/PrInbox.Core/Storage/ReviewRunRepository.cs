@@ -38,7 +38,7 @@ public sealed class ReviewRunRepository
             )
             RETURNING id;
             """;
-        cmd.Parameters.AddWithValue("$prId", identity.Display);
+        cmd.Parameters.AddWithValue("$prId", identity.Url);
         cmd.Parameters.AddWithValue("$createdAt", PullRequestRepository.FormatTimestamp(createdAt));
         cmd.Parameters.AddWithValue("$briefPath", briefPath);
         cmd.Parameters.AddWithValue("$runDir", runDirectory);
@@ -64,7 +64,7 @@ public sealed class ReviewRunRepository
             WHERE pr_identity = $id
             ORDER BY created_at DESC, id DESC;
             """;
-        cmd.Parameters.AddWithValue("$id", identity.Display);
+        cmd.Parameters.AddWithValue("$id", identity.Url);
         await using var reader = await cmd.ExecuteReaderAsync(ct);
         while (await reader.ReadAsync(ct))
         {

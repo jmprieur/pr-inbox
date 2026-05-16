@@ -55,7 +55,7 @@ public sealed class PrSnapshotRepository
               $commitShas, $reviewerState, $prState, $rawJson
             );
             """;
-        cmd.Parameters.AddWithValue("$prId", identity.Display);
+        cmd.Parameters.AddWithValue("$prId", identity.Url);
         cmd.Parameters.AddWithValue("$syncedAt", PullRequestRepository.FormatTimestamp(syncedAt));
         cmd.Parameters.AddWithValue("$headSha", headSha);
         cmd.Parameters.AddWithValue("$baseSha", baseSha);
@@ -87,7 +87,7 @@ public sealed class PrSnapshotRepository
             ORDER BY synced_at DESC, id DESC
             LIMIT 1;
             """;
-        cmd.Parameters.AddWithValue("$id", identity.Display);
+        cmd.Parameters.AddWithValue("$id", identity.Url);
         await using var reader = await cmd.ExecuteReaderAsync(ct);
         if (!await reader.ReadAsync(ct))
         {
@@ -100,7 +100,7 @@ public sealed class PrSnapshotRepository
         return new PrSnapshotRow(
             Id: reader.GetInt64(reader.GetOrdinal("id")),
             Identity: new PrIdentity(
-                Display: reader.GetString(reader.GetOrdinal("pr_identity")),
+                Url: reader.GetString(reader.GetOrdinal("pr_identity")),
                 Stable: identity.Stable),
             SyncedAt: DateTimeOffset.Parse(reader.GetString(reader.GetOrdinal("synced_at"))),
             HeadSha: reader.GetString(reader.GetOrdinal("head_sha")),

@@ -43,7 +43,7 @@ internal sealed class ConfigDoctorCommand : AsyncCommand<ConfigDoctorSettings>
                 ITokenProvider provider = sc.Kind switch
                 {
                     SourceConfigKind.GitHub or SourceConfigKind.GitHubEnterprise =>
-                        new GhCliTokenProvider(sc.Id, sc.Host ?? throw new InvalidOperationException("host required")),
+                        new GhCliTokenProvider(sc.Id, sc.Host ?? throw new InvalidOperationException("host required"), sc.Identity),
                     SourceConfigKind.AzureDevOps =>
                         new AzureCliTokenProvider(sc.Id),
                     _ => throw new InvalidOperationException($"Unknown kind {sc.Kind}"),

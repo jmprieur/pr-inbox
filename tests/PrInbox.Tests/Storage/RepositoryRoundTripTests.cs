@@ -30,7 +30,7 @@ public class RepositoryRoundTripTests : IAsyncLifetime
     private static PullRequestRow SampleRow(PrIdentity? id = null)
     {
         id ??= new PrIdentity(
-            Display: "gh.com:agency-microsoft/playground#4248",
+            Url: "https://github.com/agency-microsoft/playground/pull/4248",
             Stable: "gh.com:100#4248");
 
         return new PullRequestRow(
@@ -59,7 +59,7 @@ public class RepositoryRoundTripTests : IAsyncLifetime
         var row = SampleRow();
 
         await repo.UpsertAsync(row, CancellationToken.None);
-        var fetched = await repo.GetAsync(row.Identity.Display, CancellationToken.None);
+        var fetched = await repo.GetAsync(row.Identity.Url, CancellationToken.None);
 
         fetched.Should().NotBeNull();
         fetched!.Identity.Should().Be(row.Identity);
@@ -82,7 +82,7 @@ public class RepositoryRoundTripTests : IAsyncLifetime
         };
         await repo.UpsertAsync(second, CancellationToken.None);
 
-        var fetched = await repo.GetAsync(first.Identity.Display, CancellationToken.None);
+        var fetched = await repo.GetAsync(first.Identity.Url, CancellationToken.None);
         fetched.Should().NotBeNull();
         fetched!.Title.Should().Be("Sample PR (renamed)");
         fetched.LastSyncedAt.Should().Be(DateTimeOffset.Parse("2026-05-14T08:00:00Z"));
@@ -95,9 +95,9 @@ public class RepositoryRoundTripTests : IAsyncLifetime
         var row = SampleRow();
         await repo.UpsertAsync(row, CancellationToken.None);
 
-        await repo.MarkPreviouslyAssignedAsync(row.Identity.Display, CancellationToken.None);
+        await repo.MarkPreviouslyAssignedAsync(row.Identity.Url, CancellationToken.None);
 
-        var fetched = await repo.GetAsync(row.Identity.Display, CancellationToken.None);
+        var fetched = await repo.GetAsync(row.Identity.Url, CancellationToken.None);
         fetched!.TrackingReason.Should().Be(TrackingReason.PreviouslyAssigned);
     }
 
@@ -106,14 +106,14 @@ public class RepositoryRoundTripTests : IAsyncLifetime
     {
         var repo = new PullRequestRepository(_db);
 
-        await repo.UpsertAsync(SampleRow(new PrIdentity("gh.com:o/r#1", "gh.com:1#1")), CancellationToken.None);
-        await repo.UpsertAsync(SampleRow(new PrIdentity("gh.com:o/r#2", "gh.com:1#2"))
+        await repo.UpsertAsync(SampleRow(new PrIdentity("https://github.com/o/r/pull/1", "gh.com:1#1")), CancellationToken.None);
+        await repo.UpsertAsync(SampleRow(new PrIdentity("https://github.com/o/r/pull/2", "gh.com:1#2"))
             with { Status = PullRequestStatus.Closed }, CancellationToken.None);
-        await repo.UpsertAsync(SampleRow(new PrIdentity("gh.com:o/r#3", "gh.com:1#3"))
+        await repo.UpsertAsync(SampleRow(new PrIdentity("https://github.com/o/r/pull/3", "gh.com:1#3"))
             with { TrackingReason = TrackingReason.Archived }, CancellationToken.None);
 
         var active = await repo.ListActiveAsync(CancellationToken.None);
-        active.Should().ContainSingle(p => p.Identity.Display == "gh.com:o/r#1");
+        active.Should().ContainSingle(p => p.Identity.Url == "https://github.com/o/r/pull/1");
     }
 
     [Fact]
@@ -288,5 +288,57 @@ public class RepositoryRoundTripTests : IAsyncLifetime
         runs.Should().HaveCount(2);
         runs[0].HeadSha.Should().Be("def");
         runs[1].HeadSha.Should().Be("abc");
+    }
+
+    [Fact]
+    public async Task PullRequest_Upsert_Records_Source_Binding_Idempotently()
+    {
+        // Two different (source, identity) pairs discover the same PR URL.
+        // Expected: one row in pull_requests, one binding per discovery.
+        var repo = new PullRequestRepository(_db);
+        var url = "https://github.com/owner/repo/pull/42";
+        var stable = "gh.com:5000#42";
+
+        var rowEmu = SampleRow(new PrIdentity(url, stable)) with
+        {
+            SourceId = "gh.com:emu",
+            IdentityUsed = "jmprieur_microsoft",
+        };
+        var rowPublic = SampleRow(new PrIdentity(url, stable)) with
+        {
+            SourceId = "gh.com:public",
+            IdentityUsed = "jmprieur",
+            LastSyncedAt = DateTimeOffset.Parse("2026-05-14T08:00:00Z"),
+        };
+
+        await repo.UpsertAsync(rowEmu, CancellationToken.None);
+        await repo.UpsertAsync(rowPublic, CancellationToken.None);
+
+        // Same upsert twice with same (source, identity) does NOT duplicate bindings.
+        await repo.UpsertAsync(rowEmu, CancellationToken.None);
+
+        await using var conn = await _db.OpenAsync(CancellationToken.None);
+        await using var bindingsCmd = conn.CreateCommand();
+        bindingsCmd.CommandText = """
+            SELECT source_id, identity_used FROM pr_source_bindings
+            WHERE pr_identity = $url ORDER BY source_id;
+            """;
+        bindingsCmd.Parameters.AddWithValue("$url", url);
+        var bindings = new List<(string SourceId, string IdentityUsed)>();
+        await using var reader = await bindingsCmd.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+        {
+            bindings.Add((reader.GetString(0), reader.GetString(1)));
+        }
+        bindings.Should().HaveCount(2);
+        bindings.Should().Contain(("gh.com:emu", "jmprieur_microsoft"));
+        bindings.Should().Contain(("gh.com:public", "jmprieur"));
+
+        // pull_requests still has exactly one row keyed by URL.
+        await using var prCmd = conn.CreateCommand();
+        prCmd.CommandText = "SELECT COUNT(*) FROM pull_requests WHERE pr_identity = $url;";
+        prCmd.Parameters.AddWithValue("$url", url);
+        var count = Convert.ToInt64(await prCmd.ExecuteScalarAsync());
+        count.Should().Be(1L);
     }
 }

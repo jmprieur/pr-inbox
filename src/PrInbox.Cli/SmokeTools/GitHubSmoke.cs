@@ -45,7 +45,7 @@ internal static class GitHubSmoke
             foreach (var pr in inbox.Take(10))
             {
                 table.AddRow(
-                    Markup.Escape(pr.Identity.Display),
+                    Markup.Escape(pr.Identity.Url),
                     Markup.Escape(pr.DisplayRepo),
                     Markup.Escape(Truncate(pr.Title ?? "", 60)),
                     Markup.Escape(pr.AuthorLogin ?? ""),
@@ -60,7 +60,7 @@ internal static class GitHubSmoke
 
             // Pick the first PR and exercise detail / threads / commits.
             var sample = inbox[0];
-            AnsiConsole.MarkupLine($"[bold]Detail for [cyan]{Markup.Escape(sample.Identity.Display)}[/][/]");
+            AnsiConsole.MarkupLine($"[bold]Detail for [cyan]{Markup.Escape(sample.Identity.Url)}[/][/]");
 
             var detail = await source.GetPullRequestDetailAsync(sample.Identity, CancellationToken.None);
             AnsiConsole.MarkupLine($"  head: [white]{detail.HeadSha[..Math.Min(12, detail.HeadSha.Length)]}[/]");
