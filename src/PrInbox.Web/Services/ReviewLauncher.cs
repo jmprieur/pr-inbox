@@ -166,7 +166,7 @@ public sealed class ReviewLauncher : IReviewLauncher, IAsyncDisposable
         {
             if (wt is not null)
             {
-                var args = $"-w 0 nw --title \"pr-inbox review\" -d \"{runDir}\" pwsh -NoExit -File \"{ps1}\" -RunDirectory \"{runDir}\"";
+                var args = $"-w 0 nt --title \"pr-inbox review\" -d \"{runDir}\" pwsh -NoExit -File \"{ps1}\" -RunDirectory \"{runDir}\"";
                 Process.Start(new ProcessStartInfo
                 {
                     FileName = wt,

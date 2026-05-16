@@ -1,9 +1,11 @@
 @page "/"
 @rendermode InteractiveServer
 @implements IDisposable
+@using PrInbox.Core.Models
 @inject InboxState State
 @inject ReviewRunStore Runs
 @inject IReviewLauncher Launcher
+@inject InboxSyncHostedService Sync
 @inject ILogger<Inbox> Log
 
 <h1>Pull requests assigned to me</h1>
@@ -11,15 +13,32 @@
 <div class="toolbar">
     <span class="muted">@RowCountLabel</span>
     <span class="muted">@LastSyncLabel</span>
+    <button class="refresh" @onclick="OnRefreshAsync" disabled="@_refreshing">
+        @(_refreshing ? "Refreshing..." : "Refresh")
+    </button>
+    <label class="show-closed">
+        <input type="checkbox" @bind="_showClosed" />
+        Show closed / merged
+    </label>
     @if (!string.IsNullOrEmpty(_lastLaunchMessage))
     {
         <span class="muted">@_lastLaunchMessage</span>
     }
 </div>
 
-@if (_rows.Count == 0)
+@{
+    var visible = VisibleRows;
+}
+@if (visible.Count == 0)
 {
-    <p class="empty">No PRs yet. The first fast-sync runs on startup; check back in a few seconds.</p>
+    @if (_rows.Count == 0)
+    {
+        <p class="empty">No PRs yet. The first fast-sync runs on startup; check back in a few seconds.</p>
+    }
+    else
+    {
+        <p class="empty">No open PRs. Toggle "Show closed / merged" to see @_rows.Count cached row(s).</p>
+    }
 }
 else
 {
@@ -38,7 +57,7 @@ else
             </tr>
         </thead>
         <tbody>
-            @foreach (var row in _rows)
+            @foreach (var row in visible)
             {
                 <tr>
                     <td><span class="badge @SourceClass(row)">@SourceLabel(row)</span></td>
@@ -64,9 +83,15 @@ else
                         }
                     </td>
                     <td>
-                        <span class="badge @EnrichClass(row.EnrichState)">@row.EnrichState.ToString().ToLowerInvariant()</span>
+                        <span class="badge @StatusClass(row.Status)">@StatusLabel(row.Status)</span>
                     </td>
-                    <td class="muted">@RelativeTime(row.LastSyncedAt)</td>
+                    <td class="muted" title="@EnrichTooltip(row.EnrichState)">
+                        @RelativeTime(row.LastSyncedAt)
+                        @if (row.EnrichState != EnrichState.Enriched)
+                        {
+                            <span class="enrich-suffix"> · @row.EnrichState.ToString().ToLowerInvariant()</span>
+                        }
+                    </td>
                     <td>
                         @{
                             var run = _runMap.TryGetValue(row.Url, out var r) ? r : null;
@@ -108,8 +133,20 @@ else
     private IReadOnlyList<InboxRow> _rows = Array.Empty<InboxRow>();
     private IReadOnlyDictionary<string, ReviewRun> _runMap = new Dictionary<string, ReviewRun>();
     private string? _lastLaunchMessage;
-    private string RowCountLabel => $"{_rows.Count} PR(s)";
+    private bool _showClosed;
+    private bool _refreshing;
+
+    private string RowCountLabel =>
+        _showClosed
+            ? $"{_rows.Count} PR(s)"
+            : $"{VisibleRows.Count} open · {_rows.Count} total";
+
     private string LastSyncLabel => State.LastSyncMessage ?? "Loading...";
+
+    private IReadOnlyList<InboxRow> VisibleRows =>
+        _showClosed
+            ? _rows
+            : _rows.Where(r => r.Status == PullRequestStatus.Open).ToArray();
 
     protected override void OnInitialized()
     {
@@ -143,6 +180,29 @@ else
         }
     }
 
+    private async Task OnRefreshAsync()
+    {
+        if (_refreshing) return;
+        _refreshing = true;
+        try
+        {
+            var started = await Sync.TriggerNowAsync(CancellationToken.None);
+            if (!started)
+            {
+                _lastLaunchMessage = "Sync already in progress.";
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.LogError(ex, "Manual refresh failed");
+            _lastLaunchMessage = $"Refresh error: {ex.Message}";
+        }
+        finally
+        {
+            _refreshing = false;
+        }
+    }
+
     private static string SourceLabel(InboxRow row) => row.SourceId switch
     {
         "gh.com:emu"    => "EMU",
@@ -161,11 +221,29 @@ else
         _ => "src-other",
     };
 
-    private static string EnrichClass(EnrichState s) => s switch
+    private static string StatusLabel(PullRequestStatus s) => s switch
     {
-        EnrichState.Enriched => "enrich-enriched",
-        EnrichState.Basic    => "enrich-basic",
-        _                    => "enrich-unsynced",
+        PullRequestStatus.Open         => "open",
+        PullRequestStatus.Closed       => "closed",
+        PullRequestStatus.Merged       => "merged",
+        PullRequestStatus.Inaccessible => "inaccessible",
+        _                              => s.ToString().ToLowerInvariant(),
+    };
+
+    private static string StatusClass(PullRequestStatus s) => s switch
+    {
+        PullRequestStatus.Open         => "status-open",
+        PullRequestStatus.Closed       => "status-closed",
+        PullRequestStatus.Merged       => "status-merged",
+        PullRequestStatus.Inaccessible => "status-inaccessible",
+        _                              => "status-other",
+    };
+
+    private static string EnrichTooltip(EnrichState s) => s switch
+    {
+        EnrichState.Enriched => "enrich: threads, iterations, bot signals loaded",
+        EnrichState.Basic    => "enrich: list-tier only; details still loading",
+        _                    => "enrich: not yet synced",
     };
 
     private static string RelativeTime(DateTimeOffset when)

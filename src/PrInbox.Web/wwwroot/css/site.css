@@ -92,6 +92,36 @@ h1 { font-size: 1.4rem; margin: 0 0 0.5rem 0; }
 .enrich-basic    { background: #6b6b2e; }
 .enrich-unsynced { background: #6b3a2e; }
 
+.status-open         { background: #2e6b4f; }
+.status-closed       { background: #6b3a2e; }
+.status-merged       { background: #5b3a8c; }
+.status-inaccessible { background: #8c3a3a; }
+.status-other        { background: #444; }
+
+.enrich-suffix { color: var(--muted); font-size: 0.75rem; }
+
+button.refresh {
+    background: transparent;
+    color: var(--accent);
+    border: 1px solid var(--accent);
+    padding: 0.15rem 0.55rem;
+    border-radius: 3px;
+    font-size: 0.8rem;
+    cursor: pointer;
+}
+button.refresh:hover:not([disabled]) { background: rgba(93,164,255,0.12); }
+button.refresh[disabled] { opacity: 0.5; cursor: default; }
+
+.show-closed {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    color: var(--muted);
+    font-size: 0.85rem;
+    cursor: pointer;
+}
+.show-closed input { cursor: pointer; }
+
 button.review {
     background: transparent;
     color: var(--accent);

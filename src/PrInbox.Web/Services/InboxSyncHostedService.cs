@@ -16,12 +16,42 @@ public sealed class InboxSyncHostedService : BackgroundService
     private readonly InboxState _state;
     private readonly IConfiguration _config;
     private readonly ILogger<InboxSyncHostedService> _log;
+    private readonly SemaphoreSlim _syncGate = new(1, 1);
+    private volatile bool _syncing;
 
     public InboxSyncHostedService(InboxState state, IConfiguration config, ILogger<InboxSyncHostedService> log)
     {
         _state = state;
         _config = config;
         _log = log;
+    }
+
+    /// <summary>True while a fast+enrich pass is running (either automatic or manual).</summary>
+    public bool IsSyncing => _syncing;
+
+    /// <summary>
+    /// Run an out-of-band sync immediately. Serialized with the
+    /// background loop via <see cref="_syncGate"/>; concurrent calls
+    /// return without queueing extra work.
+    /// </summary>
+    public async Task<bool> TriggerNowAsync(CancellationToken ct)
+    {
+        if (!await _syncGate.WaitAsync(0, ct))
+        {
+            return false; // already running
+        }
+        try
+        {
+            _syncing = true;
+            _state.NoteSync("Manual refresh started...");
+            await RunSyncIterationAsync(ct);
+            return true;
+        }
+        finally
+        {
+            _syncing = false;
+            _syncGate.Release();
+        }
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -41,7 +71,7 @@ public sealed class InboxSyncHostedService : BackgroundService
 
         if (runOnStartup)
         {
-            await TrySyncAsync(stoppingToken);
+            await TryGatedSyncAsync(stoppingToken);
         }
 
         while (!stoppingToken.IsCancellationRequested)
@@ -49,11 +79,32 @@ public sealed class InboxSyncHostedService : BackgroundService
             try { await Task.Delay(TimeSpan.FromSeconds(intervalSec), stoppingToken); }
             catch (OperationCanceledException) { return; }
 
-            await TrySyncAsync(stoppingToken);
+            await TryGatedSyncAsync(stoppingToken);
         }
     }
 
-    private async Task TrySyncAsync(CancellationToken ct)
+    private async Task TryGatedSyncAsync(CancellationToken ct)
+    {
+        // If a manual refresh is currently running, skip this tick rather
+        // than queueing — the manual run will refresh the inbox anyway.
+        if (!await _syncGate.WaitAsync(0, ct))
+        {
+            _log.LogDebug("Skipping scheduled sync; another sync is in progress.");
+            return;
+        }
+        try
+        {
+            _syncing = true;
+            await RunSyncIterationAsync(ct);
+        }
+        finally
+        {
+            _syncing = false;
+            _syncGate.Release();
+        }
+    }
+
+    private async Task RunSyncIterationAsync(CancellationToken ct)
     {
         try
         {

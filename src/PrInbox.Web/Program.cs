@@ -15,7 +15,8 @@ builder.Services.AddRazorComponents()
 builder.Services.AddSingleton<InboxState>();
 builder.Services.AddSingleton<ReviewRunStore>();
 builder.Services.AddSingleton<IReviewLauncher, ReviewLauncher>();
-builder.Services.AddHostedService<InboxSyncHostedService>();
+builder.Services.AddSingleton<InboxSyncHostedService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<InboxSyncHostedService>());
 
 // Publishers — only registered here (CLI never references PrInbox.Publishers).
 // Migrate the DB up-front so chunk-7 schema (migration v4) is in place
