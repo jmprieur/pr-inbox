@@ -385,7 +385,8 @@ public class RepositoryRoundTripTests : IAsyncLifetime
         };
         await repo.UpsertAsync(rowEmuBasic, CancellationToken.None);
 
-        // PR 2: same source+identity but already 'enriched' — EXCLUDED
+        // PR 2: same source+identity, already enriched AND stamped at the
+        // current dossier version — EXCLUDED (no backfill needed).
         var rowEmuEnriched = SampleRow(new PrIdentity("https://github.com/o/r/pull/2", "gh.com:1#2")) with
         {
             SourceId = "gh.com:emu",
@@ -395,6 +396,10 @@ public class RepositoryRoundTripTests : IAsyncLifetime
             TrackingReason = TrackingReason.Assigned,
         };
         await repo.UpsertAsync(rowEmuEnriched, CancellationToken.None);
+        await repo.UpdateDossierVersionAsync(
+            rowEmuEnriched.Identity.Url,
+            PrInbox.Core.Reviewing.BriefService.CurrentDossierVersion,
+            CancellationToken.None);
 
         // PR 3: basic but bound to a different identity — EXCLUDED for EMU caller
         var rowPublicBasic = SampleRow(new PrIdentity("https://github.com/o/r/pull/3", "gh.com:1#3")) with
@@ -430,7 +435,9 @@ public class RepositoryRoundTripTests : IAsyncLifetime
         await repo.UpsertAsync(rowEmuPrev, CancellationToken.None);
 
         var candidates = await repo.ListNeedingEnrichmentAsync(
-            "gh.com:emu", "jmprieur_microsoft", CancellationToken.None);
+            "gh.com:emu", "jmprieur_microsoft",
+            minDossierVersion: PrInbox.Core.Reviewing.BriefService.CurrentDossierVersion,
+            CancellationToken.None);
 
         candidates.Should().ContainSingle();
         candidates[0].Identity.Url.Should().Be("https://github.com/o/r/pull/1");
@@ -596,6 +603,144 @@ public class RepositoryRoundTripTests : IAsyncLifetime
         open[0].LastCommentBody.Should().Be("Original body");
         open[0].AnchorPath.Should().Be("src/Foo.cs");
         open[0].AnchorLine.Should().Be(10);
+    }
+
+    // -----------------------------------------------------------------
+    // Dossier-version backfill (migration 007).
+    // -----------------------------------------------------------------
+
+    [Fact]
+    public async Task ListNeedingEnrichment_Includes_DossierBelowVersion_EvenIfEnriched()
+    {
+        var repo = new PullRequestRepository(_db);
+
+        // PR 1: enriched but dossier_version stamped at 0 → re-elected for backfill.
+        var legacy = SampleRow(new PrIdentity("https://github.com/o/r/pull/1", "gh.com:1#1")) with
+        {
+            SourceId = "gh.com",
+            IdentityUsed = "jmprieur",
+            EnrichState = EnrichState.Enriched,
+            Status = PullRequestStatus.Open,
+            TrackingReason = TrackingReason.Assigned,
+        };
+        await repo.UpsertAsync(legacy, CancellationToken.None);
+        // (no UpdateDossierVersionAsync — leaves it at the SQL default 0)
+
+        // PR 2: enriched and stamped at dossier_version=1 → excluded.
+        var fresh = SampleRow(new PrIdentity("https://github.com/o/r/pull/2", "gh.com:1#2")) with
+        {
+            SourceId = "gh.com",
+            IdentityUsed = "jmprieur",
+            EnrichState = EnrichState.Enriched,
+            Status = PullRequestStatus.Open,
+            TrackingReason = TrackingReason.Assigned,
+        };
+        await repo.UpsertAsync(fresh, CancellationToken.None);
+        await repo.UpdateDossierVersionAsync(fresh.Identity.Url, 1, CancellationToken.None);
+
+        var candidates = await repo.ListNeedingEnrichmentAsync(
+            "gh.com", "jmprieur",
+            minDossierVersion: 1,
+            CancellationToken.None);
+
+        candidates.Should().ContainSingle();
+        candidates[0].Identity.Url.Should().Be("https://github.com/o/r/pull/1");
+    }
+
+    [Fact]
+    public async Task ListNeedingEnrichment_Skips_Ignored_Prs()
+    {
+        var repo = new PullRequestRepository(_db);
+        var row = SampleRow() with
+        {
+            SourceId = "gh.com",
+            IdentityUsed = "jmprieur",
+            EnrichState = EnrichState.Basic,
+            Status = PullRequestStatus.Open,
+            TrackingReason = TrackingReason.Assigned,
+        };
+        await repo.UpsertAsync(row, CancellationToken.None);
+        await repo.SetIgnoredAsync(row.Identity.Url, ignored: true, CancellationToken.None);
+
+        var candidates = await repo.ListNeedingEnrichmentAsync(
+            "gh.com", "jmprieur",
+            minDossierVersion: 1,
+            CancellationToken.None);
+
+        candidates.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task UpdateDossierVersionAsync_Stamps_Row()
+    {
+        var repo = new PullRequestRepository(_db);
+        var row = SampleRow();
+        await repo.UpsertAsync(row, CancellationToken.None);
+
+        await repo.UpdateDossierVersionAsync(row.Identity.Url, 1, CancellationToken.None);
+
+        var fetched = await repo.GetAsync(row.Identity.Url, CancellationToken.None);
+        fetched!.DossierVersion.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task UpdateLatestDossierAsync_Updates_Latest_Snapshot_InPlace()
+    {
+        var prRepo = new PullRequestRepository(_db);
+        var snapRepo = new PrSnapshotRepository(_db);
+        var row = SampleRow();
+        await prRepo.UpsertAsync(row, CancellationToken.None);
+
+        // First enrich — no dossier metadata (legacy).
+        await snapRepo.InsertIfChangedAsync(
+            row.Identity, DateTimeOffset.UtcNow,
+            "abc", "base", null, new[] { "abc" },
+            ReviewerState.Requested, PullRequestStatus.Open, null,
+            CancellationToken.None);
+
+        // Backfill enrich — same canonical state (dedup blocks new insert),
+        // but we want the dossier fields to populate.
+        await snapRepo.UpdateLatestDossierAsync(
+            row.Identity,
+            mergeableState: "clean",
+            ciStatus: "success",
+            files: new[] { new SnapshotFileChange("src/A.cs", 10, 2, "modified") },
+            CancellationToken.None);
+
+        var latest = await snapRepo.GetLatestAsync(row.Identity, CancellationToken.None);
+        latest!.MergeableState.Should().Be("clean");
+        latest.CiStatus.Should().Be("success");
+        latest.Files.Should().NotBeNull();
+        latest.Files!.Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task UpdateLatestDossierAsync_Preserves_Existing_Values_When_Passed_Null()
+    {
+        var prRepo = new PullRequestRepository(_db);
+        var snapRepo = new PrSnapshotRepository(_db);
+        var row = SampleRow();
+        await prRepo.UpsertAsync(row, CancellationToken.None);
+
+        await snapRepo.InsertIfChangedAsync(
+            row.Identity, DateTimeOffset.UtcNow,
+            "abc", "base", null, new[] { "abc" },
+            ReviewerState.Requested, PullRequestStatus.Open, null,
+            CancellationToken.None,
+            mergeableState: "clean", ciStatus: "success");
+
+        // Partial backfill — only files now, mergeable/ci unchanged.
+        await snapRepo.UpdateLatestDossierAsync(
+            row.Identity,
+            mergeableState: null,
+            ciStatus: null,
+            files: new[] { new SnapshotFileChange("src/A.cs", 1, 0, "added") },
+            CancellationToken.None);
+
+        var latest = await snapRepo.GetLatestAsync(row.Identity, CancellationToken.None);
+        latest!.MergeableState.Should().Be("clean"); // preserved
+        latest.CiStatus.Should().Be("success"); // preserved
+        latest.Files.Should().NotBeNull();
     }
 }
 

@@ -90,6 +90,56 @@ public sealed class PrSnapshotRepository
     }
 
     /// <summary>
+    /// Update the dossier metadata on the most recent snapshot for a PR
+    /// without inserting a new history row. Used by the backfill / re-enrich
+    /// path: when the canonical state hasn't changed (so dedup blocks an
+    /// insert), we still want the latest snapshot's CI/mergeable/files to
+    /// reflect the freshest fetch.
+    /// </summary>
+    /// <remarks>
+    /// Consistent with <see cref="InsertIfChangedAsync"/>'s exclusion of these
+    /// fields from the dedup comparison: the dossier metadata is "latest
+    /// observation," not "canonical state at time T," so updating-in-place
+    /// matches its semantics. Append-only history of canonical state is
+    /// preserved.
+    /// <para>
+    /// Each non-null parameter overwrites the corresponding column. Nulls are
+    /// left unchanged via COALESCE so a partial backfill never wipes a prior
+    /// good value.
+    /// </para>
+    /// </remarks>
+    public async Task UpdateLatestDossierAsync(
+        PrIdentity identity,
+        string? mergeableState,
+        string? ciStatus,
+        IReadOnlyList<SnapshotFileChange>? files,
+        CancellationToken ct)
+    {
+        await using var conn = await _db.OpenAsync(ct);
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            UPDATE pr_snapshots
+            SET mergeable_state = COALESCE($mergeable, mergeable_state),
+                ci_status       = COALESCE($ci,        ci_status),
+                files_json      = COALESCE($files,     files_json)
+            WHERE id = (
+              SELECT id FROM pr_snapshots
+              WHERE pr_identity = $prId
+              ORDER BY synced_at DESC, id DESC
+              LIMIT 1
+            );
+            """;
+        cmd.Parameters.AddWithValue("$prId", identity.Url);
+        cmd.Parameters.AddWithValue("$mergeable", (object?)mergeableState ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("$ci", (object?)ciStatus ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("$files",
+            files is null || files.Count == 0
+                ? DBNull.Value
+                : (object)JsonSerializer.Serialize(files));
+        await cmd.ExecuteNonQueryAsync(ct);
+    }
+
+    /// <summary>
     /// Returns the most recent snapshot for a PR, or null if no snapshots exist.
     /// </summary>
     public async Task<PrSnapshotRow?> GetLatestAsync(PrIdentity identity, CancellationToken ct)

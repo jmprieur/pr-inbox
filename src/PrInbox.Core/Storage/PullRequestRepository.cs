@@ -107,6 +107,22 @@ public sealed class PullRequestRepository
     }
 
     /// <summary>
+    /// Stamp the dossier schema version this PR was last enriched against.
+    /// The enrich pass calls this with <see cref="BriefService.CurrentDossierVersion"/>
+    /// after a successful enrich; the next dossier-schema bump (migration 008,
+    /// 009, …) automatically re-elects every row for backfill.
+    /// </summary>
+    public async Task UpdateDossierVersionAsync(string url, int version, CancellationToken ct)
+    {
+        await using var conn = await _db.OpenAsync(ct);
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = "UPDATE pull_requests SET dossier_version = $v WHERE pr_identity = $id;";
+        cmd.Parameters.AddWithValue("$v", version);
+        cmd.Parameters.AddWithValue("$id", url);
+        await cmd.ExecuteNonQueryAsync(ct);
+    }
+
+    /// <summary>
     /// Fetch a single row by display identity, or null if not found.
     /// </summary>
     public async Task<PullRequestRow?> GetAsync(string displayIdentity, CancellationToken ct)
@@ -208,23 +224,24 @@ public sealed class PullRequestRepository
     }
 
     /// <summary>
-    /// Active rows for a given (source, identity) that still need tier-3
-    /// enrichment. Scoped via <c>pr_source_bindings</c> so a runtime never
-    /// tries to enrich a PR that its identity cannot see.
+    /// List PRs that need a tier-3 enrichment pass.
     /// </summary>
     /// <remarks>
-    /// Filters:
+    /// A PR is a candidate when, viewed through the binding (<paramref name="sourceId"/>,
+    /// <paramref name="identityUsed"/>), it is open, owned by the user, not
+    /// ignored, and either:
     /// <list type="bullet">
-    ///   <item>The binding <c>(pr_identity, source_id, identity_used)</c> exists,
-    ///         so the calling runtime is authorized for the PR.</item>
-    ///   <item><c>enrich_state = 'basic'</c> — needs enrichment now.</item>
-    ///   <item><c>status = 'open'</c> — closed/merged/inaccessible PRs are skipped.</item>
-    ///   <item><c>tracking_reason IN ('assigned','manually_added')</c> — PRs the
-    ///         user is currently expected to review.</item>
+    ///   <item><c>enrich_state = 'basic'</c> — has never been enriched.</item>
+    ///   <item><c>dossier_version &lt; <paramref name="minDossierVersion"/></c> — was
+    ///         enriched against an older brief contract; a one-shot backfill
+    ///         is needed to fill the new dossier columns (body/files/CI/...).
+    ///         </item>
     /// </list>
+    /// Basic rows are returned first so a fresh PR never starves behind a
+    /// large backfill queue.
     /// </remarks>
     public async Task<IReadOnlyList<PullRequestRow>> ListNeedingEnrichmentAsync(
-        string sourceId, string identityUsed, CancellationToken ct)
+        string sourceId, string identityUsed, int minDossierVersion, CancellationToken ct)
     {
         var rows = new List<PullRequestRow>();
         await using var conn = await _db.OpenAsync(ct);
@@ -236,13 +253,19 @@ public sealed class PullRequestRepository
               ON b.pr_identity = pr.pr_identity
              AND b.source_id   = $sourceId
              AND b.identity_used = $identityUsed
-            WHERE pr.enrich_state    = 'basic'
-              AND pr.status          = 'open'
+            WHERE pr.status          = 'open'
               AND pr.tracking_reason IN ('assigned','manually_added')
-            ORDER BY pr.last_synced_at DESC;
+              AND pr.is_ignored      = 0
+              AND (
+                pr.enrich_state = 'basic'
+                OR pr.dossier_version < $minVersion
+              )
+            ORDER BY CASE WHEN pr.enrich_state = 'basic' THEN 0 ELSE 1 END ASC,
+                     pr.last_synced_at DESC;
             """;
         cmd.Parameters.AddWithValue("$sourceId", sourceId);
         cmd.Parameters.AddWithValue("$identityUsed", identityUsed);
+        cmd.Parameters.AddWithValue("$minVersion", minDossierVersion);
         await using var reader = await cmd.ExecuteReaderAsync(ct);
         while (await reader.ReadAsync(ct))
         {
@@ -426,7 +449,10 @@ public sealed class PullRequestRepository
             LastSweptAt: ParseOptionalTimestamp(reader, "last_swept_at"),
             Body: HasColumn(reader, "body") && !reader.IsDBNull(reader.GetOrdinal("body"))
                 ? reader.GetString(reader.GetOrdinal("body"))
-                : null);
+                : null,
+            DossierVersion: HasColumn(reader, "dossier_version")
+                ? (int)reader.GetInt64(reader.GetOrdinal("dossier_version"))
+                : 0);
     }
 
     private static bool HasColumn(SqliteDataReader reader, string name)

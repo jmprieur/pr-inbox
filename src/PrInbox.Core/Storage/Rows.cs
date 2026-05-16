@@ -26,7 +26,8 @@ public sealed record PullRequestRow(
     bool IsIgnored = false,
     DateTimeOffset? DisappearedAt = null,
     DateTimeOffset? LastSweptAt = null,
-    string? Body = null);
+    string? Body = null,
+    int DossierVersion = 0);
 
 /// <summary>
 /// Row from <c>pr_snapshots</c>. Append-only.

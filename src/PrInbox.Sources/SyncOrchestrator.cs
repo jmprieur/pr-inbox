@@ -248,7 +248,10 @@ public sealed class SyncOrchestrator
 
         try
         {
-            var candidates = await _pullRequests.ListNeedingEnrichmentAsync(_source.SourceId, identityUsed, ct);
+            var candidates = await _pullRequests.ListNeedingEnrichmentAsync(
+                _source.SourceId, identityUsed,
+                minDossierVersion: PrInbox.Core.Reviewing.BriefService.CurrentDossierVersion,
+                ct);
             progress?.Report(new SyncProgress(_source.SourceId, $"Enriching: {candidates.Count} PR(s)", 0, candidates.Count));
 
             string? firstError = null;
@@ -350,7 +353,7 @@ public sealed class SyncOrchestrator
             .Select(f => new SnapshotFileChange(f.Path, f.Additions, f.Deletions, f.Status))
             .ToList();
 
-        await _snapshots.InsertIfChangedAsync(
+        var inserted = await _snapshots.InsertIfChangedAsync(
             row.Identity, enrichedAt,
             bundle.Detail.HeadSha, bundle.Detail.BaseSha, bundle.Detail.MergeBaseSha,
             bundle.Detail.OrderedCommitShas, bundle.Detail.ReviewerState, bundle.Detail.Status,
@@ -358,6 +361,20 @@ public sealed class SyncOrchestrator
             mergeableState: bundle.Detail.MergeableState,
             ciStatus: bundle.Detail.CiStatus,
             files: files);
+
+        if (!inserted)
+        {
+            // Canonical state unchanged → dedup blocked the insert, but dossier
+            // metadata (CI, mergeable, files) may have moved. Refresh the
+            // latest snapshot's dossier columns in place so the brief sees the
+            // freshest data without spamming the append-only history.
+            await _snapshots.UpdateLatestDossierAsync(
+                row.Identity,
+                mergeableState: bundle.Detail.MergeableState,
+                ciStatus: bundle.Detail.CiStatus,
+                files: files,
+                ct);
+        }
 
         await _threads.UpsertManyAsync(row.Identity, bundle.Threads, enrichedAt, ct);
         await _pullRequests.MarkEnrichedAsync(row.Identity.Url, ct);
@@ -368,6 +385,13 @@ public sealed class SyncOrchestrator
         {
             await _pullRequests.UpdateBodyAsync(row.Identity.Url, bundle.Detail.Body, ct);
         }
+
+        // Stamp the dossier-schema version this enrich satisfied so the
+        // backfill SELECT stops re-electing this PR.
+        await _pullRequests.UpdateDossierVersionAsync(
+            row.Identity.Url,
+            PrInbox.Core.Reviewing.BriefService.CurrentDossierVersion,
+            ct);
 
         // Propagate the latest platform status to pull_requests.status so
         // PRs that have been merged/closed since the last fast pass don't
