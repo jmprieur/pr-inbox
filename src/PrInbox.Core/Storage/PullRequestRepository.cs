@@ -31,13 +31,15 @@ public sealed class PullRequestRepository
               display_repo, number, title, author_login, url,
               status, tracking_reason, identity_used,
               first_seen_at, last_synced_at, enrich_state,
-              last_briefed_head_sha, last_review_run_head_sha, last_posted_review_head_sha
+              last_briefed_head_sha, last_review_run_head_sha, last_posted_review_head_sha,
+              body
             ) VALUES (
               $prId, $stableId, $sourceId, $sourceKind,
               $displayRepo, $number, $title, $author, $url,
               $status, $tracking, $identityUsed,
               $firstSeen, $lastSynced, $enrichState,
-              $lastBriefed, $lastReviewRun, $lastPosted
+              $lastBriefed, $lastReviewRun, $lastPosted,
+              $body
             )
             ON CONFLICT(stable_identity) DO UPDATE SET
               pr_identity   = excluded.pr_identity,
@@ -51,7 +53,10 @@ public sealed class PullRequestRepository
               status        = excluded.status,
               identity_used = excluded.identity_used,
               last_synced_at= excluded.last_synced_at,
-              enrich_state  = excluded.enrich_state;
+              enrich_state  = excluded.enrich_state,
+              -- Preserve a previously enriched body across subsequent
+              -- fast-pass upserts (which carry body=null).
+              body          = COALESCE(excluded.body, pull_requests.body);
 
             -- Record this (source, identity) binding for the PR. Idempotent:
             -- the first sync that discovered the PR seeded one row in
@@ -81,7 +86,23 @@ public sealed class PullRequestRepository
         cmd.Parameters.AddWithValue("$lastBriefed", (object?)row.LastBriefedHeadSha ?? DBNull.Value);
         cmd.Parameters.AddWithValue("$lastReviewRun", (object?)row.LastReviewRunHeadSha ?? DBNull.Value);
         cmd.Parameters.AddWithValue("$lastPosted", (object?)row.LastPostedReviewHeadSha ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("$body", (object?)row.Body ?? DBNull.Value);
 
+        await cmd.ExecuteNonQueryAsync(ct);
+    }
+
+    /// <summary>
+    /// Update only the <c>body</c> column. Called from the enrich path so the
+    /// brief can render "Author's framing" without re-issuing a full upsert.
+    /// Passing <c>null</c> clears the column.
+    /// </summary>
+    public async Task UpdateBodyAsync(string url, string? body, CancellationToken ct)
+    {
+        await using var conn = await _db.OpenAsync(ct);
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = "UPDATE pull_requests SET body = $b WHERE pr_identity = $id;";
+        cmd.Parameters.AddWithValue("$b", (object?)body ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("$id", url);
         await cmd.ExecuteNonQueryAsync(ct);
     }
 
@@ -402,7 +423,10 @@ public sealed class PullRequestRepository
             LastPostedReviewHeadSha: GetStringOrNull(reader, "last_posted_review_head_sha"),
             IsIgnored: HasColumn(reader, "is_ignored") && reader.GetInt64(reader.GetOrdinal("is_ignored")) != 0,
             DisappearedAt: ParseOptionalTimestamp(reader, "disappeared_at"),
-            LastSweptAt: ParseOptionalTimestamp(reader, "last_swept_at"));
+            LastSweptAt: ParseOptionalTimestamp(reader, "last_swept_at"),
+            Body: HasColumn(reader, "body") && !reader.IsDBNull(reader.GetOrdinal("body"))
+                ? reader.GetString(reader.GetOrdinal("body"))
+                : null);
     }
 
     private static bool HasColumn(SqliteDataReader reader, string name)

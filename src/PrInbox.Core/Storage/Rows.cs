@@ -25,7 +25,8 @@ public sealed record PullRequestRow(
     string? LastPostedReviewHeadSha,
     bool IsIgnored = false,
     DateTimeOffset? DisappearedAt = null,
-    DateTimeOffset? LastSweptAt = null);
+    DateTimeOffset? LastSweptAt = null,
+    string? Body = null);
 
 /// <summary>
 /// Row from <c>pr_snapshots</c>. Append-only.
@@ -40,7 +41,19 @@ public sealed record PrSnapshotRow(
     IReadOnlyList<string> OrderedCommitShas,
     ReviewerState? ReviewerState,
     PullRequestStatus PrState,
-    string? RawMetadataJson);
+    string? RawMetadataJson,
+    string? MergeableState = null,
+    string? CiStatus = null,
+    IReadOnlyList<SnapshotFileChange>? Files = null);
+
+/// <summary>
+/// One changed file persisted in a snapshot's <c>files_json</c> column.
+/// </summary>
+public sealed record SnapshotFileChange(
+    string Path,
+    int Additions,
+    int Deletions,
+    string? Status);
 
 /// <summary>
 /// Row from <c>observed_threads</c>. <c>first_seen_at</c> is preserved across
@@ -58,7 +71,10 @@ public sealed record ObservedThreadRow(
     DateTimeOffset FirstSeenAt,
     DateTimeOffset LastSeenAt,
     DateTimeOffset? ResolvedAt,
-    string? RawJson);
+    string? RawJson,
+    string? LastCommentBody = null,
+    string? AnchorPath = null,
+    int? AnchorLine = null);
 
 /// <summary>
 /// Row from <c>review_runs</c>. Immutable once created.

@@ -40,20 +40,25 @@ public sealed class ObservedThreadRepository
                     INSERT INTO observed_threads (
                       pr_identity, platform_thread_id, kind, author_login,
                       is_bot, bot_kind,
-                      first_seen_at, last_seen_at, resolved_at, raw_json
+                      first_seen_at, last_seen_at, resolved_at, raw_json,
+                      last_comment_body, anchor_path, anchor_line
                     ) VALUES (
                       $prId, $threadId, $kind, $author,
                       $isBot, $botKind,
-                      $syncedAt, $syncedAt, $resolvedAt, $rawJson
+                      $syncedAt, $syncedAt, $resolvedAt, $rawJson,
+                      $body, $path, $line
                     )
                     ON CONFLICT(pr_identity, platform_thread_id) DO UPDATE SET
-                      kind          = excluded.kind,
-                      author_login  = excluded.author_login,
-                      is_bot        = excluded.is_bot,
-                      bot_kind      = excluded.bot_kind,
-                      last_seen_at  = excluded.last_seen_at,
-                      resolved_at   = COALESCE(observed_threads.resolved_at, excluded.resolved_at),
-                      raw_json      = excluded.raw_json;
+                      kind              = excluded.kind,
+                      author_login      = excluded.author_login,
+                      is_bot            = excluded.is_bot,
+                      bot_kind          = excluded.bot_kind,
+                      last_seen_at      = excluded.last_seen_at,
+                      resolved_at       = COALESCE(observed_threads.resolved_at, excluded.resolved_at),
+                      raw_json          = excluded.raw_json,
+                      last_comment_body = COALESCE(excluded.last_comment_body, observed_threads.last_comment_body),
+                      anchor_path       = COALESCE(excluded.anchor_path, observed_threads.anchor_path),
+                      anchor_line       = COALESCE(excluded.anchor_line, observed_threads.anchor_line);
                     """;
                 cmd.Parameters.AddWithValue("$prId", identity.Url);
                 cmd.Parameters.AddWithValue("$threadId", thread.PlatformThreadId);
@@ -68,6 +73,10 @@ public sealed class ObservedThreadRepository
                         ? (object)PullRequestRepository.FormatTimestamp(syncedAt)
                         : DBNull.Value);
                 cmd.Parameters.AddWithValue("$rawJson", (object?)thread.RawJson ?? DBNull.Value);
+                cmd.Parameters.AddWithValue("$body", (object?)thread.BodyExcerpt ?? DBNull.Value);
+                cmd.Parameters.AddWithValue("$path", (object?)thread.AnchorPath ?? DBNull.Value);
+                cmd.Parameters.AddWithValue("$line",
+                    thread.AnchorLine.HasValue ? (object)thread.AnchorLine.Value : DBNull.Value);
                 await cmd.ExecuteNonQueryAsync(ct);
             }
 
@@ -151,6 +160,35 @@ public sealed class ObservedThreadRepository
                 : DateTimeOffset.Parse(reader.GetString(reader.GetOrdinal("resolved_at"))),
             RawJson: reader.IsDBNull(reader.GetOrdinal("raw_json"))
                 ? null
-                : reader.GetString(reader.GetOrdinal("raw_json")));
+                : reader.GetString(reader.GetOrdinal("raw_json")),
+            LastCommentBody: ReadOptionalString(reader, "last_comment_body"),
+            AnchorPath: ReadOptionalString(reader, "anchor_path"),
+            AnchorLine: ReadOptionalInt(reader, "anchor_line"));
+    }
+
+    private static bool HasColumn(SqliteDataReader reader, string name)
+    {
+        for (var i = 0; i < reader.FieldCount; i++)
+        {
+            if (string.Equals(reader.GetName(i), name, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static string? ReadOptionalString(SqliteDataReader reader, string column)
+    {
+        if (!HasColumn(reader, column)) return null;
+        var ord = reader.GetOrdinal(column);
+        return reader.IsDBNull(ord) ? null : reader.GetString(ord);
+    }
+
+    private static int? ReadOptionalInt(SqliteDataReader reader, string column)
+    {
+        if (!HasColumn(reader, column)) return null;
+        var ord = reader.GetOrdinal(column);
+        return reader.IsDBNull(ord) ? null : (int)reader.GetInt64(ord);
     }
 }

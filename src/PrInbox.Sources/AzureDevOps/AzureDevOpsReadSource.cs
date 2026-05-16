@@ -189,6 +189,10 @@ public sealed class AzureDevOpsReadSource : IPrReadSource
 
         var reviewerState = InterpretReviewerState(pr.Reviewers, _cachedReviewerId);
 
+        // ADO mergeStatus values: succeeded, conflicts, queued, rejectedByPolicy,
+        // failure, notSet. Map to a lowercase short string for the brief.
+        var mergeable = string.IsNullOrEmpty(pr.MergeStatus) ? null : pr.MergeStatus.ToLowerInvariant();
+
         return new RemotePullRequestDetail(
             Identity: id,
             HeadSha: headSha,
@@ -201,6 +205,7 @@ public sealed class AzureDevOpsReadSource : IPrReadSource
             {
                 pr.PullRequestId,
                 pr.Status,
+                pr.MergeStatus,
                 pr.IsDraft,
                 pr.SourceRefName,
                 pr.TargetRefName,
@@ -208,7 +213,17 @@ public sealed class AzureDevOpsReadSource : IPrReadSource
                 @base = baseSha,
                 mergeBase,
                 repo = new { id = pr.Repository?.Id, name = pr.Repository?.Name, project = pr.Repository?.Project?.Name },
-            }));
+            }),
+            Body: pr.Description,
+            // ADO file-change listing requires a separate /iterations/changes call
+            // per iteration — heavier than GitHub's single endpoint. Deferred for
+            // v0.2; the brief renders "_File list unavailable for this source._"
+            // when Files is null.
+            Files: null,
+            MergeableState: mergeable,
+            // ADO has no single combined CI status; policy evaluations + build
+            // results are separate calls. Deferred for v0.2.
+            CiStatus: null);
     }
 
     private IReadOnlyList<RemoteThread> MapThreads(IReadOnlyList<AdoDtos.Thread> threads)
@@ -234,6 +249,10 @@ public sealed class AzureDevOpsReadSource : IPrReadSource
                           || string.Equals(t.Status, "wontFix", StringComparison.OrdinalIgnoreCase)
                           || string.Equals(t.Status, "byDesign", StringComparison.OrdinalIgnoreCase);
 
+            var anchorLine = t.ThreadContext?.RightFileStart?.Line > 0
+                ? t.ThreadContext.RightFileStart.Line
+                : (t.ThreadContext?.LeftFileStart?.Line > 0 ? t.ThreadContext.LeftFileStart.Line : (int?)null);
+
             result.Add(new RemoteThread(
                 PlatformThreadId: $"ado-thread:{t.Id}",
                 Kind: ThreadKind.AdoThread,
@@ -249,9 +268,20 @@ public sealed class AzureDevOpsReadSource : IPrReadSource
                     status = t.Status,
                     filePath = t.ThreadContext?.FilePath,
                     commentCount = t.Comments.Count,
-                })));
+                }),
+                BodyExcerpt: TruncateExcerpt(first.Content),
+                AnchorPath: t.ThreadContext?.FilePath,
+                AnchorLine: anchorLine));
         }
         return result;
+    }
+
+    /// <summary>Single-line excerpt of a comment body capped at 240 chars.</summary>
+    private static string? TruncateExcerpt(string? body)
+    {
+        if (string.IsNullOrWhiteSpace(body)) return null;
+        var collapsed = System.Text.RegularExpressions.Regex.Replace(body, @"\s+", " ").Trim();
+        return collapsed.Length <= 240 ? collapsed : collapsed[..240] + "…";
     }
 
     private (bool IsBot, BotKind? BotKind) ClassifyAuthor(AdoDtos.Identity? author)

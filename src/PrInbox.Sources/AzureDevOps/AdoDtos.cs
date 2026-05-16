@@ -33,7 +33,9 @@ internal static class AdoDtos
     {
         [JsonPropertyName("pullRequestId")] public int PullRequestId { get; init; }
         [JsonPropertyName("title")] public string? Title { get; init; }
+        [JsonPropertyName("description")] public string? Description { get; init; }
         [JsonPropertyName("status")] public string? Status { get; init; }
+        [JsonPropertyName("mergeStatus")] public string? MergeStatus { get; init; }
         [JsonPropertyName("creationDate")] public DateTimeOffset CreationDate { get; init; }
         [JsonPropertyName("lastMergeSourceCommit")] public Commit? LastMergeSourceCommit { get; init; }
         [JsonPropertyName("lastMergeTargetCommit")] public Commit? LastMergeTargetCommit { get; init; }
@@ -110,6 +112,14 @@ internal static class AdoDtos
     public sealed class ThreadContext
     {
         [JsonPropertyName("filePath")] public string? FilePath { get; init; }
+        [JsonPropertyName("rightFileStart")] public FilePosition? RightFileStart { get; init; }
+        [JsonPropertyName("leftFileStart")] public FilePosition? LeftFileStart { get; init; }
+    }
+
+    public sealed class FilePosition
+    {
+        [JsonPropertyName("line")] public int Line { get; init; }
+        [JsonPropertyName("offset")] public int Offset { get; init; }
     }
 
     public sealed class Comment

@@ -18,6 +18,15 @@ public sealed class PrSnapshotRepository
     /// in any tracked field. Otherwise this is a no-op (the caller still bumps
     /// <c>last_synced_at</c> on <c>pull_requests</c>).
     /// </summary>
+    /// <remarks>
+    /// New post-v0.2 dossier fields (<paramref name="mergeableState"/>,
+    /// <paramref name="ciStatus"/>, <paramref name="files"/>) are persisted but
+    /// intentionally <i>not</i> included in the dedup comparison: CI status
+    /// flips frequently (rerun on push, scheduled re-evaluation) and would
+    /// otherwise spam the append-only history with near-duplicate snapshots.
+    /// We snapshot when the canonical state (head/base/commits/reviewer state)
+    /// changes; the latest dossier fields ride along with that snapshot.
+    /// </remarks>
     /// <returns><c>true</c> if a snapshot was inserted, <c>false</c> if deduped.</returns>
     public async Task<bool> InsertIfChangedAsync(
         PrIdentity identity,
@@ -29,7 +38,10 @@ public sealed class PrSnapshotRepository
         ReviewerState? reviewerState,
         PullRequestStatus prState,
         string? rawMetadataJson,
-        CancellationToken ct)
+        CancellationToken ct,
+        string? mergeableState = null,
+        string? ciStatus = null,
+        IReadOnlyList<SnapshotFileChange>? files = null)
     {
         await using var conn = await _db.OpenAsync(ct);
 
@@ -49,10 +61,12 @@ public sealed class PrSnapshotRepository
         cmd.CommandText = """
             INSERT INTO pr_snapshots (
               pr_identity, synced_at, head_sha, base_sha, merge_base_sha,
-              ordered_commit_shas, reviewer_state, pr_state, raw_metadata_json
+              ordered_commit_shas, reviewer_state, pr_state, raw_metadata_json,
+              mergeable_state, ci_status, files_json
             ) VALUES (
               $prId, $syncedAt, $headSha, $baseSha, $mergeBaseSha,
-              $commitShas, $reviewerState, $prState, $rawJson
+              $commitShas, $reviewerState, $prState, $rawJson,
+              $mergeable, $ci, $files
             );
             """;
         cmd.Parameters.AddWithValue("$prId", identity.Url);
@@ -64,6 +78,12 @@ public sealed class PrSnapshotRepository
         cmd.Parameters.AddWithValue("$reviewerState", (object?)reviewerState?.ToString() ?? DBNull.Value);
         cmd.Parameters.AddWithValue("$prState", prState.ToString().ToLowerInvariant());
         cmd.Parameters.AddWithValue("$rawJson", (object?)rawMetadataJson ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("$mergeable", (object?)mergeableState ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("$ci", (object?)ciStatus ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("$files",
+            files is null || files.Count == 0
+                ? DBNull.Value
+                : (object)JsonSerializer.Serialize(files));
 
         await cmd.ExecuteNonQueryAsync(ct);
         return true;
@@ -115,7 +135,44 @@ public sealed class PrSnapshotRepository
             PrState: Enum.Parse<PullRequestStatus>(reader.GetString(reader.GetOrdinal("pr_state")), ignoreCase: true),
             RawMetadataJson: reader.IsDBNull(reader.GetOrdinal("raw_metadata_json"))
                 ? null
-                : reader.GetString(reader.GetOrdinal("raw_metadata_json")));
+                : reader.GetString(reader.GetOrdinal("raw_metadata_json")),
+            MergeableState: ReadOptionalString(reader, "mergeable_state"),
+            CiStatus: ReadOptionalString(reader, "ci_status"),
+            Files: ReadOptionalFiles(reader, "files_json"));
+    }
+
+    private static bool HasColumn(SqliteDataReader reader, string name)
+    {
+        for (var i = 0; i < reader.FieldCount; i++)
+        {
+            if (string.Equals(reader.GetName(i), name, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static string? ReadOptionalString(SqliteDataReader reader, string column)
+    {
+        if (!HasColumn(reader, column)) return null;
+        var ord = reader.GetOrdinal(column);
+        return reader.IsDBNull(ord) ? null : reader.GetString(ord);
+    }
+
+    private static IReadOnlyList<SnapshotFileChange>? ReadOptionalFiles(SqliteDataReader reader, string column)
+    {
+        var json = ReadOptionalString(reader, column);
+        if (string.IsNullOrWhiteSpace(json)) return null;
+        try
+        {
+            return JsonSerializer.Deserialize<List<SnapshotFileChange>>(json);
+        }
+        catch (JsonException)
+        {
+            // Tolerant of upgrade-time malformed rows; brief just falls back to "files unavailable".
+            return null;
+        }
     }
 
     private static bool CommitShasEqual(IReadOnlyList<string> a, IReadOnlyList<string> b)

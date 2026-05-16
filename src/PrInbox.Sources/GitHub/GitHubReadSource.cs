@@ -128,6 +128,47 @@ public sealed class GitHubReadSource : IPrReadSource
             reviewerState = ReviewerState.Requested;
         }
 
+        // Files — cheap (one paged endpoint) and fundamental to the brief.
+        IReadOnlyList<RemoteFileChange>? files = null;
+        try
+        {
+            var prFiles = await client.PullRequest.Files(owner, repo, number);
+            files = prFiles
+                .Select(f => new RemoteFileChange(
+                    Path: f.FileName,
+                    Additions: f.Additions,
+                    Deletions: f.Deletions,
+                    Status: f.Status))
+                .ToList();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Files endpoint failed for {Url}; brief will show 'files unavailable'.", id.Url);
+        }
+
+        // CI / combined status — best-effort. Some repos use check-runs
+        // exclusively (Status returns Pending for those); brief falls back to
+        // 'unknown' if both calls fail.
+        string? ciStatus = null;
+        try
+        {
+            var combined = await client.Repository.Status.GetCombined(owner, repo, pr.Head.Sha);
+            var stateValue = combined.State.StringValue;
+            if (!string.IsNullOrEmpty(stateValue))
+            {
+                ciStatus = stateValue.ToLowerInvariant();
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Combined status failed for {Url}; CI status will be null.", id.Url);
+        }
+
+        var mergeable = pr.MergeableState?.StringValue?.ToLowerInvariant()
+            ?? (pr.Mergeable == true ? "clean"
+                : pr.Mergeable == false ? "conflicts"
+                : null);
+
         return new RemotePullRequestDetail(
             Identity: id,
             HeadSha: pr.Head.Sha,
@@ -148,7 +189,11 @@ public sealed class GitHubReadSource : IPrReadSource
                 head = new { pr.Head.Sha, pr.Head.Ref },
                 @base = new { pr.Base.Sha, pr.Base.Ref },
                 repo = new { pr.Base.Repository.Id, pr.Base.Repository.FullName },
-            }));
+            }),
+            Body: pr.Body,
+            Files: files,
+            MergeableState: mergeable,
+            CiStatus: ciStatus);
     }
 
     private async Task<IReadOnlyList<RemoteThread>> FetchThreadsAsync(PrIdentity id, CancellationToken ct)
@@ -172,7 +217,14 @@ public sealed class GitHubReadSource : IPrReadSource
                 IsResolved: false, // GraphQL exposes resolution; REST does not. Best-effort.
                 CreatedAt: c.CreatedAt,
                 LastUpdatedAt: c.UpdatedAt,
-                RawJson: $"{{\"id\":{c.Id},\"path\":\"{Escape(c.Path)}\"}}"));
+                RawJson: $"{{\"id\":{c.Id},\"path\":\"{Escape(c.Path)}\"}}",
+                BodyExcerpt: TruncateExcerpt(c.Body),
+                AnchorPath: c.Path,
+                // Octokit 14 surfaces `Position` (line-in-diff, falls back to
+                // OriginalPosition when outdated). Good enough orientation for
+                // the brief; reviewers click through to the GitHub UI for the
+                // actual file line.
+                AnchorLine: c.Position > 0 ? c.Position : (c.OriginalPosition > 0 ? c.OriginalPosition : (int?)null)));
         }
 
         // Top-level issue comments on the PR.
@@ -189,7 +241,10 @@ public sealed class GitHubReadSource : IPrReadSource
                 IsResolved: false,
                 CreatedAt: c.CreatedAt,
                 LastUpdatedAt: c.UpdatedAt ?? c.CreatedAt,
-                RawJson: $"{{\"id\":{c.Id}}}"));
+                RawJson: $"{{\"id\":{c.Id}}}",
+                BodyExcerpt: TruncateExcerpt(c.Body),
+                AnchorPath: null,
+                AnchorLine: null));
         }
 
         // Top-level review bodies.
@@ -207,10 +262,25 @@ public sealed class GitHubReadSource : IPrReadSource
                 IsResolved: false,
                 CreatedAt: r.SubmittedAt,
                 LastUpdatedAt: r.SubmittedAt,
-                RawJson: $"{{\"id\":{r.Id},\"state\":\"{r.State}\"}}"));
+                RawJson: $"{{\"id\":{r.Id},\"state\":\"{r.State}\"}}",
+                BodyExcerpt: TruncateExcerpt(r.Body),
+                AnchorPath: null,
+                AnchorLine: null));
         }
 
         return result;
+    }
+
+    /// <summary>
+    /// Trim a comment body to a single-line excerpt suitable for the brief.
+    /// Strips CR/LF, collapses runs of whitespace, and caps at 240 chars
+    /// (with a trailing ellipsis if truncated).
+    /// </summary>
+    private static string? TruncateExcerpt(string? body)
+    {
+        if (string.IsNullOrWhiteSpace(body)) return null;
+        var collapsed = System.Text.RegularExpressions.Regex.Replace(body, @"\s+", " ").Trim();
+        return collapsed.Length <= 240 ? collapsed : collapsed[..240] + "…";
     }
 
     public async Task<IReadOnlyList<RemoteCommit>> GetCommitsAsync(PrIdentity id, CancellationToken ct)

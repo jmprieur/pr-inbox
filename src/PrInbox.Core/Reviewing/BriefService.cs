@@ -186,7 +186,7 @@ public sealed class BriefService
         await src.CopyToAsync(dst, ct);
     }
 
-    private static string BuildBriefMarkdown(
+    internal static string BuildBriefMarkdown(
         PullRequestRow pr,
         PrSnapshotRow snapshot,
         IReadOnlyList<ObservedThreadRow> openThreads,
@@ -214,7 +214,59 @@ public sealed class BriefService
         sb.AppendLine($"- **URL:** {pr.Url}");
         sb.AppendLine($"- **Stable id:** `{pr.Identity.Stable}` · source `{pr.SourceId}` ({pr.SourceKind})");
         sb.AppendLine($"- **HEAD** `{shortHead}` · **Base** `{shortBase}` · commits: {snapshot.OrderedCommitShas.Count} · reviewer state: {snapshot.ReviewerState?.ToString() ?? "unknown"}");
+        var statusBits = new List<string>();
+        if (!string.IsNullOrEmpty(snapshot.CiStatus)) statusBits.Add($"CI: {snapshot.CiStatus}");
+        if (!string.IsNullOrEmpty(snapshot.MergeableState)) statusBits.Add($"Mergeable: {snapshot.MergeableState}");
+        if (snapshot.Files is { Count: > 0 })
+        {
+            var adds = snapshot.Files.Sum(f => f.Additions);
+            var dels = snapshot.Files.Sum(f => f.Deletions);
+            statusBits.Add($"Size: +{adds} / −{dels} across {snapshot.Files.Count} file(s)");
+        }
+        if (statusBits.Count > 0)
+        {
+            sb.AppendLine($"- {string.Join(" · ", statusBits.Select(s => $"**{s}**"))}");
+        }
         sb.AppendLine($"- **Last briefed:** `{ShortShaOrNever(pr.LastBriefedHeadSha)}` · **last review-run:** `{ShortShaOrNever(pr.LastReviewRunHeadSha)}` · **last posted:** `{ShortShaOrNever(pr.LastPostedReviewHeadSha)}`");
+        sb.AppendLine();
+
+        if (!string.IsNullOrWhiteSpace(pr.Body))
+        {
+            sb.AppendLine("## Author's framing");
+            sb.AppendLine();
+            var body = pr.Body!;
+            const int cap = 4096;
+            var truncated = body.Length > cap ? body[..cap] + "\n…" : body;
+            foreach (var line in truncated.Split('\n'))
+            {
+                sb.AppendLine($"> {line.TrimEnd('\r')}");
+            }
+            sb.AppendLine();
+        }
+
+        sb.AppendLine("## Files");
+        sb.AppendLine();
+        if (snapshot.Files is null)
+        {
+            sb.AppendLine("_File list unavailable for this source._");
+        }
+        else if (snapshot.Files.Count == 0)
+        {
+            sb.AppendLine("_No files changed._");
+        }
+        else
+        {
+            sb.AppendLine("| File | + | − |");
+            sb.AppendLine("|---|---:|---:|");
+            foreach (var f in snapshot.Files.OrderByDescending(f => f.Additions + f.Deletions).Take(50))
+            {
+                sb.AppendLine($"| `{f.Path}` | {f.Additions} | {f.Deletions} |");
+            }
+            if (snapshot.Files.Count > 50)
+            {
+                sb.AppendLine($"| _… {snapshot.Files.Count - 50} more file(s) hidden_ |  |  |");
+            }
+        }
         sb.AppendLine();
 
         sb.AppendLine("## What changed since last brief");
@@ -253,7 +305,11 @@ public sealed class BriefService
         {
             foreach (var t in openThreads)
             {
-                sb.AppendLine($"- `{t.AuthorLogin ?? "(unknown)"}` · {t.Kind} · first seen {t.FirstSeenAt:yyyy-MM-dd}, last seen {t.LastSeenAt:yyyy-MM-dd}");
+                sb.AppendLine(FormatThreadBullet(t));
+                if (!string.IsNullOrWhiteSpace(t.LastCommentBody))
+                {
+                    sb.AppendLine($"  > {t.LastCommentBody}");
+                }
             }
         }
         sb.AppendLine();
@@ -268,7 +324,14 @@ public sealed class BriefService
         {
             foreach (var t in recentBotThreads)
             {
-                sb.AppendLine($"- **{t.BotKind?.ToString() ?? "Other"}** · `{t.AuthorLogin ?? "(unknown)"}` · {t.Kind} · {t.FirstSeenAt:yyyy-MM-dd HH:mm}");
+                sb.Append($"- **{t.BotKind?.ToString() ?? "Other"}** · `{t.AuthorLogin ?? "(unknown)"}` · {t.Kind} · {t.FirstSeenAt:yyyy-MM-dd HH:mm}");
+                var anchor = FormatAnchor(t);
+                if (anchor is not null) sb.Append($" · {anchor}");
+                sb.AppendLine();
+                if (!string.IsNullOrWhiteSpace(t.LastCommentBody))
+                {
+                    sb.AppendLine($"  > {t.LastCommentBody}");
+                }
             }
         }
         sb.AppendLine();
@@ -302,6 +365,23 @@ public sealed class BriefService
 
     private static string ShortShaOrNever(string? sha) =>
         sha is null ? "never" : ShortSha(sha);
+
+    private static string FormatThreadBullet(ObservedThreadRow t)
+    {
+        var sb = new StringBuilder();
+        sb.Append($"- `{t.AuthorLogin ?? "(unknown)"}` · {t.Kind} · first seen {t.FirstSeenAt:yyyy-MM-dd}, last seen {t.LastSeenAt:yyyy-MM-dd}");
+        var anchor = FormatAnchor(t);
+        if (anchor is not null) sb.Append($" · {anchor}");
+        return sb.ToString();
+    }
+
+    private static string? FormatAnchor(ObservedThreadRow t)
+    {
+        if (string.IsNullOrEmpty(t.AnchorPath)) return null;
+        return t.AnchorLine.HasValue
+            ? $"@ `{t.AnchorPath}:{t.AnchorLine}`"
+            : $"@ `{t.AnchorPath}`";
+    }
 
     /// <summary>
     /// Detects bot-generated PRs from title heuristics or author login.

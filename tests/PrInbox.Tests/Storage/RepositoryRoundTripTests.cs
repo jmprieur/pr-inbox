@@ -435,5 +435,167 @@ public class RepositoryRoundTripTests : IAsyncLifetime
         candidates.Should().ContainSingle();
         candidates[0].Identity.Url.Should().Be("https://github.com/o/r/pull/1");
     }
+
+    // -----------------------------------------------------------------
+    // Brief dossier round-trip (post-v0.2 fields: body, files,
+    // mergeable_state, ci_status, thread anchor/body).
+    // -----------------------------------------------------------------
+
+    [Fact]
+    public async Task PullRequest_Body_RoundTrips_And_Preserved_Across_FastPass_Upsert()
+    {
+        var repo = new PullRequestRepository(_db);
+        var withBody = SampleRow() with { Body = "## Summary\nFix the thing." };
+        await repo.UpsertAsync(withBody, CancellationToken.None);
+
+        // Fast-pass upsert (no body) should not wipe the enriched body.
+        var withoutBody = SampleRow() with { Body = null, LastSyncedAt = DateTimeOffset.UtcNow };
+        await repo.UpsertAsync(withoutBody, CancellationToken.None);
+
+        var fetched = await repo.GetAsync(withBody.Identity.Url, CancellationToken.None);
+        fetched!.Body.Should().Be("## Summary\nFix the thing.");
+    }
+
+    [Fact]
+    public async Task PullRequest_UpdateBodyAsync_Sets_Body()
+    {
+        var repo = new PullRequestRepository(_db);
+        var row = SampleRow();
+        await repo.UpsertAsync(row, CancellationToken.None);
+
+        await repo.UpdateBodyAsync(row.Identity.Url, "Updated body text.", CancellationToken.None);
+
+        var fetched = await repo.GetAsync(row.Identity.Url, CancellationToken.None);
+        fetched!.Body.Should().Be("Updated body text.");
+    }
+
+    [Fact]
+    public async Task PrSnapshot_RoundTrips_Mergeable_Ci_Files()
+    {
+        var prRepo = new PullRequestRepository(_db);
+        var snapRepo = new PrSnapshotRepository(_db);
+        var row = SampleRow();
+        await prRepo.UpsertAsync(row, CancellationToken.None);
+
+        var files = new[]
+        {
+            new SnapshotFileChange("src/Foo.cs", 30, 5, "modified"),
+            new SnapshotFileChange("README.md", 2, 0, "modified"),
+        };
+
+        var inserted = await snapRepo.InsertIfChangedAsync(
+            row.Identity, DateTimeOffset.UtcNow,
+            headSha: "abc", baseSha: "base", mergeBaseSha: null,
+            orderedCommitShas: new[] { "abc" },
+            reviewerState: ReviewerState.Requested,
+            prState: PullRequestStatus.Open,
+            rawMetadataJson: null,
+            CancellationToken.None,
+            mergeableState: "clean",
+            ciStatus: "success",
+            files: files);
+
+        inserted.Should().BeTrue();
+        var latest = await snapRepo.GetLatestAsync(row.Identity, CancellationToken.None);
+        latest!.MergeableState.Should().Be("clean");
+        latest.CiStatus.Should().Be("success");
+        latest.Files.Should().NotBeNull();
+        latest.Files!.Should().HaveCount(2);
+        latest.Files![0].Path.Should().Be("src/Foo.cs");
+        latest.Files![0].Additions.Should().Be(30);
+        latest.Files![0].Deletions.Should().Be(5);
+    }
+
+    [Fact]
+    public async Task PrSnapshot_CiOnly_Change_Does_Not_Insert_New_Snapshot()
+    {
+        var prRepo = new PullRequestRepository(_db);
+        var snapRepo = new PrSnapshotRepository(_db);
+        var row = SampleRow();
+        await prRepo.UpsertAsync(row, CancellationToken.None);
+
+        await snapRepo.InsertIfChangedAsync(
+            row.Identity, DateTimeOffset.UtcNow,
+            "abc", "base", null, new[] { "abc" },
+            ReviewerState.Requested, PullRequestStatus.Open, null,
+            CancellationToken.None, ciStatus: "pending");
+
+        // Same canonical state; only CI changed pending → success.
+        var inserted = await snapRepo.InsertIfChangedAsync(
+            row.Identity, DateTimeOffset.UtcNow.AddMinutes(1),
+            "abc", "base", null, new[] { "abc" },
+            ReviewerState.Requested, PullRequestStatus.Open, null,
+            CancellationToken.None, ciStatus: "success");
+
+        inserted.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task ObservedThread_RoundTrips_Anchor_And_Body()
+    {
+        var prRepo = new PullRequestRepository(_db);
+        var threadRepo = new ObservedThreadRepository(_db);
+        var row = SampleRow();
+        await prRepo.UpsertAsync(row, CancellationToken.None);
+
+        var t1 = DateTimeOffset.Parse("2026-05-13T10:00:00Z");
+        var thread = new RemoteThread(
+            PlatformThreadId: "thread-anchor-1",
+            Kind: ThreadKind.ReviewComment,
+            AuthorLogin: "Copilot",
+            IsBot: true,
+            BotKind: BotKind.CopilotReview,
+            IsResolved: false,
+            CreatedAt: t1,
+            LastUpdatedAt: t1,
+            RawJson: "{}",
+            BodyExcerpt: "NuGet does NOT auto-update; …",
+            AnchorPath: "src/Foo.cs",
+            AnchorLine: 214);
+
+        await threadRepo.UpsertManyAsync(row.Identity, new[] { thread }, syncedAt: t1, CancellationToken.None);
+
+        var open = await threadRepo.GetOpenThreadsAsync(row.Identity, CancellationToken.None);
+        open.Should().ContainSingle();
+        open[0].LastCommentBody.Should().Be("NuGet does NOT auto-update; …");
+        open[0].AnchorPath.Should().Be("src/Foo.cs");
+        open[0].AnchorLine.Should().Be(214);
+    }
+
+    [Fact]
+    public async Task ObservedThread_Body_Preserved_When_Subsequent_Upsert_Has_Null()
+    {
+        var prRepo = new PullRequestRepository(_db);
+        var threadRepo = new ObservedThreadRepository(_db);
+        var row = SampleRow();
+        await prRepo.UpsertAsync(row, CancellationToken.None);
+
+        var t1 = DateTimeOffset.Parse("2026-05-13T10:00:00Z");
+        var t2 = DateTimeOffset.Parse("2026-05-14T10:00:00Z");
+
+        var withBody = new RemoteThread(
+            PlatformThreadId: "thread-body-1",
+            Kind: ThreadKind.ReviewComment,
+            AuthorLogin: "Copilot",
+            IsBot: true,
+            BotKind: BotKind.CopilotReview,
+            IsResolved: false,
+            CreatedAt: t1,
+            LastUpdatedAt: t1,
+            RawJson: "{}",
+            BodyExcerpt: "Original body",
+            AnchorPath: "src/Foo.cs",
+            AnchorLine: 10);
+
+        var withoutBody = withBody with { BodyExcerpt = null, AnchorPath = null, AnchorLine = null, LastUpdatedAt = t2 };
+
+        await threadRepo.UpsertManyAsync(row.Identity, new[] { withBody }, syncedAt: t1, CancellationToken.None);
+        await threadRepo.UpsertManyAsync(row.Identity, new[] { withoutBody }, syncedAt: t2, CancellationToken.None);
+
+        var open = await threadRepo.GetOpenThreadsAsync(row.Identity, CancellationToken.None);
+        open[0].LastCommentBody.Should().Be("Original body");
+        open[0].AnchorPath.Should().Be("src/Foo.cs");
+        open[0].AnchorLine.Should().Be(10);
+    }
 }
 

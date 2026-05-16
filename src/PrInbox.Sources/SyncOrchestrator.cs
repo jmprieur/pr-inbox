@@ -346,14 +346,28 @@ public sealed class SyncOrchestrator
         var enrichedAt = DateTimeOffset.UtcNow;
         var bundle = await _source.EnrichAsync(row.Identity, ct);
 
+        var files = bundle.Detail.Files?
+            .Select(f => new SnapshotFileChange(f.Path, f.Additions, f.Deletions, f.Status))
+            .ToList();
+
         await _snapshots.InsertIfChangedAsync(
             row.Identity, enrichedAt,
             bundle.Detail.HeadSha, bundle.Detail.BaseSha, bundle.Detail.MergeBaseSha,
             bundle.Detail.OrderedCommitShas, bundle.Detail.ReviewerState, bundle.Detail.Status,
-            bundle.Detail.RawMetadataJson, ct);
+            bundle.Detail.RawMetadataJson, ct,
+            mergeableState: bundle.Detail.MergeableState,
+            ciStatus: bundle.Detail.CiStatus,
+            files: files);
 
         await _threads.UpsertManyAsync(row.Identity, bundle.Threads, enrichedAt, ct);
         await _pullRequests.MarkEnrichedAsync(row.Identity.Url, ct);
+
+        // Persist PR body separately. The fast-pass UpsertAsync runs without
+        // a body; the enrich pass is the only place we have one to write.
+        if (!string.IsNullOrEmpty(bundle.Detail.Body))
+        {
+            await _pullRequests.UpdateBodyAsync(row.Identity.Url, bundle.Detail.Body, ct);
+        }
 
         // Propagate the latest platform status to pull_requests.status so
         // PRs that have been merged/closed since the last fast pass don't

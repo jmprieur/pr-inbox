@@ -28,7 +28,22 @@ public sealed record RemotePullRequestDetail(
     IReadOnlyList<string> OrderedCommitShas,
     ReviewerState? ReviewerState,
     PullRequestStatus Status,
-    string RawMetadataJson);
+    string RawMetadataJson,
+    string? Body = null,
+    IReadOnlyList<RemoteFileChange>? Files = null,
+    string? MergeableState = null,
+    string? CiStatus = null);
+
+/// <summary>
+/// One file changed in a PR. Populated when the source adapter supports a
+/// cheap files endpoint (GitHub does via <c>pulls/{n}/files</c>); may be
+/// <c>null</c> on adapters that don't (ADO defers it).
+/// </summary>
+public sealed record RemoteFileChange(
+    string Path,
+    int Additions,
+    int Deletions,
+    string? Status);
 
 /// <summary>
 /// Bundled result of a single tier-3 enrichment call for one PR: per-PR
@@ -52,7 +67,10 @@ public sealed record RemoteThread(
     bool IsResolved,
     DateTimeOffset CreatedAt,
     DateTimeOffset LastUpdatedAt,
-    string RawJson);
+    string RawJson,
+    string? BodyExcerpt = null,
+    string? AnchorPath = null,
+    int? AnchorLine = null);
 
 /// <summary>
 /// A commit on a PR's head branch.
