@@ -104,6 +104,22 @@ Write-Host (' Findings: ' + $findingsPath) -ForegroundColor DarkGray
 Write-Host '------------------------------------------------------------' -ForegroundColor DarkGray
 Write-Host ''
 
+# Clear session-tagging env vars inherited from the parent copilot/agency
+# process tree (pr-inbox-web → wt → pwsh → agency copilot). Without this,
+# the new agency copilot invocation auto-resumes the parent's session and
+# errors with `--name cannot be used with --resume` (they're mutually
+# exclusive). Each entry below was confirmed present in the leaked env;
+# add more here if a future agency build introduces additional ones.
+$inherited = @(
+    'AGENCY_SESSION_ID', 'COPILOT_AGENT_SESSION_ID',
+    'AGENCY_OPERATION_ID', 'AGENCY_LOG_SESSION_DIR', 'AGENCY_PLUGIN_DIR',
+    'COPILOT_CUSTOM_INSTRUCTIONS_DIRS', 'COPILOT_LOADER_PID',
+    'COPILOT_RUN_APP', 'COPILOT_CLI'
+)
+foreach ($name in $inherited) {
+    Remove-Item -Path "env:$name" -ErrorAction SilentlyContinue
+}
+
 # Build the agency invocation. Pass-through args (anything agency doesn't
 # recognize as its own option) are forwarded to the underlying engine CLI
 # (copilot), so `--name <session>` lands as a copilot flag — that's what
