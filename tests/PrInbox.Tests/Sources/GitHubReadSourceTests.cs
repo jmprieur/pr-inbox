@@ -121,4 +121,21 @@ public class GitHubReadSourceParseTests
         var act = () => GitHubReadSource.ParseUrl("https://dev.azure.com/mseng/Context/_git/Private/pullrequest/1234");
         act.Should().Throw<FormatException>();
     }
+
+    /// <summary>
+    /// Regression test for the "PR I commented on disappeared from my inbox"
+    /// bug. GitHub removes a reviewer from <c>requested_reviewers</c> the
+    /// moment they submit any review, so a single <c>review-requested:@me</c>
+    /// query was losing PRs the user was actively engaged with. The inbox
+    /// must union <c>review-requested:@me</c> with <c>reviewed-by:@me</c>.
+    /// </summary>
+    [Fact]
+    public void InboxQueries_Cover_Both_Pending_And_Engaged_Reviews()
+    {
+        GitHubReadSource.InboxQueries.Should().BeEquivalentTo(new[]
+        {
+            "is:pr is:open review-requested:@me",
+            "is:pr is:open reviewed-by:@me",
+        });
+    }
 }

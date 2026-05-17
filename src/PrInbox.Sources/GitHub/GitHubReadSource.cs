@@ -51,10 +51,59 @@ public sealed class GitHubReadSource : IPrReadSource
         SupportsStableRepoIds: true,
         SupportsForcePushDetection: true);
 
+    /// <summary>
+    /// The two GitHub search qualifiers we union to build the inbox. They
+    /// must be issued as separate queries because the Issues Search API
+    /// does not accept boolean OR between user qualifiers
+    /// (<c>review-requested:</c> and <c>reviewed-by:</c>).
+    /// </summary>
+    /// <remarks>
+    /// <list type="bullet">
+    ///   <item><c>review-requested:@me</c> — PR is currently pending your
+    ///     review (you appear in the requested-reviewers list).</item>
+    ///   <item><c>reviewed-by:@me</c> — you have already submitted at least
+    ///     one review (any kind: comment / approve / request changes).
+    ///     GitHub removes you from the requested-reviewers list the moment
+    ///     you submit a review, so without this second query the PR would
+    ///     drop out of the inbox right when it needs the most follow-up.
+    ///   </item>
+    /// </list>
+    /// Both are scoped to <c>is:pr is:open</c>; merged/closed PRs fall out
+    /// naturally.
+    /// </remarks>
+    internal static readonly string[] InboxQueries = new[]
+    {
+        "is:pr is:open review-requested:@me",
+        "is:pr is:open reviewed-by:@me",
+    };
+
     public async IAsyncEnumerable<RemotePullRequest> ListAssignedFastAsync(
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
     {
         var client = await CreateClientAsync(ct);
+        // Dedupe across the two queries: a PR you've been re-requested on
+        // after reviewing it appears in both result sets. URL is the canonical
+        // identity at this point in the pipeline.
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var query in InboxQueries)
+        {
+            ct.ThrowIfCancellationRequested();
+            await foreach (var pr in SearchPrsPagedAsync(client, query, ct))
+            {
+                if (seen.Add(pr.Url))
+                {
+                    yield return pr;
+                }
+            }
+        }
+    }
+
+    private async IAsyncEnumerable<RemotePullRequest> SearchPrsPagedAsync(
+        IGitHubClient client,
+        string query,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
+    {
         var page = 1;
         const int perPage = 50;
         var emitted = 0;
@@ -62,7 +111,7 @@ public sealed class GitHubReadSource : IPrReadSource
         while (true)
         {
             ct.ThrowIfCancellationRequested();
-            var req = new SearchIssuesRequest("is:pr is:open review-requested:@me")
+            var req = new SearchIssuesRequest(query)
             {
                 PerPage = perPage,
                 Page = page,
@@ -74,7 +123,7 @@ public sealed class GitHubReadSource : IPrReadSource
             }
             catch (RateLimitExceededException ex)
             {
-                _logger.LogWarning(ex, "GitHub search rate limited at page {Page}.", page);
+                _logger.LogWarning(ex, "GitHub search rate limited at page {Page} for {Query}.", page, query);
                 throw;
             }
 
@@ -91,7 +140,7 @@ public sealed class GitHubReadSource : IPrReadSource
             page++;
             if (page > 20)
             {
-                _logger.LogWarning("Hit safety cap of 20 pages while paging review inbox.");
+                _logger.LogWarning("Hit safety cap of 20 pages while paging {Query}.", query);
                 yield break;
             }
         }
