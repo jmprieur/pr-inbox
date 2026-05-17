@@ -31,14 +31,22 @@
 .PARAMETER Mcps
     Comma-separated list of MCP servers to enable. Defaults to
     'workiq,teams'. Each entry becomes one --mcp flag.
+
+.PARAMETER SessionName
+    Optional human-readable name for the underlying copilot session.
+    Passed through to `agency copilot ... -- --name "<value>"`. Lets
+    the user pick this review back out of the `--resume` picker by
+    name, and prevents multiple reviews of different PRs from
+    colliding onto a single resumable session.
 #>
 
 param(
     [Parameter(Mandatory = $true)] [string] $RunDirectory,
-    [string] $Agent  = $env:PRINBOX_REVIEW_AGENT,
-    [string] $Plugin = $env:PRINBOX_REVIEW_PLUGIN,
-    [string] $Model  = $env:PRINBOX_REVIEW_MODEL,
-    [string] $Mcps   = $env:PRINBOX_REVIEW_MCPS
+    [string] $Agent       = $env:PRINBOX_REVIEW_AGENT,
+    [string] $Plugin      = $env:PRINBOX_REVIEW_PLUGIN,
+    [string] $Model       = $env:PRINBOX_REVIEW_MODEL,
+    [string] $Mcps        = $env:PRINBOX_REVIEW_MCPS,
+    [string] $SessionName = ''
 )
 
 if (-not $Agent)  { $Agent  = 'security-toolkit:dual-model-review' }
@@ -88,11 +96,24 @@ Write-Host (' Agent:    ' + $Agent)  -ForegroundColor DarkGray
 Write-Host (' Plugin:   ' + $Plugin) -ForegroundColor DarkGray
 Write-Host (' Model:    ' + $Model)  -ForegroundColor DarkGray
 Write-Host (' MCPs:     ' + $Mcps)   -ForegroundColor DarkGray
+if ($SessionName) {
+    Write-Host (' Session:  ' + $SessionName) -ForegroundColor DarkGray
+}
 Write-Host (' Findings: ' + $findingsPath) -ForegroundColor DarkGray
 Write-Host '------------------------------------------------------------' -ForegroundColor DarkGray
 Write-Host ''
 
-& agency copilot @mcpArgs `
-    --plugin $Plugin `
-    --model $Model `
-    --agent $Agent
+# Build the agency invocation. Anything after `--` is forwarded by agency
+# to the underlying engine CLI (copilot), so `--name` lands as a copilot
+# flag — that's what tags this session so independent reviews don't
+# collide on the same default name.
+$agencyArgs = @('copilot') + $mcpArgs + @(
+    '--plugin', $Plugin,
+    '--model',  $Model,
+    '--agent',  $Agent
+)
+if ($SessionName) {
+    $agencyArgs += @('--', '--name', $SessionName)
+}
+
+& agency @agencyArgs

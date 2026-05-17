@@ -63,16 +63,21 @@ public sealed class ReviewLauncher : IReviewLauncher, IAsyncDisposable
             return ex.Message;
         }
 
-        // Build a "<repo> #<number>" title for the wt tab so the user can
-        // tell multiple in-flight reviews apart at a glance. Fall back to
-        // a generic title if the row is unexpectedly missing.
+        // Build a "<repo> #<number> @<short-sha>" title for the wt tab and
+        // the underlying agent's session name. Including the short HEAD SHA
+        // lets independent reviews of different PRs (and of the same PR
+        // across force-pushes) own distinct copilot session names — so the
+        // CLI no longer collides multiple briefs onto a single resumable
+        // session. Same-PR-same-HEAD relaunch keeps the same name, which is
+        // a feature (continuing where you left off).
         string tabTitle = "pr-inbox review";
         try
         {
             var row = await prRepo.GetAsync(brief.PrUrl, ct);
             if (row is not null)
             {
-                tabTitle = $"{row.DisplayRepo} #{row.Number}";
+                var shortSha = brief.HeadSha.Length >= 7 ? brief.HeadSha[..7] : brief.HeadSha;
+                tabTitle = $"{row.DisplayRepo} #{row.Number} @{shortSha}";
             }
         }
         catch (Exception ex)
@@ -183,12 +188,19 @@ public sealed class ReviewLauncher : IReviewLauncher, IAsyncDisposable
 
         var rl = _config.ReviewLauncher;
         var mcps = string.Join(",", rl.AdditionalMcps ?? new());
-        // Quote values defensively in case a user puts spaces in them.
+        // Quote values defensively in case a user puts spaces in them. The
+        // tab title is also re-used as the underlying agent's session name
+        // (--name) so each review claims its own copilot session and the
+        // CLI doesn't auto-load a colliding prior one.
+        var safeSessionName = string.IsNullOrWhiteSpace(tabTitle)
+            ? "pr-inbox review"
+            : tabTitle.Replace("\"", "");
         var launcherArgs =
             $"-RunDirectory \"{runDir}\"" +
             $" -Plugin \"{rl.Plugin}\"" +
             $" -Model \"{rl.Model}\"" +
             $" -Agent \"{rl.Agent}\"" +
+            $" -SessionName \"{safeSessionName}\"" +
             (string.IsNullOrEmpty(mcps) ? "" : $" -Mcps \"{mcps}\"");
 
         // Strip embedded quotes from the tab title so wt doesn't mis-parse
