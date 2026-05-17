@@ -33,3 +33,22 @@ the style they land in is the style they were written in.
   with the same 3 lines plus a 4th is noise.
 - Skip the suggestion if the right answer is a question, or if the
   fix needs more context than fits in a single anchor.
+
+## Severity calibration
+
+Anchor levels so reviewers calibrate identically across sessions:
+
+- **critical** — exploitable vulnerability, data loss, or a guaranteed
+  production outage. Reach for this rarely.
+- **high** — a clear bug or regression that will break a real user
+  path. Wrong logic, off-by-one in a hot path, missing null check on
+  user input, a contract violation a caller relies on.
+- **medium** — correctness or maintainability issue that's likely to
+  bite but not guaranteed. Missing test coverage of a tricky branch,
+  a subtle race that hasn't manifested, a confusing API that invites
+  misuse.
+- **low** — naming, dead code, minor refactor, doc polish. Worth
+  saying once, not worth blocking on.
+
+If unsure between two tiers, pick the lower one. Reviewers earn trust
+by not crying wolf.

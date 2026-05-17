@@ -278,9 +278,13 @@ public sealed class GitHubReadSource : IPrReadSource
     /// </summary>
     private static string? TruncateExcerpt(string? body)
     {
+        // 1024 chars (was 240): reviewers need enough text to dedupe their
+        // findings against existing bot comments without an extra round trip
+        // back to the GitHub API. The brief is the primary cost driver, and
+        // a few KB extra per thread is cheaper than a `gh api` call per dedupe.
         if (string.IsNullOrWhiteSpace(body)) return null;
         var collapsed = System.Text.RegularExpressions.Regex.Replace(body, @"\s+", " ").Trim();
-        return collapsed.Length <= 240 ? collapsed : collapsed[..240] + "…";
+        return collapsed.Length <= 1024 ? collapsed : collapsed[..1024] + "…";
     }
 
     public async Task<IReadOnlyList<RemoteCommit>> GetCommitsAsync(PrIdentity id, CancellationToken ct)

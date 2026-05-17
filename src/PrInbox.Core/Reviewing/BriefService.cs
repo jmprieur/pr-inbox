@@ -360,6 +360,33 @@ public sealed class BriefService
         {
             sb.AppendLine("## Prior review runs");
             sb.AppendLine();
+
+            // Surface any prior findings.yaml written against the *current*
+            // HEAD up-front. The reviewer should re-affirm / supersede / drop
+            // those findings rather than re-discovering them. Without this
+            // callout the brief's `last_review_run_head_sha: null` contradicts
+            // the on-disk artifact and the agent has to detective-work it.
+            var sameHeadFindings = priorRuns
+                .Where(r => string.Equals(r.HeadSha, snapshot.HeadSha, StringComparison.Ordinal))
+                .Select(r => new
+                {
+                    Run = r,
+                    Path = Path.Combine(r.RunDirectory, "findings.yaml"),
+                })
+                .Where(x => File.Exists(x.Path))
+                .ToList();
+
+            if (sameHeadFindings.Count > 0)
+            {
+                sb.AppendLine("**⭐ Prior `findings.yaml` for current HEAD** — re-affirm, supersede, or drop per evidence; don't re-discover:");
+                foreach (var p in sameHeadFindings)
+                {
+                    sb.AppendLine($"- `{p.Path}` · Run #{p.Run.Id} · {p.Run.CreatedAt:yyyy-MM-dd HH:mm} · {p.Run.Status}");
+                }
+                sb.AppendLine();
+            }
+
+            sb.AppendLine("Run history (newest first):");
             foreach (var run in priorRuns.Take(5))
             {
                 sb.AppendLine($"- Run #{run.Id} · {run.CreatedAt:yyyy-MM-dd HH:mm} · HEAD `{ShortSha(run.HeadSha)}` · {run.Status}");

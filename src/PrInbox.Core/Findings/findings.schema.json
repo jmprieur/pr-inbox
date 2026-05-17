@@ -39,16 +39,17 @@
       "type": "array",
       "items": { "type": "string" },
       "minItems": 1,
-      "description": "Model identifiers used by the review (e.g. opus-4.7, gpt-5.5)."
+      "description": "Model identifiers used by the review (e.g. opus-4.7, gpt-5.5). If only one model was available, list just that one; do not invent a second."
     },
     "asymmetry": {
       "type": "object",
       "additionalProperties": true,
-      "description": "Diagnostic breakdown of model agreement. Free-shape so future tools can extend without a schema bump.",
+      "description": "Diagnostic breakdown of model agreement. Free-shape so future tools can extend without a schema bump. If only one model was available, set `single_model: <count>` (total findings from the single model) and omit the cross-model counts.",
       "properties": {
         "both_found": { "type": "integer", "minimum": 0 },
         "opus_only": { "type": "integer", "minimum": 0 },
-        "gpt_only":  { "type": "integer", "minimum": 0 }
+        "gpt_only":  { "type": "integer", "minimum": 0 },
+        "single_model": { "type": "integer", "minimum": 0 }
       }
     },
     "findings": {

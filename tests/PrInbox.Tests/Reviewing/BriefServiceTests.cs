@@ -288,4 +288,89 @@ public class BriefServiceTests
         Assert.Contains("running **as** the dual-model-review agent", md);
         Assert.Contains("do not spawn another dual-model-review", md);
     }
+
+    [Fact]
+    public void Prior_Findings_For_Same_Head_Are_Surfaced_As_Callout()
+    {
+        var pr = MakePr();
+        var snap = MakeSnapshot();
+
+        // Create a temp run directory with a findings.yaml and a
+        // matching HeadSha — the brief should call this out explicitly
+        // so the reviewer re-affirms / supersedes / drops rather than
+        // re-discovering.
+        var tmp = Path.Combine(Path.GetTempPath(), "prinbox-tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tmp);
+        var findingsPath = Path.Combine(tmp, "findings.yaml");
+        File.WriteAllText(findingsPath, "schema_version: 1\nfindings: []\n");
+        try
+        {
+            var priorRun = new ReviewRunRow(
+                Id: 7,
+                Identity: pr.Identity,
+                CreatedAt: DateTimeOffset.Parse("2026-05-13T20:00:00Z"),
+                BriefPath: Path.Combine(tmp, "brief.md"),
+                RunDirectory: tmp,
+                HeadSha: snap.HeadSha,
+                BaseSha: snap.BaseSha,
+                Status: ReviewRunStatus.Generated,
+                CopilotSessionId: null,
+                Notes: null);
+
+            var md = BriefService.BuildBriefMarkdown(pr, snap,
+                openThreads: Array.Empty<ObservedThreadRow>(),
+                recentBotThreads: Array.Empty<ObservedThreadRow>(),
+                priorRuns: new[] { priorRun },
+                runDir: @"C:\runs\x");
+
+            Assert.Contains("Prior `findings.yaml` for current HEAD", md);
+            Assert.Contains(findingsPath, md);
+            Assert.Contains("re-affirm, supersede, or drop", md);
+            // Run history is still listed alongside the callout.
+            Assert.Contains("Run #7", md);
+        }
+        finally
+        {
+            try { Directory.Delete(tmp, recursive: true); } catch { }
+        }
+    }
+
+    [Fact]
+    public void Prior_Findings_For_Different_Head_Are_Not_Surfaced_As_Same_Head_Callout()
+    {
+        var pr = MakePr();
+        var snap = MakeSnapshot();
+
+        var tmp = Path.Combine(Path.GetTempPath(), "prinbox-tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tmp);
+        File.WriteAllText(Path.Combine(tmp, "findings.yaml"), "schema_version: 1\nfindings: []\n");
+        try
+        {
+            var priorRun = new ReviewRunRow(
+                Id: 8,
+                Identity: pr.Identity,
+                CreatedAt: DateTimeOffset.Parse("2026-05-13T20:00:00Z"),
+                BriefPath: Path.Combine(tmp, "brief.md"),
+                RunDirectory: tmp,
+                HeadSha: "ffffffffffffffffffffffffffffffffffffffff", // different from snapshot HEAD
+                BaseSha: snap.BaseSha,
+                Status: ReviewRunStatus.Generated,
+                CopilotSessionId: null,
+                Notes: null);
+
+            var md = BriefService.BuildBriefMarkdown(pr, snap,
+                openThreads: Array.Empty<ObservedThreadRow>(),
+                recentBotThreads: Array.Empty<ObservedThreadRow>(),
+                priorRuns: new[] { priorRun },
+                runDir: @"C:\runs\x");
+
+            Assert.DoesNotContain("Prior `findings.yaml` for current HEAD", md);
+            // But the run is still listed in the history line.
+            Assert.Contains("Run #8", md);
+        }
+        finally
+        {
+            try { Directory.Delete(tmp, recursive: true); } catch { }
+        }
+    }
 }
