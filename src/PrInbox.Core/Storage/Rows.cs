@@ -75,7 +75,8 @@ public sealed record ObservedThreadRow(
     string? RawJson,
     string? LastCommentBody = null,
     string? AnchorPath = null,
-    int? AnchorLine = null);
+    int? AnchorLine = null,
+    string? PlatformThreadNodeId = null);
 
 /// <summary>
 /// Row from <c>review_runs</c>. Immutable once created.

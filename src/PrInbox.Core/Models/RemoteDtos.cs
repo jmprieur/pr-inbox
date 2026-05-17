@@ -70,7 +70,8 @@ public sealed record RemoteThread(
     string RawJson,
     string? BodyExcerpt = null,
     string? AnchorPath = null,
-    int? AnchorLine = null);
+    int? AnchorLine = null,
+    string? PlatformThreadNodeId = null);
 
 /// <summary>
 /// A commit on a PR's head branch.

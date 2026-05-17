@@ -742,5 +742,177 @@ public class RepositoryRoundTripTests : IAsyncLifetime
         latest.CiStatus.Should().Be("success"); // preserved
         latest.Files.Should().NotBeNull();
     }
+
+    // -----------------------------------------------------------------
+    // Phase 1 — thread node id (migration 008) + reopen semantics.
+    // -----------------------------------------------------------------
+
+    [Fact]
+    public async Task ObservedThread_RoundTrips_PlatformThreadNodeId()
+    {
+        var prRepo = new PullRequestRepository(_db);
+        var threadRepo = new ObservedThreadRepository(_db);
+        var row = SampleRow();
+        await prRepo.UpsertAsync(row, CancellationToken.None);
+
+        var t1 = DateTimeOffset.Parse("2026-05-17T10:00:00Z");
+        var thread = new RemoteThread(
+            PlatformThreadId: "review-comment:42",
+            Kind: ThreadKind.ReviewComment,
+            AuthorLogin: "Copilot",
+            IsBot: true,
+            BotKind: PrInbox.Core.Models.BotKind.CopilotReview,
+            IsResolved: false,
+            CreatedAt: t1,
+            LastUpdatedAt: t1,
+            RawJson: "{}",
+            BodyExcerpt: null,
+            AnchorPath: null,
+            AnchorLine: null,
+            PlatformThreadNodeId: "PRRT_kwDOABCDEF");
+
+        await threadRepo.UpsertManyAsync(row.Identity, new[] { thread }, syncedAt: t1, CancellationToken.None);
+
+        var open = await threadRepo.GetOpenThreadsAsync(row.Identity, CancellationToken.None);
+        open.Should().ContainSingle();
+        open[0].PlatformThreadNodeId.Should().Be("PRRT_kwDOABCDEF");
+    }
+
+    [Fact]
+    public async Task ObservedThread_PlatformThreadNodeId_Preserved_When_Subsequent_Upsert_Has_Null()
+    {
+        // Models the case where GraphQL was unavailable during a sync and
+        // the REST-only path emits a thread with null node id. We must not
+        // overwrite a value we previously learned.
+        var prRepo = new PullRequestRepository(_db);
+        var threadRepo = new ObservedThreadRepository(_db);
+        var row = SampleRow();
+        await prRepo.UpsertAsync(row, CancellationToken.None);
+
+        var t1 = DateTimeOffset.Parse("2026-05-17T10:00:00Z");
+        var t2 = DateTimeOffset.Parse("2026-05-17T11:00:00Z");
+
+        var withNode = new RemoteThread(
+            PlatformThreadId: "review-comment:42",
+            Kind: ThreadKind.ReviewComment,
+            AuthorLogin: "Copilot", IsBot: true, BotKind: PrInbox.Core.Models.BotKind.CopilotReview,
+            IsResolved: false,
+            CreatedAt: t1, LastUpdatedAt: t1, RawJson: "{}",
+            BodyExcerpt: null, AnchorPath: null, AnchorLine: null,
+            PlatformThreadNodeId: "PRRT_kwDOABCDEF");
+
+        var withoutNode = withNode with { PlatformThreadNodeId = null, LastUpdatedAt = t2 };
+
+        await threadRepo.UpsertManyAsync(row.Identity, new[] { withNode }, syncedAt: t1, CancellationToken.None);
+        await threadRepo.UpsertManyAsync(row.Identity, new[] { withoutNode }, syncedAt: t2, CancellationToken.None);
+
+        var open = await threadRepo.GetOpenThreadsAsync(row.Identity, CancellationToken.None);
+        open[0].PlatformThreadNodeId.Should().Be("PRRT_kwDOABCDEF");
+    }
+
+    [Fact]
+    public async Task ObservedThread_Reopen_Clears_ResolvedAt()
+    {
+        // Authoritative reopen semantics: if a thread was previously
+        // resolved (either by sync or by local write-back) and the next
+        // sync says IsResolved=false, resolved_at must be cleared.
+        var prRepo = new PullRequestRepository(_db);
+        var threadRepo = new ObservedThreadRepository(_db);
+        var row = SampleRow();
+        await prRepo.UpsertAsync(row, CancellationToken.None);
+
+        var t1 = DateTimeOffset.Parse("2026-05-17T10:00:00Z");
+        var t2 = DateTimeOffset.Parse("2026-05-17T11:00:00Z");
+
+        var resolvedThread = new RemoteThread(
+            PlatformThreadId: "review-comment:99",
+            Kind: ThreadKind.ReviewComment,
+            AuthorLogin: "jmprieur", IsBot: false, BotKind: null,
+            IsResolved: true,
+            CreatedAt: t1, LastUpdatedAt: t1, RawJson: "{}",
+            PlatformThreadNodeId: "PRRT_reopen");
+
+        var reopenedThread = resolvedThread with { IsResolved = false, LastUpdatedAt = t2 };
+
+        await threadRepo.UpsertManyAsync(row.Identity, new[] { resolvedThread }, syncedAt: t1, CancellationToken.None);
+        (await threadRepo.GetOpenThreadsAsync(row.Identity, CancellationToken.None)).Should().BeEmpty();
+
+        await threadRepo.UpsertManyAsync(row.Identity, new[] { reopenedThread }, syncedAt: t2, CancellationToken.None);
+        var open = await threadRepo.GetOpenThreadsAsync(row.Identity, CancellationToken.None);
+        open.Should().ContainSingle();
+        open[0].ResolvedAt.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task MarkResolvedByNodeIdsAsync_Sets_ResolvedAt_On_All_Rows_Sharing_Node()
+    {
+        // A single GraphQL thread can contain multiple REST comments
+        // (root + replies). One mutation must resolve all of them locally.
+        var prRepo = new PullRequestRepository(_db);
+        var threadRepo = new ObservedThreadRepository(_db);
+        var row = SampleRow();
+        await prRepo.UpsertAsync(row, CancellationToken.None);
+
+        var t = DateTimeOffset.Parse("2026-05-17T10:00:00Z");
+        var commonNode = "PRRT_shared";
+        var rootComment = new RemoteThread(
+            PlatformThreadId: "review-comment:100",
+            Kind: ThreadKind.ReviewComment,
+            AuthorLogin: "Copilot", IsBot: true, BotKind: PrInbox.Core.Models.BotKind.CopilotReview,
+            IsResolved: false,
+            CreatedAt: t, LastUpdatedAt: t, RawJson: "{}",
+            PlatformThreadNodeId: commonNode);
+        var replyComment = rootComment with { PlatformThreadId = "review-comment:101" };
+        var unrelatedComment = rootComment with
+        {
+            PlatformThreadId = "review-comment:200",
+            PlatformThreadNodeId = "PRRT_other",
+        };
+
+        await threadRepo.UpsertManyAsync(
+            row.Identity,
+            new[] { rootComment, replyComment, unrelatedComment },
+            syncedAt: t,
+            CancellationToken.None);
+
+        var resolvedAt = DateTimeOffset.Parse("2026-05-17T12:00:00Z");
+        var affected = await threadRepo.MarkResolvedByNodeIdsAsync(
+            row.Identity,
+            new[] { commonNode },
+            resolvedAt,
+            CancellationToken.None);
+
+        affected.Should().Be(2);
+        var open = await threadRepo.GetOpenThreadsAsync(row.Identity, CancellationToken.None);
+        open.Should().ContainSingle(); // only the unrelated row remains open
+        open[0].PlatformThreadNodeId.Should().Be("PRRT_other");
+    }
+
+    [Fact]
+    public async Task MarkResolvedByNodeIdsAsync_Is_Idempotent_For_Already_Resolved_Rows()
+    {
+        var prRepo = new PullRequestRepository(_db);
+        var threadRepo = new ObservedThreadRepository(_db);
+        var row = SampleRow();
+        await prRepo.UpsertAsync(row, CancellationToken.None);
+
+        var t = DateTimeOffset.Parse("2026-05-17T10:00:00Z");
+        var thread = new RemoteThread(
+            PlatformThreadId: "review-comment:42",
+            Kind: ThreadKind.ReviewComment,
+            AuthorLogin: "Copilot", IsBot: true, BotKind: PrInbox.Core.Models.BotKind.CopilotReview,
+            IsResolved: true, // already resolved upstream
+            CreatedAt: t, LastUpdatedAt: t, RawJson: "{}",
+            PlatformThreadNodeId: "PRRT_already");
+        await threadRepo.UpsertManyAsync(row.Identity, new[] { thread }, syncedAt: t, CancellationToken.None);
+
+        // Second call should affect zero rows (already-resolved guard).
+        var affected = await threadRepo.MarkResolvedByNodeIdsAsync(
+            row.Identity,
+            new[] { "PRRT_already" },
+            DateTimeOffset.UtcNow,
+            CancellationToken.None);
+        affected.Should().Be(0);
+    }
 }
 

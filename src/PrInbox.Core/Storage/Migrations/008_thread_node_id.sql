@@ -1,0 +1,21 @@
+-- Migration 008 — Persist GitHub GraphQL review-thread node id on observed_threads.
+--
+-- Why: the /threads UI needs the GraphQL node id to call
+-- `resolveReviewThread(threadId: ID!)`. The REST comment id we already store
+-- isn't the same thing — a single GraphQL review thread can contain N REST
+-- review comments (root + replies), so REST id maps many-to-one onto thread
+-- id. Storing the node id lets us bulk-resolve without re-querying GraphQL
+-- on every page load.
+--
+-- Backfill: nullable. Newly-enriched PRs get it via the GraphQL pass added
+-- alongside this migration. Until a PR is re-enriched, its observed_threads
+-- rows have null node ids and the UI displays a "thread id not synced yet"
+-- state (distinct from "thread kind cannot be resolved", which applies to
+-- issue_comment and review_body rows).
+--
+-- Population scope:
+--   * review_comment kind on GitHub PRs → set from GraphQL
+--   * issue_comment, review_body kind → stays null (not a review thread)
+--   * ado_thread kind → stays null (ADO write-back not in this cut)
+
+ALTER TABLE observed_threads ADD COLUMN platform_thread_node_id TEXT;

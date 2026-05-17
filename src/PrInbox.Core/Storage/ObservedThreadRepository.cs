@@ -16,8 +16,19 @@ public sealed class ObservedThreadRepository
 
     /// <summary>
     /// Upsert a batch of threads observed during a sync. Inserts new threads,
-    /// bumps <c>last_seen_at</c> on existing ones, and sets <c>resolved_at</c>
-    /// when a thread transitions to resolved.
+    /// bumps <c>last_seen_at</c> on existing ones, and writes the source's
+    /// authoritative <c>resolved_at</c>. We deliberately do NOT
+    /// <c>COALESCE</c> <c>resolved_at</c> with the previous local value:
+    /// when GitHub reports a thread as un-resolved (e.g. someone reopened
+    /// it), the new state must win. The local write-back from
+    /// <see cref="MarkResolvedAsync"/> already sets <c>resolved_at</c>; if a
+    /// subsequent sync sees the thread is still resolved upstream, the
+    /// timestamp may shift slightly, which is fine.
+    ///
+    /// <c>platform_thread_node_id</c> uses <c>COALESCE</c> because it's
+    /// learned once and never lost — a sync that doesn't carry the node id
+    /// (e.g. ADO, or a transient GraphQL outage) must not erase a value we
+    /// already have.
     /// </summary>
     public async Task UpsertManyAsync(
         PrIdentity identity,
@@ -41,24 +52,27 @@ public sealed class ObservedThreadRepository
                       pr_identity, platform_thread_id, kind, author_login,
                       is_bot, bot_kind,
                       first_seen_at, last_seen_at, resolved_at, raw_json,
-                      last_comment_body, anchor_path, anchor_line
+                      last_comment_body, anchor_path, anchor_line,
+                      platform_thread_node_id
                     ) VALUES (
                       $prId, $threadId, $kind, $author,
                       $isBot, $botKind,
                       $syncedAt, $syncedAt, $resolvedAt, $rawJson,
-                      $body, $path, $line
+                      $body, $path, $line,
+                      $nodeId
                     )
                     ON CONFLICT(pr_identity, platform_thread_id) DO UPDATE SET
-                      kind              = excluded.kind,
-                      author_login      = excluded.author_login,
-                      is_bot            = excluded.is_bot,
-                      bot_kind          = excluded.bot_kind,
-                      last_seen_at      = excluded.last_seen_at,
-                      resolved_at       = COALESCE(observed_threads.resolved_at, excluded.resolved_at),
-                      raw_json          = excluded.raw_json,
-                      last_comment_body = COALESCE(excluded.last_comment_body, observed_threads.last_comment_body),
-                      anchor_path       = COALESCE(excluded.anchor_path, observed_threads.anchor_path),
-                      anchor_line       = COALESCE(excluded.anchor_line, observed_threads.anchor_line);
+                      kind                    = excluded.kind,
+                      author_login            = excluded.author_login,
+                      is_bot                  = excluded.is_bot,
+                      bot_kind                = excluded.bot_kind,
+                      last_seen_at            = excluded.last_seen_at,
+                      resolved_at             = excluded.resolved_at,
+                      raw_json                = excluded.raw_json,
+                      last_comment_body       = COALESCE(excluded.last_comment_body, observed_threads.last_comment_body),
+                      anchor_path             = COALESCE(excluded.anchor_path, observed_threads.anchor_path),
+                      anchor_line             = COALESCE(excluded.anchor_line, observed_threads.anchor_line),
+                      platform_thread_node_id = COALESCE(excluded.platform_thread_node_id, observed_threads.platform_thread_node_id);
                     """;
                 cmd.Parameters.AddWithValue("$prId", identity.Url);
                 cmd.Parameters.AddWithValue("$threadId", thread.PlatformThreadId);
@@ -77,6 +91,8 @@ public sealed class ObservedThreadRepository
                 cmd.Parameters.AddWithValue("$path", (object?)thread.AnchorPath ?? DBNull.Value);
                 cmd.Parameters.AddWithValue("$line",
                     thread.AnchorLine.HasValue ? (object)thread.AnchorLine.Value : DBNull.Value);
+                cmd.Parameters.AddWithValue("$nodeId",
+                    (object?)thread.PlatformThreadNodeId ?? DBNull.Value);
                 await cmd.ExecuteNonQueryAsync(ct);
             }
 
@@ -87,6 +103,44 @@ public sealed class ObservedThreadRepository
             await tx.RollbackAsync(ct);
             throw;
         }
+    }
+
+    /// <summary>
+    /// Mark every <c>observed_threads</c> row for this PR whose
+    /// <c>platform_thread_node_id</c> matches one of the supplied ids as
+    /// resolved (sets <c>resolved_at</c> if currently null). Used by the
+    /// thread-resolve write-back path so the inbox count drops the moment
+    /// a live resolve succeeds, without waiting for the next sync.
+    /// </summary>
+    /// <returns>Number of rows updated.</returns>
+    public async Task<int> MarkResolvedByNodeIdsAsync(
+        PrIdentity identity,
+        IReadOnlyList<string> nodeIds,
+        DateTimeOffset resolvedAt,
+        CancellationToken ct)
+    {
+        if (nodeIds.Count == 0) return 0;
+
+        await using var conn = await _db.OpenAsync(ct);
+        // Build a parameterised IN-list. SQLite's max is 999 params; we
+        // expect at most a few dozen ids in any realistic bulk resolve.
+        var placeholders = string.Join(",", nodeIds.Select((_, i) => $"$id{i}"));
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = $"""
+            UPDATE observed_threads
+               SET resolved_at = $resolvedAt
+             WHERE pr_identity = $prId
+               AND resolved_at IS NULL
+               AND platform_thread_node_id IN ({placeholders});
+            """;
+        cmd.Parameters.AddWithValue("$prId", identity.Url);
+        cmd.Parameters.AddWithValue("$resolvedAt",
+            PullRequestRepository.FormatTimestamp(resolvedAt));
+        for (var i = 0; i < nodeIds.Count; i++)
+        {
+            cmd.Parameters.AddWithValue($"$id{i}", nodeIds[i]);
+        }
+        return await cmd.ExecuteNonQueryAsync(ct);
     }
 
     /// <summary>
@@ -163,7 +217,8 @@ public sealed class ObservedThreadRepository
                 : reader.GetString(reader.GetOrdinal("raw_json")),
             LastCommentBody: ReadOptionalString(reader, "last_comment_body"),
             AnchorPath: ReadOptionalString(reader, "anchor_path"),
-            AnchorLine: ReadOptionalInt(reader, "anchor_line"));
+            AnchorLine: ReadOptionalInt(reader, "anchor_line"),
+            PlatformThreadNodeId: ReadOptionalString(reader, "platform_thread_node_id"));
     }
 
     private static bool HasColumn(SqliteDataReader reader, string name)

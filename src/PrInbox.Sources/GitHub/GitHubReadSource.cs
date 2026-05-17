@@ -1,3 +1,6 @@
+using System.Net.Http.Headers;
+using System.Net.Http.Json;
+using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Octokit;
@@ -245,6 +248,11 @@ public sealed class GitHubReadSource : IPrReadSource
             CiStatus: ciStatus);
     }
 
+    private static readonly HttpClient s_graphqlHttp = new()
+    {
+        Timeout = TimeSpan.FromSeconds(30),
+    };
+
     private async Task<IReadOnlyList<RemoteThread>> FetchThreadsAsync(PrIdentity id, CancellationToken ct)
     {
         var (owner, repo, number) = ParseUrl(id.Url);
@@ -252,18 +260,41 @@ public sealed class GitHubReadSource : IPrReadSource
 
         var result = new List<RemoteThread>();
 
+        // GraphQL pass: build a map from REST review-comment database id →
+        // (thread node id, thread isResolved). We need this to (a) populate
+        // platform_thread_node_id so the /threads UI can call
+        // resolveReviewThread, and (b) override the hard-coded
+        // IsResolved=false on REST review comments below — REST has no
+        // notion of thread resolution; only GraphQL does.
+        Dictionary<long, ThreadGraphInfo> threadMap;
+        try
+        {
+            threadMap = await FetchReviewThreadMapAsync(owner, repo, number, ct);
+        }
+        catch (Exception ex)
+        {
+            // Don't fail the whole enrich if GraphQL is unavailable (e.g.
+            // GHE outage, network glitch). The REST path still produces
+            // useful rows; node ids will get backfilled on next sync.
+            _logger.LogWarning(ex,
+                "GraphQL review-thread fetch failed for {Owner}/{Repo}#{N}; falling back to REST-only thread enrichment",
+                owner, repo, number);
+            threadMap = new Dictionary<long, ThreadGraphInfo>();
+        }
+
         // Inline review comments.
         var reviewComments = await client.PullRequest.ReviewComment.GetAll(owner, repo, number);
         foreach (var c in reviewComments)
         {
             var (isBot, kind) = ClassifyAuthor(c.User);
+            var graph = threadMap.TryGetValue(c.Id, out var g) ? g : default;
             result.Add(new RemoteThread(
                 PlatformThreadId: $"review-comment:{c.Id}",
                 Kind: ThreadKind.ReviewComment,
                 AuthorLogin: c.User?.Login,
                 IsBot: isBot,
                 BotKind: kind,
-                IsResolved: false, // GraphQL exposes resolution; REST does not. Best-effort.
+                IsResolved: graph.NodeId is not null && graph.IsResolved,
                 CreatedAt: c.CreatedAt,
                 LastUpdatedAt: c.UpdatedAt,
                 RawJson: $"{{\"id\":{c.Id},\"path\":\"{Escape(c.Path)}\"}}",
@@ -273,7 +304,8 @@ public sealed class GitHubReadSource : IPrReadSource
                 // OriginalPosition when outdated). Good enough orientation for
                 // the brief; reviewers click through to the GitHub UI for the
                 // actual file line.
-                AnchorLine: c.Position > 0 ? c.Position : (c.OriginalPosition > 0 ? c.OriginalPosition : (int?)null)));
+                AnchorLine: c.Position > 0 ? c.Position : (c.OriginalPosition > 0 ? c.OriginalPosition : (int?)null),
+                PlatformThreadNodeId: graph.NodeId));
         }
 
         // Top-level issue comments on the PR.
@@ -318,6 +350,120 @@ public sealed class GitHubReadSource : IPrReadSource
         }
 
         return result;
+    }
+
+    /// <summary>
+    /// Output of <see cref="FetchReviewThreadMapAsync"/>: maps a REST review-
+    /// comment database id to the GraphQL thread that contains it, plus that
+    /// thread's authoritative <c>isResolved</c>. A single GraphQL thread may
+    /// contain many REST comments (root + replies); the same record is
+    /// returned for each member comment so callers can join 1:1.
+    /// </summary>
+    private readonly record struct ThreadGraphInfo(string? NodeId, bool IsResolved);
+
+    /// <summary>
+    /// GraphQL query for review threads on a single PR. We fetch all threads
+    /// and their member comments' <c>databaseId</c> so we can join back to
+    /// the REST <c>id</c> field used by the REST review-comments endpoint.
+    /// </summary>
+    private const string ReviewThreadsQuery = """
+        query($owner:String!, $name:String!, $number:Int!, $after:String) {
+          repository(owner:$owner, name:$name) {
+            pullRequest(number:$number) {
+              reviewThreads(first:100, after:$after) {
+                pageInfo { hasNextPage endCursor }
+                nodes {
+                  id
+                  isResolved
+                  comments(first:100) {
+                    nodes { databaseId }
+                  }
+                }
+              }
+            }
+          }
+        }
+        """;
+
+    private async Task<Dictionary<long, ThreadGraphInfo>> FetchReviewThreadMapAsync(
+        string owner,
+        string repo,
+        int number,
+        CancellationToken ct)
+    {
+        var token = await _tokenProvider.GetTokenAsync(ct);
+        var endpoint = _isEnterprise
+            ? new Uri($"https://{_hostname}/api/graphql")
+            : new Uri("https://api.github.com/graphql");
+
+        var map = new Dictionary<long, ThreadGraphInfo>();
+        string? cursor = null;
+
+        // Hard cap to avoid pathological pagination on a runaway PR.
+        for (var page = 0; page < 20; page++)
+        {
+            using var req = new HttpRequestMessage(HttpMethod.Post, endpoint);
+            req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+            req.Headers.UserAgent.Add(new ProductInfoHeaderValue("pr-inbox", "0.2"));
+            req.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+            req.Content = JsonContent.Create(new
+            {
+                query = ReviewThreadsQuery,
+                variables = new { owner, name = repo, number, after = cursor },
+            });
+
+            using var resp = await s_graphqlHttp.SendAsync(req, ct);
+            resp.EnsureSuccessStatusCode();
+            await using var stream = await resp.Content.ReadAsStreamAsync(ct);
+            using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: ct);
+
+            if (doc.RootElement.TryGetProperty("errors", out var errs) && errs.GetArrayLength() > 0)
+            {
+                throw new InvalidOperationException(
+                    $"GitHub GraphQL returned errors for {owner}/{repo}#{number}: {errs}");
+            }
+
+            if (!doc.RootElement.TryGetProperty("data", out var data)
+                || data.ValueKind != JsonValueKind.Object)
+            {
+                break;
+            }
+
+            var threads = data
+                .GetProperty("repository")
+                .GetProperty("pullRequest")
+                .GetProperty("reviewThreads");
+
+            foreach (var thread in threads.GetProperty("nodes").EnumerateArray())
+            {
+                var nodeId = thread.GetProperty("id").GetString();
+                var isResolved = thread.GetProperty("isResolved").GetBoolean();
+                var info = new ThreadGraphInfo(nodeId, isResolved);
+
+                if (thread.TryGetProperty("comments", out var comments)
+                    && comments.TryGetProperty("nodes", out var commentNodes))
+                {
+                    foreach (var comment in commentNodes.EnumerateArray())
+                    {
+                        if (comment.TryGetProperty("databaseId", out var dbid)
+                            && dbid.ValueKind == JsonValueKind.Number
+                            && dbid.TryGetInt64(out var id))
+                        {
+                            // Same info repeated for every comment in the thread;
+                            // overwriting is harmless since the value is identical.
+                            map[id] = info;
+                        }
+                    }
+                }
+            }
+
+            var pageInfo = threads.GetProperty("pageInfo");
+            if (!pageInfo.GetProperty("hasNextPage").GetBoolean()) break;
+            cursor = pageInfo.GetProperty("endCursor").GetString();
+            if (string.IsNullOrEmpty(cursor)) break;
+        }
+
+        return map;
     }
 
     /// <summary>
@@ -385,7 +531,7 @@ public sealed class GitHubReadSource : IPrReadSource
     private async Task<GitHubClient> CreateClientAsync(CancellationToken ct)
     {
         var token = await _tokenProvider.GetTokenAsync(ct);
-        var product = new ProductHeaderValue("pr-inbox", "0.1");
+        var product = new Octokit.ProductHeaderValue("pr-inbox", "0.1");
         var client = _isEnterprise
             ? new GitHubClient(product, new Uri($"https://{_hostname}/api/v3/"))
             : new GitHubClient(product);
