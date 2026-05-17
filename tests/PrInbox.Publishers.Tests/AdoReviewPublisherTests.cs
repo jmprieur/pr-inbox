@@ -124,6 +124,31 @@ public sealed class AdoReviewPublisherTests
         handler.Requests.Should().BeEmpty();
     }
 
+    [Fact]
+    public async Task ResolveThreadsAsync_returns_friendly_not_supported()
+    {
+        var handler = new RecordingHandler(_ => throw new InvalidOperationException(
+            "ADO publisher must not make any network call for ResolveThreadsAsync."));
+        using var http = new HttpClient(handler);
+        var token = new FakeTokenProvider(_ => "tk");
+
+        var publisher = new AdoReviewPublisher(
+            token, http, identityUsed: "azurecli",
+            log: NullLogger<AdoReviewPublisher>.Instance);
+
+        var result = await publisher.ResolveThreadsAsync(
+            new ThreadResolveRequest(
+                PrUrl: "https://dev.azure.com/o/p/_git/r/pullrequest/1",
+                ThreadNodeIds: new[] { "x" },
+                DryRun: false),
+            CancellationToken.None);
+
+        result.Performed.Should().BeFalse();
+        result.ResolvedNodeIds.Should().BeEmpty();
+        result.Errors.Should().ContainMatch("*not yet supported*");
+        handler.Requests.Should().BeEmpty();
+    }
+
     private static FindingToPost Finding(string id, bool anchorable)
         => new(
             Id: id,

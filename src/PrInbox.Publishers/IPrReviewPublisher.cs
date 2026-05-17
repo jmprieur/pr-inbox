@@ -141,6 +141,82 @@ public sealed record PublishResult(
 }
 
 /// <summary>
+/// Request to resolve one or more PR review threads on the source platform.
+/// </summary>
+/// <param name="PrUrl">Canonical PR URL (already normalised).</param>
+/// <param name="ThreadNodeIds">
+/// Platform-native thread handles to resolve. For GitHub these are the
+/// GraphQL <c>ReviewThread.id</c> values stored on
+/// <c>observed_threads.platform_thread_node_id</c>. The publisher does NOT
+/// validate that these belong to <paramref name="PrUrl"/>; the orchestrator
+/// is responsible for ensuring the caller only supplies known-belonging ids
+/// (server-side authoritative validation against the local DB).
+/// </param>
+/// <param name="DryRun">
+/// <c>true</c> ⇒ no network traffic. The publisher returns a result
+/// describing what it WOULD have done.
+/// </param>
+public sealed record ThreadResolveRequest(
+    string PrUrl,
+    IReadOnlyList<string> ThreadNodeIds,
+    bool DryRun);
+
+/// <summary>
+/// Outcome of a <see cref="IPrReviewPublisher.ResolveThreadsAsync"/> call.
+/// Per-thread outcomes are reported via the three disjoint lists so the
+/// orchestrator knows exactly which local <c>observed_threads</c> rows to
+/// stamp resolved.
+/// </summary>
+/// <param name="Performed">
+/// <c>true</c> when at least one live mutation was issued (i.e. not a
+/// dry-run). Independent of whether any individual mutation succeeded.
+/// </param>
+/// <param name="ResolvedNodeIds">
+/// Threads we resolved as a direct result of this call.
+/// </param>
+/// <param name="AlreadyResolvedNodeIds">
+/// Threads the server reported as already resolved (race with another
+/// reviewer, or duplicated click). Treated as success — orchestrator
+/// should still mark these resolved locally.
+/// </param>
+/// <param name="FailedNodeIds">
+/// Threads the mutation failed on (auth, permissions, GitHub-side errors).
+/// Orchestrator must NOT mark these resolved locally.
+/// </param>
+public sealed record ThreadResolveResult(
+    bool Performed,
+    IReadOnlyList<string> ResolvedNodeIds,
+    IReadOnlyList<string> AlreadyResolvedNodeIds,
+    IReadOnlyList<string> FailedNodeIds,
+    string IdentityUsed,
+    IReadOnlyList<string> Warnings,
+    IReadOnlyList<string> Errors)
+{
+    public static ThreadResolveResult Failure(string identityUsed, params string[] errors)
+        => new(
+            Performed: false,
+            ResolvedNodeIds: Array.Empty<string>(),
+            AlreadyResolvedNodeIds: Array.Empty<string>(),
+            FailedNodeIds: Array.Empty<string>(),
+            IdentityUsed: identityUsed,
+            Warnings: Array.Empty<string>(),
+            Errors: errors);
+
+    public static ThreadResolveResult DryRunPlan(
+        IReadOnlyList<string> wouldResolve,
+        string identityUsed,
+        string warning)
+        => new(
+            Performed: false,
+            ResolvedNodeIds: wouldResolve,
+            AlreadyResolvedNodeIds: Array.Empty<string>(),
+            FailedNodeIds: Array.Empty<string>(),
+            IdentityUsed: identityUsed,
+            Warnings: new[] { warning },
+            Errors: Array.Empty<string>());
+}
+
+/// <summary>
 /// Posts a selection of findings to the source platform (GitHub.com, GHE,
 /// ADO). Implementations: <c>GitHubReviewPublisher</c>,
 /// <c>AdoReviewPublisher</c>. Selection of the right implementation is
@@ -160,4 +236,14 @@ public interface IPrReviewPublisher
     /// <see cref="PublishRequest.DryRun"/> as a hard "no network" gate.
     /// </summary>
     Task<PublishResult> PublishAsync(PublishRequest request, CancellationToken ct);
+
+    /// <summary>
+    /// Mark one or more PR review threads as resolved on the source
+    /// platform. Implementations MUST treat <see cref="ThreadResolveRequest.DryRun"/>
+    /// as a hard "no network" gate. Idempotent: re-resolving a thread that
+    /// is already resolved upstream must report it as
+    /// <see cref="ThreadResolveResult.AlreadyResolvedNodeIds"/>, not as a
+    /// failure.
+    /// </summary>
+    Task<ThreadResolveResult> ResolveThreadsAsync(ThreadResolveRequest request, CancellationToken ct);
 }

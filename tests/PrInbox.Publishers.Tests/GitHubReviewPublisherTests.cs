@@ -312,6 +312,261 @@ public sealed class GitHubReviewPublisherTests
         handler.Requests.Should().BeEmpty();
     }
 
+    // -- ResolveThreadsAsync ----------------------------------------------
+
+    [Fact]
+    public async Task ResolveThreads_DryRun_makes_zero_http_requests()
+    {
+        var handler = new RecordingHandler(_ => throw new InvalidOperationException(
+            "DryRun must not make any HTTP call."));
+        using var http = new HttpClient(handler);
+        var token = new FakeTokenProvider(_ => throw new InvalidOperationException(
+            "DryRun must not even fetch a token."));
+
+        var publisher = new GitHubReviewPublisher(
+            token, http, isEnterprise: false, host: "github.com",
+            identityUsed: "jmprieur",
+            log: NullLogger<GitHubReviewPublisher>.Instance);
+
+        var result = await publisher.ResolveThreadsAsync(
+            new ThreadResolveRequest(
+                PrUrl: "https://github.com/owner/repo/pull/42",
+                ThreadNodeIds: new[] { "PRRT_one", "PRRT_two" },
+                DryRun: true),
+            CancellationToken.None);
+
+        result.Performed.Should().BeFalse();
+        result.ResolvedNodeIds.Should().BeEquivalentTo(new[] { "PRRT_one", "PRRT_two" });
+        result.Errors.Should().BeEmpty();
+        handler.Requests.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ResolveThreads_dedupes_thread_ids_before_mutating()
+    {
+        var seen = new List<string>();
+        var handler = new RecordingHandler(req =>
+        {
+            var body = JsonDocument.Parse(req.Content!.ReadAsStringAsync().Result);
+            seen.Add(body.RootElement.GetProperty("variables").GetProperty("threadId").GetString()!);
+            return ResolveOkResponse();
+        });
+        using var http = new HttpClient(handler);
+        var token = new FakeTokenProvider(_ => "tk");
+
+        var publisher = new GitHubReviewPublisher(
+            token, http, isEnterprise: false, host: "github.com",
+            identityUsed: "jmprieur",
+            log: NullLogger<GitHubReviewPublisher>.Instance);
+
+        var result = await publisher.ResolveThreadsAsync(
+            new ThreadResolveRequest(
+                PrUrl: "https://github.com/owner/repo/pull/42",
+                ThreadNodeIds: new[] { "PRRT_one", "PRRT_one", "PRRT_two", "" },
+                DryRun: false),
+            CancellationToken.None);
+
+        result.Performed.Should().BeTrue();
+        seen.Should().BeEquivalentTo(new[] { "PRRT_one", "PRRT_two" });
+        result.ResolvedNodeIds.Should().BeEquivalentTo(new[] { "PRRT_one", "PRRT_two" });
+        result.Errors.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ResolveThreads_targets_graphql_endpoint_with_bearer_auth()
+    {
+        var handler = new RecordingHandler(req =>
+        {
+            req.Method.Should().Be(HttpMethod.Post);
+            req.RequestUri!.ToString().Should().Be("https://api.github.com/graphql");
+            req.Headers.Authorization!.Scheme.Should().Be("Bearer");
+            req.Headers.Authorization.Parameter.Should().Be("tk");
+            var payload = JsonDocument.Parse(req.Content!.ReadAsStringAsync().Result);
+            payload.RootElement.GetProperty("query").GetString()!
+                .Should().Contain("resolveReviewThread");
+            payload.RootElement.GetProperty("variables").GetProperty("threadId").GetString()
+                .Should().Be("PRRT_one");
+            return ResolveOkResponse();
+        });
+        using var http = new HttpClient(handler);
+        var token = new FakeTokenProvider(_ => "tk");
+
+        var publisher = new GitHubReviewPublisher(
+            token, http, isEnterprise: false, host: "github.com",
+            identityUsed: "jmprieur",
+            log: NullLogger<GitHubReviewPublisher>.Instance);
+
+        var result = await publisher.ResolveThreadsAsync(
+            new ThreadResolveRequest(
+                PrUrl: "https://github.com/owner/repo/pull/42",
+                ThreadNodeIds: new[] { "PRRT_one" },
+                DryRun: false),
+            CancellationToken.None);
+
+        result.Performed.Should().BeTrue();
+        result.ResolvedNodeIds.Should().ContainSingle().Which.Should().Be("PRRT_one");
+    }
+
+    [Fact]
+    public async Task ResolveThreads_ghe_uses_api_graphql_endpoint_not_v3()
+    {
+        var observed = "";
+        var handler = new RecordingHandler(req =>
+        {
+            observed = req.RequestUri!.ToString();
+            return ResolveOkResponse();
+        });
+        using var http = new HttpClient(handler);
+        var token = new FakeTokenProvider(_ => "tk");
+
+        var publisher = new GitHubReviewPublisher(
+            token, http, isEnterprise: true, host: "microsoft.ghe.com",
+            identityUsed: "jmprieur_microsoft",
+            log: NullLogger<GitHubReviewPublisher>.Instance);
+
+        await publisher.ResolveThreadsAsync(
+            new ThreadResolveRequest(
+                PrUrl: "https://microsoft.ghe.com/owner/repo/pull/42",
+                ThreadNodeIds: new[] { "PRRT_one" },
+                DryRun: false),
+            CancellationToken.None);
+
+        observed.Should().Be("https://microsoft.ghe.com/api/graphql");
+    }
+
+    [Fact]
+    public async Task ResolveThreads_treats_already_resolved_GraphQL_error_as_success_bucket()
+    {
+        var handler = new RecordingHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(
+                "{ \"errors\": [ { \"message\": \"Thread is already resolved.\", \"type\": \"UNPROCESSABLE\" } ] }",
+                System.Text.Encoding.UTF8, "application/json"),
+        });
+        using var http = new HttpClient(handler);
+        var token = new FakeTokenProvider(_ => "tk");
+
+        var publisher = new GitHubReviewPublisher(
+            token, http, isEnterprise: false, host: "github.com",
+            identityUsed: "jmprieur",
+            log: NullLogger<GitHubReviewPublisher>.Instance);
+
+        var result = await publisher.ResolveThreadsAsync(
+            new ThreadResolveRequest(
+                PrUrl: "https://github.com/owner/repo/pull/42",
+                ThreadNodeIds: new[] { "PRRT_one" },
+                DryRun: false),
+            CancellationToken.None);
+
+        result.Performed.Should().BeTrue();
+        result.ResolvedNodeIds.Should().BeEmpty();
+        result.AlreadyResolvedNodeIds.Should().ContainSingle().Which.Should().Be("PRRT_one");
+        result.FailedNodeIds.Should().BeEmpty();
+        result.Errors.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ResolveThreads_partitions_per_thread_outcomes_when_some_succeed_and_some_fail()
+    {
+        var handler = new RecordingHandler(req =>
+        {
+            var body = JsonDocument.Parse(req.Content!.ReadAsStringAsync().Result);
+            var id = body.RootElement.GetProperty("variables").GetProperty("threadId").GetString();
+            return id switch
+            {
+                "PRRT_ok" => ResolveOkResponse(),
+                "PRRT_already" => new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(
+                        "{\"errors\":[{\"message\":\"Thread is already resolved.\"}]}",
+                        System.Text.Encoding.UTF8, "application/json"),
+                },
+                _ => new HttpResponseMessage(HttpStatusCode.NotFound)
+                {
+                    Content = new StringContent("{\"message\":\"Not Found\"}",
+                        System.Text.Encoding.UTF8, "application/json"),
+                },
+            };
+        });
+        using var http = new HttpClient(handler);
+        var token = new FakeTokenProvider(_ => "tk");
+
+        var publisher = new GitHubReviewPublisher(
+            token, http, isEnterprise: false, host: "github.com",
+            identityUsed: "jmprieur",
+            log: NullLogger<GitHubReviewPublisher>.Instance);
+
+        var result = await publisher.ResolveThreadsAsync(
+            new ThreadResolveRequest(
+                PrUrl: "https://github.com/owner/repo/pull/42",
+                ThreadNodeIds: new[] { "PRRT_ok", "PRRT_already", "PRRT_missing" },
+                DryRun: false),
+            CancellationToken.None);
+
+        result.Performed.Should().BeTrue();
+        result.ResolvedNodeIds.Should().ContainSingle().Which.Should().Be("PRRT_ok");
+        result.AlreadyResolvedNodeIds.Should().ContainSingle().Which.Should().Be("PRRT_already");
+        result.FailedNodeIds.Should().ContainSingle().Which.Should().Be("PRRT_missing");
+        result.Errors.Should().ContainSingle().Which.Should().Contain("PRRT_missing");
+    }
+
+    [Fact]
+    public async Task ResolveThreads_returns_failure_when_no_ids_supplied()
+    {
+        var handler = new RecordingHandler(_ => throw new InvalidOperationException(
+            "Empty selection must not call out."));
+        using var http = new HttpClient(handler);
+        var token = new FakeTokenProvider(_ => "tk");
+
+        var publisher = new GitHubReviewPublisher(
+            token, http, isEnterprise: false, host: "github.com",
+            identityUsed: "jmprieur",
+            log: NullLogger<GitHubReviewPublisher>.Instance);
+
+        var result = await publisher.ResolveThreadsAsync(
+            new ThreadResolveRequest(
+                PrUrl: "https://github.com/owner/repo/pull/42",
+                ThreadNodeIds: Array.Empty<string>(),
+                DryRun: false),
+            CancellationToken.None);
+
+        result.Performed.Should().BeFalse();
+        result.Errors.Should().NotBeEmpty();
+        handler.Requests.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ResolveThreads_rejects_ADO_url()
+    {
+        var handler = new RecordingHandler(_ => throw new InvalidOperationException(
+            "ADO URL must not call GraphQL."));
+        using var http = new HttpClient(handler);
+        var token = new FakeTokenProvider(_ => "tk");
+
+        var publisher = new GitHubReviewPublisher(
+            token, http, isEnterprise: false, host: "github.com",
+            identityUsed: "jmprieur",
+            log: NullLogger<GitHubReviewPublisher>.Instance);
+
+        var result = await publisher.ResolveThreadsAsync(
+            new ThreadResolveRequest(
+                PrUrl: "https://dev.azure.com/o/p/_git/r/pullrequest/1",
+                ThreadNodeIds: new[] { "PRRT_x" },
+                DryRun: false),
+            CancellationToken.None);
+
+        result.Performed.Should().BeFalse();
+        result.Errors.Should().ContainMatch("*GitHub*Azure DevOps*");
+    }
+
+    private static HttpResponseMessage ResolveOkResponse() =>
+        new(HttpStatusCode.OK)
+        {
+            Content = new StringContent(
+                "{ \"data\": { \"resolveReviewThread\": { \"thread\": { \"id\": \"PRRT_x\", \"isResolved\": true } } } }",
+                System.Text.Encoding.UTF8, "application/json"),
+        };
+
     // -- helpers --
 
     private static PublishRequest MakeRequest(

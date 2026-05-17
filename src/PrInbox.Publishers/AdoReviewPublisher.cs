@@ -41,6 +41,20 @@ public sealed class AdoReviewPublisher : IPrReviewPublisher
 
     public string Kind => "azure-devops";
 
+    /// <summary>
+    /// ADO has a notion of thread status (active / fixed / wontFix / etc.),
+    /// but the inbox v0.2 thread-resolve flow is GitHub-only. Calling here
+    /// returns a friendly failure pointing the user to the PR page.
+    /// </summary>
+    public Task<ThreadResolveResult> ResolveThreadsAsync(
+        ThreadResolveRequest request, CancellationToken ct)
+    {
+        return Task.FromResult(ThreadResolveResult.Failure(
+            _identityUsed,
+            "Resolving threads on Azure DevOps is not yet supported by pr-inbox. " +
+            "Open the PR page to change thread status."));
+    }
+
     public async Task<PublishResult> PublishAsync(PublishRequest request, CancellationToken ct)
     {
         if (request.Event != ReviewEvent.Comment)

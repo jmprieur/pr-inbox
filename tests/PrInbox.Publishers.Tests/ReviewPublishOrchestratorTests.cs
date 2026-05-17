@@ -205,6 +205,10 @@ public class ReviewPublishOrchestratorTests : IAsyncLifetime
                 Warnings: Array.Empty<string>(),
                 Errors: Array.Empty<string>()));
         }
+
+        public Task<ThreadResolveResult> ResolveThreadsAsync(
+            ThreadResolveRequest request, CancellationToken ct)
+            => Task.FromResult(ThreadResolveResult.Failure(Kind, "Not implemented in test stub."));
     }
 
     private sealed class FixedSelector : IPublisherSelector

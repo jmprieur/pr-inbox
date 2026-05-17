@@ -197,6 +197,193 @@ public sealed class GitHubReviewPublisher : IPrReviewPublisher
     private string ApiBase(PrUrlRef target) =>
         _isEnterprise ? $"https://{target.Host}/api/v3" : "https://api.github.com";
 
+    /// <summary>
+    /// GraphQL endpoint. GitHub.com uses <c>api.github.com/graphql</c>;
+    /// GHE uses <c>{host}/api/graphql</c> (note: NOT <c>/api/v3/graphql</c>,
+    /// which is the REST namespace).
+    /// </summary>
+    private string GraphqlBase(PrUrlRef target) =>
+        _isEnterprise ? $"https://{target.Host}/api/graphql" : "https://api.github.com/graphql";
+
+    public async Task<ThreadResolveResult> ResolveThreadsAsync(
+        ThreadResolveRequest request, CancellationToken ct)
+    {
+        if (request.ThreadNodeIds.Count == 0)
+        {
+            return ThreadResolveResult.Failure(_identityUsed, "No thread ids supplied.");
+        }
+
+        // Dedupe defensively. Orchestrator should already have done this,
+        // but a single thread sharing N comments easily yields N copies.
+        var ids = request.ThreadNodeIds
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+        if (ids.Count == 0)
+        {
+            return ThreadResolveResult.Failure(_identityUsed, "No non-empty thread ids supplied.");
+        }
+
+        PrUrlRef target;
+        try { target = PullRequestUrlParser.Parse(request.PrUrl); }
+        catch (ArgumentException ex)
+        {
+            return ThreadResolveResult.Failure(_identityUsed, ex.Message);
+        }
+
+        if (target.Kind == PrPlatform.AzureDevOps)
+        {
+            return ThreadResolveResult.Failure(_identityUsed,
+                $"This publisher handles GitHub, not Azure DevOps URLs ({request.PrUrl}).");
+        }
+
+        if (request.DryRun)
+        {
+            return ThreadResolveResult.DryRunPlan(
+                wouldResolve: ids,
+                identityUsed: _identityUsed,
+                warning: $"Dry-run: would resolve {ids.Count} review thread(s) on {target.Owner}/{target.Repo}#{target.Number} via {GraphqlBase(target)} as '{_identityUsed}'.");
+        }
+
+        string token;
+        try { token = await _tokens.GetTokenAsync(ct); }
+        catch (Exception ex)
+        {
+            return ThreadResolveResult.Failure(_identityUsed, $"Token acquisition failed: {ex.Message}");
+        }
+
+        var resolved = new List<string>();
+        var alreadyResolved = new List<string>();
+        var failed = new List<string>();
+        var warnings = new List<string>();
+        var errors = new List<string>();
+
+        foreach (var threadId in ids)
+        {
+            ct.ThrowIfCancellationRequested();
+            var outcome = await ResolveOneAsync(token, target, threadId, ct);
+            switch (outcome.Status)
+            {
+                case ResolveStatus.Resolved:
+                    resolved.Add(threadId);
+                    break;
+                case ResolveStatus.AlreadyResolved:
+                    alreadyResolved.Add(threadId);
+                    break;
+                default:
+                    failed.Add(threadId);
+                    errors.Add($"{threadId}: {outcome.Error}");
+                    break;
+            }
+        }
+
+        return new ThreadResolveResult(
+            Performed: true,
+            ResolvedNodeIds: resolved,
+            AlreadyResolvedNodeIds: alreadyResolved,
+            FailedNodeIds: failed,
+            IdentityUsed: _identityUsed,
+            Warnings: warnings,
+            Errors: errors);
+    }
+
+    private enum ResolveStatus { Resolved, AlreadyResolved, Failed }
+    private readonly record struct ResolveOutcome(ResolveStatus Status, string? Error);
+
+    private const string ResolveThreadMutation = """
+        mutation($threadId: ID!) {
+          resolveReviewThread(input: { threadId: $threadId }) {
+            thread { id isResolved }
+          }
+        }
+        """;
+
+    private async Task<ResolveOutcome> ResolveOneAsync(
+        string token, PrUrlRef target, string threadId, CancellationToken ct)
+    {
+        using var req = new HttpRequestMessage(HttpMethod.Post, GraphqlBase(target));
+        req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        req.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+        req.Headers.UserAgent.Add(new ProductInfoHeaderValue("pr-inbox", "0.2"));
+        req.Content = JsonContent.Create(new
+        {
+            query = ResolveThreadMutation,
+            variables = new { threadId },
+        });
+
+        HttpResponseMessage resp;
+        try { resp = await _http.SendAsync(req, ct); }
+        catch (Exception ex)
+        {
+            return new ResolveOutcome(ResolveStatus.Failed, $"HTTP send failed: {ex.Message}");
+        }
+
+        var respText = await resp.Content.ReadAsStringAsync(ct);
+        if (!resp.IsSuccessStatusCode)
+        {
+            var hint = resp.StatusCode switch
+            {
+                HttpStatusCode.Unauthorized => "Authentication failed.",
+                HttpStatusCode.Forbidden => "Forbidden. This identity may lack write access.",
+                HttpStatusCode.NotFound => "Thread not found. The node id may be stale.",
+                _ => null,
+            };
+            var msg = hint is null
+                ? $"GraphQL returned {(int)resp.StatusCode}: {respText}"
+                : $"GraphQL returned {(int)resp.StatusCode} ({hint}): {respText}";
+            _log.LogWarning("GitHub resolve failed for {Thread}: {Msg}", threadId, msg);
+            return new ResolveOutcome(ResolveStatus.Failed, msg);
+        }
+
+        // GraphQL returns 200 OK even on user-facing errors. Inspect body.
+        JsonDocument doc;
+        try { doc = JsonDocument.Parse(respText); }
+        catch (JsonException ex)
+        {
+            return new ResolveOutcome(ResolveStatus.Failed, $"Could not parse GraphQL response: {ex.Message}");
+        }
+        using (doc)
+        {
+            if (doc.RootElement.TryGetProperty("errors", out var errs)
+                && errs.ValueKind == JsonValueKind.Array
+                && errs.GetArrayLength() > 0)
+            {
+                // Best-effort detection of "already resolved" so the user
+                // doesn't see a spurious error when two reviewers race.
+                // GitHub's exact code string for this case is documented as
+                // an unprocessable / validation error; we conservatively
+                // pattern-match on the message to avoid coupling to a
+                // specific code string that may change.
+                foreach (var err in errs.EnumerateArray())
+                {
+                    var msg = err.TryGetProperty("message", out var m) ? m.GetString() ?? "" : "";
+                    if (msg.Contains("already resolved", StringComparison.OrdinalIgnoreCase) ||
+                        msg.Contains("Thread is resolved", StringComparison.OrdinalIgnoreCase))
+                    {
+                        return new ResolveOutcome(ResolveStatus.AlreadyResolved, null);
+                    }
+                }
+                return new ResolveOutcome(ResolveStatus.Failed, $"GraphQL errors: {errs}");
+            }
+
+            // Success path: check the returned isResolved flag. If true,
+            // count it as Resolved (we don't distinguish "we just resolved"
+            // from "it was already resolved upstream" when the mutation
+            // returned success — both are wins).
+            if (doc.RootElement.TryGetProperty("data", out var data)
+                && data.TryGetProperty("resolveReviewThread", out var rrt)
+                && rrt.TryGetProperty("thread", out var th)
+                && th.TryGetProperty("isResolved", out var ir)
+                && ir.ValueKind == JsonValueKind.True)
+            {
+                return new ResolveOutcome(ResolveStatus.Resolved, null);
+            }
+
+            return new ResolveOutcome(ResolveStatus.Failed,
+                "GraphQL returned 200 OK but the thread did not transition to resolved.");
+        }
+    }
+
     private async Task<string?> TryGetCurrentHeadAsync(string token, PrUrlRef target, CancellationToken ct)
     {
         try
