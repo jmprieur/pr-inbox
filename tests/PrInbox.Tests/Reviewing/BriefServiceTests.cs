@@ -272,4 +272,20 @@ public class BriefServiceTests
 
         Assert.Contains("./posting-style.md", md);
     }
+
+    [Fact]
+    public void Output_Contract_Tells_Agent_It_Is_The_Reviewer()
+    {
+        var pr = MakePr();
+        var snap = MakeSnapshot();
+
+        var md = BriefService.BuildBriefMarkdown(pr, snap,
+            openThreads: Array.Empty<ObservedThreadRow>(),
+            recentBotThreads: Array.Empty<ObservedThreadRow>(),
+            priorRuns: Array.Empty<ReviewRunRow>(),
+            runDir: @"C:\runs\x");
+
+        Assert.Contains("running **as** the dual-model-review agent", md);
+        Assert.Contains("do not spawn another dual-model-review", md);
+    }
 }

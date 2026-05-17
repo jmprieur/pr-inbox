@@ -369,6 +369,8 @@ public sealed class BriefService
 
         sb.AppendLine("## Output contract");
         sb.AppendLine();
+        sb.AppendLine("You are running **as** the dual-model-review agent — do the review yourself with the asymmetry pattern; do not spawn another dual-model-review.");
+        sb.AppendLine();
         sb.AppendLine($"Write `findings.yaml` (schema v1, see `./findings.schema.json` next to this brief) to this run directory:");
         sb.AppendLine();
         sb.AppendLine($"`{runDir}`");
