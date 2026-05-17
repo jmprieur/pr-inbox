@@ -112,7 +112,7 @@ public sealed class InboxSyncHostedService : BackgroundService
             await RefreshFromCacheAsync(ct);
             await RunEnrichSyncAsync(ct);
             await RefreshFromCacheAsync(ct);
-            _state.NoteSync($"Synced at {DateTimeOffset.UtcNow:HH:mm:ss} UTC");
+            _state.NoteSync($"Synced at {DateTimeOffset.Now:HH:mm:ss}");
         }
         catch (Exception ex)
         {
