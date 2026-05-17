@@ -194,6 +194,72 @@ button.review:hover { background: rgba(93,164,255,0.12); }
     overflow-x: auto;
 }
 
+/* Editable body textarea inside each finding row. Same monospace look
+   as .comment-preview so what-you-edit matches what-gets-posted. */
+.draft-block {
+    margin: 0.4rem 0 0.6rem 0;
+}
+.draft-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    margin-bottom: 0.25rem;
+    font-size: 0.85rem;
+}
+.comment-draft {
+    width: 100%;
+    box-sizing: border-box;
+    background: rgba(127, 127, 127, 0.05);
+    border: 1px solid var(--line);
+    border-left: 3px solid rgba(127, 127, 127, 0.3);
+    border-radius: 3px;
+    padding: 0.6rem 0.8rem;
+    font-family: ui-monospace, Consolas, monospace;
+    font-size: 0.85rem;
+    line-height: 1.4;
+    color: inherit;
+    resize: vertical;
+    min-height: 6rem;
+}
+.comment-draft:focus {
+    outline: none;
+    border-color: var(--accent, #4a90e2);
+    background: rgba(127, 127, 127, 0.02);
+}
+.rendered-preview {
+    margin-top: 0.4rem;
+}
+.rendered-preview > summary {
+    cursor: pointer;
+    padding: 0.15rem 0;
+}
+.edit-badge {
+    display: inline-block;
+    margin-left: 0.4rem;
+    padding: 0.05rem 0.4rem;
+    border-radius: 3px;
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: lowercase;
+    background: rgba(240, 173, 78, 0.18);
+    color: #c08000;
+    vertical-align: middle;
+}
+button.link-like {
+    background: none;
+    border: none;
+    padding: 0;
+    margin: 0;
+    color: var(--accent, #4a90e2);
+    cursor: pointer;
+    font: inherit;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+}
+button.link-like:hover { filter: brightness(1.1); }
+button.link-like:disabled { color: var(--muted); cursor: default; text-decoration: none; }
+
 .findings-table {
     width: 100%;
     border-collapse: collapse;

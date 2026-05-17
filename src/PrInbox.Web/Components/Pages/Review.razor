@@ -1,6 +1,7 @@
 @page "/review"
 @rendermode InteractiveServer
 @using System.Collections.Generic
+@using System.IO
 @using PrInbox.Core.Findings
 @using PrInbox.Publishers
 @using PrInbox.Web.Services
@@ -23,6 +24,14 @@
     <a href="/" class="muted">← back to inbox</a>
     <span>&nbsp;·&nbsp;</span>
     <a href="@Url" target="_blank" rel="noopener">@Url</a>
+    @if (_run is not null && _run.Findings is not null)
+    {
+        <span>&nbsp;·&nbsp;</span>
+        <button type="button" class="link-like" @onclick="OnOpenFindingsYaml"
+                title="Open findings.yaml in your default editor. Save the file to update the UI.">
+            Open findings.yaml
+        </button>
+    }
 </div>
 
 @if (_run is null)
@@ -67,15 +76,42 @@ else
                                @onchange="@(e => ToggleSelected(fid, (bool)e.Value!))" /></td>
                     <td><span class="@SevClass(f.Severity)">@f.Severity.ToString().ToLowerInvariant()</span></td>
                     <td><code>@f.File:@(f.Line?.ToString() ?? "?")</code></td>
-                    <td>@f.Title</td>
+                    <td>
+                        @f.Title
+                        @if (HasOverride(fid))
+                        {
+                            <span class="edit-badge" title="Body has been edited locally; original is in findings.yaml">edited</span>
+                        }
+                    </td>
                     <td class="muted">@(f.DiffAnchorable ? "inline" : "body-only")</td>
                 </tr>
                 <tr class="preview-row">
                     <td></td>
                     <td colspan="4">
                         <details>
-                            <summary class="muted">Preview comment</summary>
-                            <pre class="comment-preview">@PublishHelpers.ComposeInlineCommentBody(ToPostable(f))</pre>
+                            <summary class="muted">Preview / edit comment</summary>
+                            <div class="draft-block">
+                                <div class="draft-toolbar">
+                                    <span class="muted">Body (editable; blur to save)</span>
+                                    @if (HasOverride(fid))
+                                    {
+                                        <button type="button" class="link-like"
+                                                @onclick="@(() => OnResetDraft(fid))"
+                                                title="Drop the edit and restore the body the agent wrote.">
+                                            Reset to original
+                                        </button>
+                                    }
+                                </div>
+                                <textarea class="comment-draft"
+                                          rows="8"
+                                          spellcheck="false"
+                                          value="@DraftFor(fid, f.Body ?? string.Empty)"
+                                          @onchange="@(e => OnDraftCommit(fid, f.Body ?? string.Empty, e.Value as string))"></textarea>
+                            </div>
+                            <details class="rendered-preview">
+                                <summary class="muted">Rendered comment (what gets posted)</summary>
+                                <pre class="comment-preview">@PublishHelpers.ComposeInlineCommentBody(ToPostable(f))</pre>
+                            </details>
                         </details>
                     </td>
                 </tr>
@@ -294,7 +330,84 @@ else
         return $"Findings: {picks.Count} ({c} critical, {h} high, {m} medium, {l} low).";
     }
 
-    private static FindingToPost ToPostable(Finding f) => new(
+    /// <summary>
+    /// True when the user has saved a body edit for this finding.
+    /// </summary>
+    private bool HasOverride(string fid)
+        => !string.IsNullOrEmpty(fid)
+           && _run?.BodyOverrides.ContainsKey(fid) == true;
+
+    /// <summary>
+    /// The text the textarea should currently show: override if any,
+    /// else the parsed body from findings.yaml.
+    /// </summary>
+    private string DraftFor(string fid, string original)
+    {
+        if (_run is not null
+            && !string.IsNullOrEmpty(fid)
+            && _run.BodyOverrides.TryGetValue(fid, out var edited))
+        {
+            return edited;
+        }
+        return original;
+    }
+
+    /// <summary>
+    /// Commit a textarea blur: if the new value matches the original
+    /// (after line-ending normalisation) or is empty/whitespace, clear
+    /// the override -- both mean "go back to the agent's prose, don't
+    /// post a blank body". Otherwise save the override.
+    /// </summary>
+    private void OnDraftCommit(string fid, string original, string? newValue)
+    {
+        if (string.IsNullOrEmpty(Url) || string.IsNullOrEmpty(fid)) return;
+        var draft = newValue ?? string.Empty;
+        var normDraft    = NormalizeLineEndings(draft);
+        var normOriginal = NormalizeLineEndings(original);
+        if (string.IsNullOrWhiteSpace(normDraft) || normDraft == normOriginal)
+        {
+            Runs.ClearBodyOverride(Url, fid);
+        }
+        else
+        {
+            Runs.SetBodyOverride(Url, fid, draft);
+        }
+    }
+
+    private void OnResetDraft(string fid)
+    {
+        if (string.IsNullOrEmpty(Url) || string.IsNullOrEmpty(fid)) return;
+        Runs.ClearBodyOverride(Url, fid);
+    }
+
+    private static string NormalizeLineEndings(string s)
+        => string.IsNullOrEmpty(s) ? string.Empty : s.Replace("\r\n", "\n").Replace("\r", "\n");
+
+    /// <summary>
+    /// Open findings.yaml in the OS default editor so the user can do
+    /// bulk edits beyond the body-only inline path (e.g. drop a finding,
+    /// retitle, fix severity, tweak the suggested-inline block).
+    /// </summary>
+    private void OnOpenFindingsYaml()
+    {
+        if (_run is null) return;
+        var path = Path.Combine(_run.RunDirectory, "findings.yaml");
+        if (!File.Exists(path)) return;
+        try
+        {
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = path,
+                UseShellExecute = true,
+            });
+        }
+        catch (Exception ex)
+        {
+            Log.LogWarning(ex, "Failed to open findings.yaml at {Path}", path);
+        }
+    }
+
+    private FindingToPost ToPostable(Finding f) => new(
         Id: f.Id,
         Severity: f.Severity,
         Confidence: f.Confidence,
@@ -304,7 +417,7 @@ else
         LineEnd: f.LineEnd,
         DiffAnchorable: f.DiffAnchorable,
         Title: f.Title,
-        Body: f.Body ?? "",
+        Body: DraftFor(f.Id, f.Body ?? string.Empty),
         SuggestedInline: f.SuggestedInline);
 
     private static string SevClass(FindingSeverity s) => s switch

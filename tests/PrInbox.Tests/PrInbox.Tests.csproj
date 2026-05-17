@@ -9,6 +9,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\PrInbox.Core\PrInbox.Core.csproj" />
     <ProjectReference Include="..\..\src\PrInbox.Sources\PrInbox.Sources.csproj" />
+    <ProjectReference Include="..\..\src\PrInbox.Web\PrInbox.Web.csproj" />
   </ItemGroup>
 
   <ItemGroup>

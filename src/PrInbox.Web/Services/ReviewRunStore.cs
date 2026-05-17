@@ -1,4 +1,7 @@
 using System.Collections.Concurrent;
+using System.Collections.Generic;
+using System.IO;
+using System.Text.Json;
 using PrInbox.Core.Findings;
 
 namespace PrInbox.Web.Services;
@@ -23,6 +26,17 @@ public sealed record ReviewRun(
     public int MediumCount   => CountBy(FindingSeverity.Medium);
     public int LowCount      => CountBy(FindingSeverity.Low);
 
+    /// <summary>
+    /// Per-finding body overrides keyed by <see cref="Finding.Id"/>.
+    /// Layered on top of the parsed body at post time; an absent key
+    /// means "use the agent's prose verbatim". Persisted to
+    /// <c>comment-overrides.json</c> in the run directory by
+    /// <see cref="ReviewRunStore.SetBodyOverride"/> so edits survive a
+    /// web restart or a benign reparse of <c>findings.yaml</c>.
+    /// </summary>
+    public IReadOnlyDictionary<string, string> BodyOverrides { get; init; }
+        = new Dictionary<string, string>(StringComparer.Ordinal);
+
     private int CountBy(FindingSeverity s)
         => Findings?.Findings.Count(f => f.Severity == s) ?? 0;
 }
@@ -46,12 +60,27 @@ public sealed class ReviewRunStore
 
     public void StartedRun(ReviewRun run)
     {
+        // Resume any prior comment-overrides we wrote for the same run dir
+        // (web restart, page reload, etc.) so the user's edits don't go
+        // missing across process boundaries.
+        if (run.BodyOverrides.Count == 0)
+        {
+            var fromDisk = ReadOverridesFromDisk(run.RunDirectory);
+            if (fromDisk.Count > 0)
+            {
+                run = run with { BodyOverrides = fromDisk };
+            }
+        }
         _byPrUrl[run.PrUrl] = run;
         Raise();
     }
 
     public void UpdateFindings(string prUrl, FindingsDocument? doc, IReadOnlyList<string> errors)
     {
+        // NOTE: the `with` clause intentionally leaves BodyOverrides alone.
+        // FindingsWatcher can reparse findings.yaml several times during a
+        // single run (the agent re-writes it as it works); the user's
+        // inline edits must survive those reparses.
         _byPrUrl.AddOrUpdate(prUrl,
             _ => throw new InvalidOperationException("No run for url"),
             (_, prev) => prev with
@@ -61,6 +90,111 @@ public sealed class ReviewRunStore
                 FindingsAtUtc = DateTimeOffset.UtcNow,
             });
         Raise();
+    }
+
+    /// <summary>
+    /// Set or replace a body override for one finding and persist to disk.
+    /// Caller is responsible for empty/whitespace and equality-to-original
+    /// semantics -- this method always stores whatever it's given. Use
+    /// <see cref="ClearBodyOverride"/> to remove an override.
+    /// </summary>
+    public void SetBodyOverride(string prUrl, string findingId, string body)
+    {
+        if (string.IsNullOrEmpty(findingId)) return;
+        ReviewRun? after = null;
+        _byPrUrl.AddOrUpdate(prUrl,
+            _ => throw new InvalidOperationException($"No run for url {prUrl}"),
+            (_, prev) =>
+            {
+                var dict = new Dictionary<string, string>(prev.BodyOverrides, StringComparer.Ordinal)
+                {
+                    [findingId] = body,
+                };
+                after = prev with { BodyOverrides = dict };
+                return after;
+            });
+        if (after is not null)
+        {
+            WriteOverridesToDisk(after.RunDirectory, after.BodyOverrides);
+        }
+        Raise();
+    }
+
+    /// <summary>Remove an existing override (no-op if absent).</summary>
+    public void ClearBodyOverride(string prUrl, string findingId)
+    {
+        if (string.IsNullOrEmpty(findingId)) return;
+        ReviewRun? after = null;
+        _byPrUrl.AddOrUpdate(prUrl,
+            _ => throw new InvalidOperationException($"No run for url {prUrl}"),
+            (_, prev) =>
+            {
+                if (!prev.BodyOverrides.ContainsKey(findingId)) return prev;
+                var dict = new Dictionary<string, string>(prev.BodyOverrides, StringComparer.Ordinal);
+                dict.Remove(findingId);
+                after = prev with { BodyOverrides = dict };
+                return after;
+            });
+        if (after is not null)
+        {
+            WriteOverridesToDisk(after.RunDirectory, after.BodyOverrides);
+        }
+        Raise();
+    }
+
+    /// <summary>Filename used inside a run directory.</summary>
+    internal const string OverridesFileName = "comment-overrides.json";
+
+    private static readonly JsonSerializerOptions OverridesJson = new()
+    {
+        WriteIndented = true,
+    };
+
+    private static void WriteOverridesToDisk(string runDir, IReadOnlyDictionary<string, string> overrides)
+    {
+        var path = Path.Combine(runDir, OverridesFileName);
+        try
+        {
+            if (overrides.Count == 0)
+            {
+                if (File.Exists(path)) File.Delete(path);
+                return;
+            }
+            // Sort keys so the file diffs cleanly across edits.
+            var sorted = overrides.OrderBy(kv => kv.Key, StringComparer.Ordinal)
+                                  .ToDictionary(kv => kv.Key, kv => kv.Value, StringComparer.Ordinal);
+            var json = JsonSerializer.Serialize(sorted, OverridesJson);
+            File.WriteAllText(path, json);
+        }
+        catch
+        {
+            // Best-effort persistence. The in-memory dict is authoritative
+            // for the current session; losing the file just means a future
+            // session won't see these edits.
+        }
+    }
+
+    internal static IReadOnlyDictionary<string, string> ReadOverridesFromDisk(string runDir)
+    {
+        var path = Path.Combine(runDir, OverridesFileName);
+        if (!File.Exists(path))
+        {
+            return new Dictionary<string, string>(StringComparer.Ordinal);
+        }
+        try
+        {
+            var json = File.ReadAllText(path);
+            var parsed = JsonSerializer.Deserialize<Dictionary<string, string>>(json);
+            return parsed is null
+                ? new Dictionary<string, string>(StringComparer.Ordinal)
+                : new Dictionary<string, string>(parsed, StringComparer.Ordinal);
+        }
+        catch
+        {
+            // Corrupt file -- ignore, treat as no overrides. Don't delete
+            // it; let the user inspect/repair if they care.
+            return new Dictionary<string, string>(StringComparer.Ordinal);
+        }
     }
 
     private void Raise()
