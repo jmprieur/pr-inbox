@@ -34,6 +34,7 @@ builder.Services.AddSingleton(bootCfg);
 builder.Services.AddSingleton(sp => new PullRequestRepository(sp.GetRequiredService<PrInboxDb>()));
 builder.Services.AddSingleton(sp => new PostedReviewRepository(sp.GetRequiredService<PrInboxDb>()));
 builder.Services.AddSingleton(sp => new UiPreferencesRepository(sp.GetRequiredService<PrInboxDb>()));
+builder.Services.AddSingleton(sp => new ObservedThreadRepository(sp.GetRequiredService<PrInboxDb>()));
 
 // Config service: read/write façade over PrInboxConfig used by the Settings
 // page. Mutations persist to disk and mirror back onto the singleton so
@@ -54,6 +55,11 @@ builder.Services.AddSingleton<ReviewPublishOrchestrator>(sp => new ReviewPublish
     sp.GetRequiredService<PullRequestRepository>(),
     sp.GetRequiredService<PostedReviewRepository>(),
     sp.GetRequiredService<ILogger<ReviewPublishOrchestrator>>()));
+builder.Services.AddSingleton<ThreadResolveOrchestrator>(sp => new ThreadResolveOrchestrator(
+    sp.GetRequiredService<IPublisherSelector>(),
+    sp.GetRequiredService<PullRequestRepository>(),
+    sp.GetRequiredService<ObservedThreadRepository>(),
+    sp.GetRequiredService<ILogger<ThreadResolveOrchestrator>>()));
 
 var app = builder.Build();
 

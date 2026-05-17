@@ -24,6 +24,14 @@
     <a href="/" class="muted">← back to inbox</a>
     <span>&nbsp;·&nbsp;</span>
     <a href="@Url" target="_blank" rel="noopener">@Url</a>
+    @if (IsGitHubUrl)
+    {
+        <span>&nbsp;·&nbsp;</span>
+        <a href="@($"/threads?url={Uri.EscapeDataString(Url ?? string.Empty)}")"
+           title="Manage and resolve review threads">
+            Manage threads
+        </a>
+    }
     @if (_run is not null && _run.Findings is not null)
     {
         <span>&nbsp;·&nbsp;</span>

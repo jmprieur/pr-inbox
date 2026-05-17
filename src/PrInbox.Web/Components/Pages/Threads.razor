@@ -1,0 +1,377 @@
+@page "/threads"
+@rendermode InteractiveServer
+@using System.Collections.Generic
+@using PrInbox.Core.Models
+@using PrInbox.Core.Storage
+@using PrInbox.Publishers
+@inject PullRequestRepository PrRepo
+@inject ObservedThreadRepository ThreadRepo
+@inject ThreadResolveOrchestrator Orchestrator
+@inject InboxState State
+@inject IJSRuntime Js
+@inject ILogger<Threads> Log
+
+<h1>Manage review threads</h1>
+
+@if (string.IsNullOrWhiteSpace(Url))
+{
+    <p class="empty">Missing <code>?url=</code> parameter.</p>
+    return;
+}
+
+<div class="toolbar">
+    <a href="/" class="muted">← back to inbox</a>
+    <span>&nbsp;·&nbsp;</span>
+    <a href="@Url" target="_blank" rel="noopener">@Url</a>
+    <span>&nbsp;·&nbsp;</span>
+    <a href="@($"/review?url={Uri.EscapeDataString(Url ?? string.Empty)}")" class="muted">Open review</a>
+</div>
+
+@if (_loadError is not null)
+{
+    <p class="empty error">@_loadError</p>
+}
+else if (_threads is null)
+{
+    <p class="empty">Loading threads…</p>
+}
+else if (_threads.Count == 0)
+{
+    <p class="empty">No open threads on this PR. 🎉</p>
+}
+else
+{
+    var resolveable = _threads.Where(t => t.CanResolve).ToList();
+    <div class="severity-filters">
+        <span class="muted">Bulk select:</span>
+        <button type="button" class="link-like" @onclick="() => SelectGroup(t => t.IsCopilot)">Copilot</button>
+        <button type="button" class="link-like" @onclick="() => SelectGroup(t => t.IsBot)">All bots</button>
+        <button type="button" class="link-like" @onclick="() => SelectGroup(_ => true)">All</button>
+        <button type="button" class="link-like" @onclick="ClearSelection">Clear</button>
+        <span class="muted">·</span>
+        <span class="muted">@_threads.Count thread@(_threads.Count == 1 ? "" : "s") · @resolveable.Count resolveable · @_selected.Count selected</span>
+    </div>
+
+    <table class="findings-table">
+        <thead>
+            <tr>
+                <th></th>
+                <th>Author</th>
+                <th>Anchor</th>
+                <th>Excerpt</th>
+                <th>State</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var t in _threads)
+            {
+                <tr class="@(t.CanResolve ? "" : "muted-row")">
+                    <td>
+                        @if (t.CanResolve)
+                        {
+                            <input type="checkbox"
+                                   checked="@_selected.Contains(t.NodeId!)"
+                                   @onchange="e => ToggleSelected(t.NodeId!, (bool)e.Value!)" />
+                        }
+                        else
+                        {
+                            <span class="muted" title="@t.NonResolveableReason">–</span>
+                        }
+                    </td>
+                    <td>
+                        @t.AuthorLogin
+                        @if (t.IsCopilot)
+                        {
+                            <span class="badge bot">Copilot</span>
+                        }
+                        else if (t.IsBot)
+                        {
+                            <span class="badge bot">bot</span>
+                        }
+                    </td>
+                    <td>
+                        @if (!string.IsNullOrEmpty(t.AnchorPath))
+                        {
+                            <code>@t.AnchorPath@(t.AnchorLine.HasValue ? $":{t.AnchorLine}" : "")</code>
+                        }
+                        else
+                        {
+                            <span class="muted">@t.KindLabel</span>
+                        }
+                    </td>
+                    <td class="title">@t.Excerpt</td>
+                    <td>
+                        @if (t.CanResolve)
+                        {
+                            <span class="muted">@($"open · {RelativeAge(t.CreatedAt)}")</span>
+                        }
+                        else
+                        {
+                            <span class="muted" title="@t.NonResolveableReason">@t.NonResolveableLabel</span>
+                        }
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+
+    <div class="post-toolbar">
+        <label><input type="checkbox" @bind="_dryRun" /> <strong>Dry run</strong> (recommended; no network)</label>
+        <button class="post" disabled="@(_resolving || _selected.Count == 0)" @onclick="OnResolveAsync">
+            @(_resolving
+                ? "Resolving…"
+                : _dryRun
+                    ? $"Plan resolve ({_selected.Count})"
+                    : $"Resolve {_selected.Count} thread{(_selected.Count == 1 ? "" : "s")}")
+        </button>
+    </div>
+}
+
+@if (_result is not null)
+{
+    <div class="result-card">
+        <h3>
+            @if (_result.DryRun)
+            {
+                <span>Dry-run plan</span>
+            }
+            else if (_result.Errors.Count > 0 && _result.LocalRowsMarked == 0)
+            {
+                <span class="sev-critical">Failed</span>
+            }
+            else
+            {
+                <span>Resolved</span>
+            }
+        </h3>
+        <ul class="result-meta">
+            @if (_result.PublisherResult is { } pub)
+            {
+                <li>Upstream resolved: <strong>@pub.ResolvedNodeIds.Count</strong></li>
+                <li>Already resolved upstream: <strong>@pub.AlreadyResolvedNodeIds.Count</strong></li>
+                <li>Failed: <strong>@pub.FailedNodeIds.Count</strong></li>
+            }
+            <li>Local rows marked: <strong>@_result.LocalRowsMarked</strong></li>
+            @if (_result.UnknownNodeIds.Count > 0)
+            {
+                <li>Unknown ids dropped: <strong>@_result.UnknownNodeIds.Count</strong></li>
+            }
+        </ul>
+        @if (_result.Errors.Count > 0)
+        {
+            <details open>
+                <summary>Errors (@_result.Errors.Count)</summary>
+                <ul>
+                    @foreach (var e in _result.Errors) { <li>@e</li> }
+                </ul>
+            </details>
+        }
+        @if (_result.Warnings.Count > 0)
+        {
+            <details>
+                <summary>Warnings (@_result.Warnings.Count)</summary>
+                <ul>
+                    @foreach (var w in _result.Warnings) { <li>@w</li> }
+                </ul>
+            </details>
+        }
+    </div>
+}
+
+@code {
+    [SupplyParameterFromQuery(Name = "url")]
+    public string? Url { get; set; }
+
+    private List<ThreadVm>? _threads;
+    private string? _loadError;
+    private HashSet<string> _selected = new(StringComparer.Ordinal);
+    private bool _dryRun = true;
+    private bool _resolving;
+    private ThreadResolveOrchestratorResult? _result;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _loadError = null;
+        _threads = null;
+        _selected.Clear();
+        if (string.IsNullOrWhiteSpace(Url)) return;
+        try
+        {
+            var pr = await PrRepo.GetAsync(Url, CancellationToken.None);
+            if (pr is null)
+            {
+                _loadError = $"PR {Url} not found in inbox. Sync first.";
+                return;
+            }
+            var rows = await ThreadRepo.GetOpenThreadsAsync(pr.Identity, CancellationToken.None);
+            _threads = rows.Select(ThreadVm.From).ToList();
+        }
+        catch (Exception ex)
+        {
+            Log.LogError(ex, "Failed to load threads for {Url}", Url);
+            _loadError = $"Failed to load threads: {ex.Message}";
+        }
+    }
+
+    private void ToggleSelected(string nodeId, bool selected)
+    {
+        if (selected) _selected.Add(nodeId);
+        else _selected.Remove(nodeId);
+    }
+
+    private void SelectGroup(Func<ThreadVm, bool> predicate)
+    {
+        if (_threads is null) return;
+        foreach (var t in _threads.Where(t => t.CanResolve && predicate(t)))
+        {
+            _selected.Add(t.NodeId!);
+        }
+    }
+
+    private void ClearSelection() => _selected.Clear();
+
+    private async Task OnResolveAsync()
+    {
+        if (string.IsNullOrWhiteSpace(Url)) return;
+        if (_selected.Count == 0) return;
+
+        if (!_dryRun)
+        {
+            var ok = await Js.InvokeAsync<bool>(
+                "confirm",
+                $"Resolve {_selected.Count} thread{(_selected.Count == 1 ? "" : "s")} on GitHub? This cannot be undone.");
+            if (!ok) return;
+        }
+
+        _resolving = true;
+        _result = null;
+        try
+        {
+            // Snapshot so the UI doesn't drift while the call is in flight.
+            var ids = _selected.ToList();
+            _result = await Orchestrator.ResolveAsync(Url, ids, _dryRun, CancellationToken.None);
+
+            if (!_dryRun && _result.LocalRowsMarked > 0)
+            {
+                // Refresh the inbox row so the threads-count cell drops
+                // immediately, without waiting for the next sync tick.
+                await RefreshInboxRowAsync();
+            }
+
+            await LoadAsync();
+        }
+        catch (Exception ex)
+        {
+            Log.LogError(ex, "Resolve failed for {Url}", Url);
+            _result = new ThreadResolveOrchestratorResult(
+                PublisherResult: null,
+                UnknownNodeIds: Array.Empty<string>(),
+                LocalRowsMarked: 0,
+                DryRun: _dryRun,
+                Warnings: Array.Empty<string>(),
+                Errors: new[] { ex.Message });
+        }
+        finally
+        {
+            _resolving = false;
+        }
+    }
+
+    private async Task RefreshInboxRowAsync()
+    {
+        if (string.IsNullOrWhiteSpace(Url)) return;
+        try
+        {
+            var pr = await PrRepo.GetAsync(Url, CancellationToken.None);
+            if (pr is null) return;
+
+            var openThreads = await ThreadRepo.GetOpenThreadsAsync(pr.Identity, CancellationToken.None);
+            var openCount = openThreads.Count;
+            var unresolvedBot = openThreads.Count(t => t.IsBot);
+
+            State.Upsert(InboxRow.FromRow(pr, openCount, unresolvedBot));
+        }
+        catch (Exception ex)
+        {
+            Log.LogWarning(ex, "Could not push live inbox refresh for {Url}", Url);
+        }
+    }
+
+    private static string RelativeAge(DateTimeOffset created)
+    {
+        var span = DateTimeOffset.UtcNow - created;
+        if (span.TotalDays >= 1) return $"{(int)span.TotalDays}d ago";
+        if (span.TotalHours >= 1) return $"{(int)span.TotalHours}h ago";
+        if (span.TotalMinutes >= 1) return $"{(int)span.TotalMinutes}m ago";
+        return "just now";
+    }
+
+    private sealed record ThreadVm(
+        string PlatformThreadId,
+        string? NodeId,
+        ThreadKind Kind,
+        string? AuthorLogin,
+        bool IsBot,
+        bool IsCopilot,
+        DateTimeOffset CreatedAt,
+        string? AnchorPath,
+        int? AnchorLine,
+        string? Excerpt,
+        bool CanResolve,
+        string KindLabel,
+        string NonResolveableLabel,
+        string NonResolveableReason)
+    {
+        public static ThreadVm From(ObservedThreadRow row)
+        {
+            var isCopilot = row.BotKind is BotKind.CopilotReview or BotKind.CopilotCodingAgent;
+            // Three non-resolveable states:
+            //   1. Wrong kind (issue_comment, review_body, ado_thread).
+            //   2. Right kind, node id null (GraphQL hasn't backfilled yet).
+            //   3. Right kind, node id present (this is the only resolveable case).
+            bool canResolve;
+            string label, reason;
+            if (row.Kind != ThreadKind.ReviewComment)
+            {
+                canResolve = false;
+                label = "not resolveable";
+                reason = "Only inline review comments can be resolved through this view. " +
+                         $"This thread is a {row.Kind}.";
+            }
+            else if (string.IsNullOrEmpty(row.PlatformThreadNodeId))
+            {
+                canResolve = false;
+                label = "id pending";
+                reason = "GraphQL thread id has not been synced yet. " +
+                         "Re-sync the inbox to backfill, then come back here.";
+            }
+            else
+            {
+                canResolve = true;
+                label = string.Empty;
+                reason = string.Empty;
+            }
+
+            return new ThreadVm(
+                PlatformThreadId: row.PlatformThreadId,
+                NodeId: row.PlatformThreadNodeId,
+                Kind: row.Kind,
+                AuthorLogin: row.AuthorLogin,
+                IsBot: row.IsBot,
+                IsCopilot: isCopilot,
+                CreatedAt: row.FirstSeenAt,
+                AnchorPath: row.AnchorPath,
+                AnchorLine: row.AnchorLine,
+                Excerpt: row.LastCommentBody,
+                CanResolve: canResolve,
+                KindLabel: row.Kind.ToString(),
+                NonResolveableLabel: label,
+                NonResolveableReason: reason);
+        }
+    }
+}

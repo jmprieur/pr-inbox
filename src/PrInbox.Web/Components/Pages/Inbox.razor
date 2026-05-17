@@ -102,6 +102,17 @@ else
                         {
                             <span class="muted">–</span>
                         }
+                        else if (row.SourceKind == SourceKind.GitHub || row.SourceKind == SourceKind.GitHubEnterprise)
+                        {
+                            <a href="@($"/threads?url={Uri.EscapeDataString(row.Url)}")"
+                               title="Manage and resolve threads">
+                                @row.OpenThreadCount
+                            </a>
+                            @if (row.UnresolvedBotCount > 0)
+                            {
+                                <span class="muted"> (@row.UnresolvedBotCount bot)</span>
+                            }
+                        }
                         else
                         {
                             <span>@row.OpenThreadCount</span>
