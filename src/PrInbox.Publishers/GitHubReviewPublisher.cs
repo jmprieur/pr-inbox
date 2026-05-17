@@ -62,7 +62,11 @@ public sealed class GitHubReviewPublisher : IPrReviewPublisher
 
     public async Task<PublishResult> PublishAsync(PublishRequest request, CancellationToken ct)
     {
-        if (request.Findings.Count == 0)
+        // For a plain "comment" review, the user must pick at least one
+        // finding (otherwise we'd post a review with nothing in it). For an
+        // explicit approve / request-changes vote, an empty selection is
+        // legitimate — the review body header is the carrier.
+        if (request.Findings.Count == 0 && request.Event == ReviewEvent.Comment)
         {
             return PublishResult.Failure(_identityUsed, "No findings selected.");
         }
@@ -95,7 +99,7 @@ public sealed class GitHubReviewPublisher : IPrReviewPublisher
                 bodyOnlyCount: nonAnchorable.Count,
                 skipped: 0,
                 identityUsed: _identityUsed,
-                warning: $"Dry-run: would POST to {ApiBase(target)}/repos/{target.Owner}/{target.Repo}/pulls/{target.Number}/reviews as '{_identityUsed}'.");
+                warning: $"Dry-run: would POST {MapEvent(request.Event)} to {ApiBase(target)}/repos/{target.Owner}/{target.Repo}/pulls/{target.Number}/reviews as '{_identityUsed}'.");
         }
 
         // Live path.
@@ -125,7 +129,7 @@ public sealed class GitHubReviewPublisher : IPrReviewPublisher
         var body = new ReviewBody
         {
             CommitId = headSha,
-            Event = "COMMENT",
+            Event = MapEvent(request.Event),
             Body = reviewBody,
             Comments = inlinePayloads,
         };
@@ -217,6 +221,13 @@ public sealed class GitHubReviewPublisher : IPrReviewPublisher
         }
         return null;
     }
+
+    private static string MapEvent(ReviewEvent e) => e switch
+    {
+        ReviewEvent.Approve => "APPROVE",
+        ReviewEvent.RequestChanges => "REQUEST_CHANGES",
+        _ => "COMMENT",
+    };
 
     private static InlineCommentPayload BuildInlinePayload(FindingToPost f)
     {

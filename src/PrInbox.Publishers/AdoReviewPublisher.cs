@@ -43,6 +43,13 @@ public sealed class AdoReviewPublisher : IPrReviewPublisher
 
     public async Task<PublishResult> PublishAsync(PublishRequest request, CancellationToken ct)
     {
+        if (request.Event != ReviewEvent.Comment)
+        {
+            return PublishResult.Failure(_identityUsed,
+                "Azure DevOps doesn't support an Approve / Request-changes vote through this publisher. " +
+                "Use the PR page directly to vote.");
+        }
+
         if (request.Findings.Count == 0)
         {
             return PublishResult.Failure(_identityUsed, "No findings selected.");

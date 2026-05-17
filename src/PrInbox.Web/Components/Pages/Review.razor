@@ -126,9 +126,20 @@ else
 
     <div class="post-row">
         <label><input type="checkbox" @bind="_dryRun" /> <strong>Dry run</strong> (recommended; no network)</label>
-        <button class="review" disabled="@(_posting || _selected.Count == 0)"
+        @if (IsGitHubUrl)
+        {
+            <label class="review-event">
+                Verdict:
+                <select @bind="_reviewEvent" disabled="@_posting">
+                    <option value="@ReviewEvent.Comment">Comment</option>
+                    <option value="@ReviewEvent.Approve">Approve</option>
+                    <option value="@ReviewEvent.RequestChanges">Request changes</option>
+                </select>
+            </label>
+        }
+        <button class="review" disabled="@PostDisabled"
                 @onclick="OnPostSelected">
-            @(_posting ? "Posting..." : (_dryRun ? $"Plan {_selected.Count} (dry-run)" : $"Post {_selected.Count} live"))
+            @PostButtonLabel
         </button>
     </div>
 }
@@ -190,6 +201,7 @@ else
     private bool _showMedium = false;
     private bool _showLow = false;
     private bool _dryRun = true;
+    private ReviewEvent _reviewEvent = ReviewEvent.Comment;
     private bool _posting;
     private PublishResult? _result;
 
@@ -270,12 +282,22 @@ else
     {
         if (_run?.Findings is null || string.IsNullOrEmpty(Url)) return;
         var picks = _run.Findings.Findings.Where(f => _selected.Contains(f.Id)).ToList();
-        if (picks.Count == 0) return;
+        // For a plain Comment review, posting nothing is meaningless; for
+        // an Approve / Request-changes vote, the body header alone is fine.
+        if (picks.Count == 0 && _reviewEvent == ReviewEvent.Comment) return;
 
         if (!_dryRun)
         {
-            var ok = await Js.InvokeAsync<bool>("confirm",
-                $"Post {picks.Count} finding(s) live to {Url}? This cannot be undone.");
+            var verb = _reviewEvent switch
+            {
+                ReviewEvent.Approve => "Approve",
+                ReviewEvent.RequestChanges => "Request changes on",
+                _ => "Post",
+            };
+            var suffix = picks.Count == 0
+                ? $"{verb} {Url}? This cannot be undone."
+                : $"{verb} {Url} with {picks.Count} finding(s)? This cannot be undone.";
+            var ok = await Js.InvokeAsync<bool>("confirm", suffix);
             if (!ok) return;
         }
 
@@ -291,7 +313,8 @@ else
                 ReviewBodyHeader: BuildReviewBodyHeader(picks),
                 Findings: picks.Select(ToPostable).ToArray(),
                 DryRun: _dryRun,
-                ValidateRemoteState: !_dryRun);
+                ValidateRemoteState: !_dryRun,
+                Event: _reviewEvent);
 
             _result = await Orchestrator.PublishAsync(publishRequest, CancellationToken.None);
         }
@@ -419,6 +442,45 @@ else
         Title: f.Title,
         Body: DraftFor(f.Id, f.Body ?? string.Empty),
         SuggestedInline: f.SuggestedInline);
+
+    /// <summary>True for GitHub.com / GHE URLs; false for ADO (which has
+    /// no Approve/Request-changes verb wired through this publisher).</summary>
+    private bool IsGitHubUrl =>
+        !string.IsNullOrEmpty(Url) &&
+        !Url.Contains("dev.azure.com", StringComparison.OrdinalIgnoreCase) &&
+        !Url.Contains("visualstudio.com", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Post button is disabled when posting, OR when a plain Comment review
+    /// would have no comments. Approve / Request-changes votes are allowed
+    /// with no selected findings (the body header carries the verdict).
+    /// </summary>
+    private bool PostDisabled =>
+        _posting || (_reviewEvent == ReviewEvent.Comment && _selected.Count == 0);
+
+    private string PostButtonLabel
+    {
+        get
+        {
+            if (_posting) return "Posting...";
+            var verb = _reviewEvent switch
+            {
+                ReviewEvent.Approve => "approve",
+                ReviewEvent.RequestChanges => "request changes",
+                _ => null,
+            };
+            var n = _selected.Count;
+            if (_dryRun)
+            {
+                return verb is null
+                    ? $"Plan {n} (dry-run)"
+                    : $"Plan {verb} (dry-run, {n} finding{(n == 1 ? "" : "s")})";
+            }
+            return verb is null
+                ? $"Post {n} live"
+                : $"Post {verb} live ({n} finding{(n == 1 ? "" : "s")})";
+        }
+    }
 
     private static string SevClass(FindingSeverity s) => s switch
     {

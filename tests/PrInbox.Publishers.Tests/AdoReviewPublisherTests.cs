@@ -96,6 +96,34 @@ public sealed class AdoReviewPublisherTests
         handler.Requests.Should().HaveCount(3);
     }
 
+    [Fact]
+    public async Task Approve_event_is_rejected_on_ADO()
+    {
+        var handler = new RecordingHandler(_ => throw new InvalidOperationException(
+            "Should fail before any HTTP call."));
+        using var http = new HttpClient(handler);
+        var token = new FakeTokenProvider(_ => "tk");
+
+        var publisher = new AdoReviewPublisher(
+            token, http, identityUsed: "azurecli",
+            log: NullLogger<AdoReviewPublisher>.Instance);
+
+        var req = new PublishRequest(
+            PrUrl: "https://dev.azure.com/mseng/Context/_git/Private/pullrequest/100",
+            RunId: 7,
+            HeadShaAtAuthoring: "abc123",
+            ReviewBodyHeader: "header",
+            Findings: new[] { Finding("f01", anchorable: true) },
+            DryRun: false,
+            ValidateRemoteState: false,
+            Event: ReviewEvent.Approve);
+
+        var result = await publisher.PublishAsync(req, CancellationToken.None);
+        result.Posted.Should().BeFalse();
+        result.Errors.Should().Contain(e => e.Contains("Azure DevOps", StringComparison.OrdinalIgnoreCase));
+        handler.Requests.Should().BeEmpty();
+    }
+
     private static FindingToPost Finding(string id, bool anchorable)
         => new(
             Id: id,

@@ -198,6 +198,120 @@ public sealed class GitHubReviewPublisherTests
         result.BodyOnlyCount.Should().Be(1);
     }
 
+    [Fact]
+    public async Task Approve_event_sends_APPROVE_in_payload()
+    {
+        var handler = new RecordingHandler(req =>
+        {
+            var payload = JsonDocument.Parse(req.Content!.ReadAsStringAsync().Result);
+            payload.RootElement.GetProperty("event").GetString().Should().Be("APPROVE");
+            return new HttpResponseMessage(HttpStatusCode.Created)
+            {
+                Content = new StringContent(@"{""id"":1,""html_url"":""u""}", System.Text.Encoding.UTF8, "application/json"),
+            };
+        });
+        using var http = new HttpClient(handler);
+        var token = new FakeTokenProvider(_ => "tk");
+
+        var publisher = new GitHubReviewPublisher(
+            token, http, isEnterprise: false, host: "github.com",
+            identityUsed: "jmprieur",
+            log: NullLogger<GitHubReviewPublisher>.Instance);
+
+        var req = MakeRequest(
+            url: "https://github.com/owner/repo/pull/42",
+            findings: new[] { Finding("f01") },
+            reviewEvent: ReviewEvent.Approve);
+
+        var result = await publisher.PublishAsync(req, CancellationToken.None);
+        result.Posted.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task RequestChanges_event_sends_REQUEST_CHANGES_in_payload()
+    {
+        var handler = new RecordingHandler(req =>
+        {
+            var payload = JsonDocument.Parse(req.Content!.ReadAsStringAsync().Result);
+            payload.RootElement.GetProperty("event").GetString().Should().Be("REQUEST_CHANGES");
+            return new HttpResponseMessage(HttpStatusCode.Created)
+            {
+                Content = new StringContent(@"{""id"":1,""html_url"":""u""}", System.Text.Encoding.UTF8, "application/json"),
+            };
+        });
+        using var http = new HttpClient(handler);
+        var token = new FakeTokenProvider(_ => "tk");
+
+        var publisher = new GitHubReviewPublisher(
+            token, http, isEnterprise: false, host: "github.com",
+            identityUsed: "jmprieur",
+            log: NullLogger<GitHubReviewPublisher>.Instance);
+
+        var req = MakeRequest(
+            url: "https://github.com/owner/repo/pull/42",
+            findings: new[] { Finding("f01") },
+            reviewEvent: ReviewEvent.RequestChanges);
+
+        var result = await publisher.PublishAsync(req, CancellationToken.None);
+        result.Posted.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task Approve_with_zero_findings_is_allowed()
+    {
+        var handler = new RecordingHandler(req =>
+        {
+            var payload = JsonDocument.Parse(req.Content!.ReadAsStringAsync().Result);
+            payload.RootElement.GetProperty("event").GetString().Should().Be("APPROVE");
+            payload.RootElement.GetProperty("comments").GetArrayLength().Should().Be(0);
+            return new HttpResponseMessage(HttpStatusCode.Created)
+            {
+                Content = new StringContent(@"{""id"":1,""html_url"":""u""}", System.Text.Encoding.UTF8, "application/json"),
+            };
+        });
+        using var http = new HttpClient(handler);
+        var token = new FakeTokenProvider(_ => "tk");
+
+        var publisher = new GitHubReviewPublisher(
+            token, http, isEnterprise: false, host: "github.com",
+            identityUsed: "jmprieur",
+            log: NullLogger<GitHubReviewPublisher>.Instance);
+
+        var req = MakeRequest(
+            url: "https://github.com/owner/repo/pull/42",
+            findings: Array.Empty<FindingToPost>(),
+            reviewEvent: ReviewEvent.Approve);
+
+        var result = await publisher.PublishAsync(req, CancellationToken.None);
+        result.Posted.Should().BeTrue();
+        result.InlineCount.Should().Be(0);
+        result.BodyOnlyCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task Comment_with_zero_findings_is_rejected()
+    {
+        var handler = new RecordingHandler(_ => throw new InvalidOperationException(
+            "Should fail before any HTTP call."));
+        using var http = new HttpClient(handler);
+        var token = new FakeTokenProvider(_ => "tk");
+
+        var publisher = new GitHubReviewPublisher(
+            token, http, isEnterprise: false, host: "github.com",
+            identityUsed: "jmprieur",
+            log: NullLogger<GitHubReviewPublisher>.Instance);
+
+        var req = MakeRequest(
+            url: "https://github.com/owner/repo/pull/42",
+            findings: Array.Empty<FindingToPost>(),
+            reviewEvent: ReviewEvent.Comment);
+
+        var result = await publisher.PublishAsync(req, CancellationToken.None);
+        result.Posted.Should().BeFalse();
+        result.Errors.Should().Contain(e => e.Contains("No findings selected"));
+        handler.Requests.Should().BeEmpty();
+    }
+
     // -- helpers --
 
     private static PublishRequest MakeRequest(
@@ -205,7 +319,8 @@ public sealed class GitHubReviewPublisherTests
         IReadOnlyList<FindingToPost> findings,
         bool dryRun = false,
         bool validateRemoteState = false,
-        string headSha = "abc123") =>
+        string headSha = "abc123",
+        ReviewEvent reviewEvent = ReviewEvent.Comment) =>
         new(
             PrUrl: url,
             RunId: 7,
@@ -213,7 +328,8 @@ public sealed class GitHubReviewPublisherTests
             ReviewBodyHeader: "Findings: 1 (1 critical, 0 high, 0 medium, 0 low).",
             Findings: findings,
             DryRun: dryRun,
-            ValidateRemoteState: validateRemoteState);
+            ValidateRemoteState: validateRemoteState,
+            Event: reviewEvent);
 
     private static FindingToPost Finding(
         string id, string file = "src/Foo.cs", int line = 42, bool anchorable = true)

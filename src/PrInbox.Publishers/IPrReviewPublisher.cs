@@ -3,6 +3,26 @@ using PrInbox.Core.Findings;
 namespace PrInbox.Publishers;
 
 /// <summary>
+/// The high-level state to set on the review when posting.
+/// Mirrors GitHub's review <c>event</c> field.
+/// </summary>
+/// <remarks>
+/// <list type="bullet">
+///   <item><see cref="Comment"/> — file plain review comments; no vote.</item>
+///   <item><see cref="Approve"/> — explicit thumbs-up review.</item>
+///   <item><see cref="RequestChanges"/> — explicit thumbs-down review.</item>
+/// </list>
+/// Azure DevOps has no direct equivalent; the ADO publisher rejects
+/// anything other than <see cref="Comment"/>.
+/// </remarks>
+public enum ReviewEvent
+{
+    Comment = 0,
+    Approve = 1,
+    RequestChanges = 2,
+}
+
+/// <summary>
 /// One finding selected by the user for posting. A simplified, transport-
 /// ready projection of a <see cref="Finding"/> from findings.yaml.
 /// </summary>
@@ -55,6 +75,10 @@ public sealed record FindingToPost(
 /// <see cref="HeadShaAtAuthoring"/>; surface a warning if changed. Ignored
 /// (forced false) when <c>DryRun</c> is <c>true</c>.
 /// </param>
+/// <param name="Event">
+/// GitHub-style review verb: comment / approve / request changes. Defaults
+/// to <see cref="ReviewEvent.Comment"/> to preserve existing behaviour.
+/// </param>
 public sealed record PublishRequest(
     string PrUrl,
     long? RunId,
@@ -62,7 +86,8 @@ public sealed record PublishRequest(
     string ReviewBodyHeader,
     IReadOnlyList<FindingToPost> Findings,
     bool DryRun,
-    bool ValidateRemoteState);
+    bool ValidateRemoteState,
+    ReviewEvent Event = ReviewEvent.Comment);
 
 /// <summary>
 /// Outcome of a publish call. Never throws on policy violations (HEAD
