@@ -1,3 +1,4 @@
+using PrInbox.Core.Config;
 using PrInbox.Core.Credentials;
 using PrInbox.Core.Models;
 using PrInbox.Core.Storage;
@@ -207,6 +208,62 @@ public sealed class InboxSyncHostedService : BackgroundService
             {
                 _log.LogWarning(ex, "Enrich of {SourceId} failed", rt.Source.SourceId);
             }
+        }
+    }
+
+    /// <summary>
+    /// Force an enrich pass on a single PR by URL — bypasses the
+    /// <c>ListNeedingEnrichmentAsync</c> candidate filter so already-enriched
+    /// rows can also be refreshed (e.g. to backfill new columns added by a
+    /// schema bump). After the enrich call, the inbox row is re-pushed
+    /// through <see cref="InboxState"/> so the UI updates in place.
+    /// Returns true if a runtime owned the PR and the enrich completed.
+    /// </summary>
+    public async Task<(bool ok, string? error)> TriggerEnrichOneAsync(string prUrl, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(prUrl)) return (false, "Empty PR URL.");
+        try
+        {
+            var config = await PrInboxConfig.LoadAsync(null);
+            var (prRepo, threadRepo, snapRepo, syncRunRepo) = OpenFullRepos();
+            var runtimes = new SourceFactory().Build(config);
+
+            // Match runtime by SourceId via the row's recorded binding so we
+            // never try to enrich a PR with the wrong identity / token.
+            var row = await prRepo.GetAsync(prUrl, ct);
+            if (row is null) return (false, "PR not found in cache.");
+
+            var rt = runtimes.FirstOrDefault(r =>
+                string.Equals(r.Source.SourceId, row.SourceId, StringComparison.Ordinal) &&
+                string.Equals(r.Identity, row.IdentityUsed, StringComparison.Ordinal));
+            if (rt is null) return (false, $"No configured source matches '{row.SourceId}' / '{row.IdentityUsed}'.");
+
+            var orchestrator = new SyncOrchestrator(rt.Source, prRepo, snapRepo, threadRepo, syncRunRepo);
+            var refreshed = await orchestrator.RunEnrichOneAsync(prUrl, ct);
+            if (refreshed is null) return (false, "PR not owned by any source runtime.");
+
+            // Push the updated row into the live UI so the threads cell and
+            // any open /threads page see the new node ids immediately.
+            try
+            {
+                var fresh = await prRepo.GetAsync(prUrl, ct);
+                if (fresh is not null)
+                {
+                    var (open, bot) = await CountThreadsAsync(threadRepo, fresh.Identity, ct);
+                    _state.Upsert(InboxRow.FromRow(fresh, open, bot));
+                }
+            }
+            catch (Exception ex)
+            {
+                _log.LogDebug(ex, "Post-enrich inbox refresh failed for {Url}", prUrl);
+            }
+
+            return (true, null);
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning(ex, "Single-PR enrich for {Url} failed", prUrl);
+            return (false, $"{ex.GetType().Name}: {ex.Message}");
         }
     }
 

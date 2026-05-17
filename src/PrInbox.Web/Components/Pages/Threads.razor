@@ -4,10 +4,12 @@
 @using PrInbox.Core.Models
 @using PrInbox.Core.Storage
 @using PrInbox.Publishers
+@using PrInbox.Web.Services
 @inject PullRequestRepository PrRepo
 @inject ObservedThreadRepository ThreadRepo
 @inject ThreadResolveOrchestrator Orchestrator
 @inject InboxState State
+@inject InboxSyncHostedService SyncSvc
 @inject IJSRuntime Js
 @inject ILogger<Threads> Log
 
@@ -25,6 +27,15 @@
     <a href="@Url" target="_blank" rel="noopener">@Url</a>
     <span>&nbsp;·&nbsp;</span>
     <a href="@($"/review?url={Uri.EscapeDataString(Url ?? string.Empty)}")" class="muted">Open review</a>
+    <span>&nbsp;·&nbsp;</span>
+    <button type="button" class="link-like" @onclick="OnRefreshNodeIdsAsync" disabled="@_refreshing"
+            title="Re-fetch threads from GitHub so the resolveable node ids backfill. Use this when threads show 'id pending'.">
+        @(_refreshing ? "Refreshing…" : "Refresh thread ids")
+    </button>
+    @if (_refreshMessage is not null)
+    {
+        <span class="muted">&nbsp;·&nbsp;@_refreshMessage</span>
+    }
 </div>
 
 @if (_loadError is not null)
@@ -187,11 +198,45 @@ else
     private HashSet<string> _selected = new(StringComparer.Ordinal);
     private bool _dryRun = true;
     private bool _resolving;
+    private bool _refreshing;
+    private string? _refreshMessage;
     private ThreadResolveOrchestratorResult? _result;
 
     protected override async Task OnParametersSetAsync()
     {
         await LoadAsync();
+    }
+
+    private async Task OnRefreshNodeIdsAsync()
+    {
+        if (string.IsNullOrWhiteSpace(Url) || _refreshing) return;
+        _refreshing = true;
+        _refreshMessage = null;
+        try
+        {
+            var (ok, error) = await SyncSvc.TriggerEnrichOneAsync(Url, CancellationToken.None);
+            if (!ok)
+            {
+                _refreshMessage = $"Refresh failed: {error}";
+                return;
+            }
+            // Reload the threads view so newly-backfilled node ids switch
+            // rows from 'id pending' to checkbox-enabled.
+            await LoadAsync();
+            var pending = _threads?.Count(t => t.Kind == ThreadKind.ReviewComment && t.NodeId is null) ?? 0;
+            _refreshMessage = pending == 0
+                ? "Refreshed — all review-comment threads now have node ids."
+                : $"Refreshed — {pending} review-comment thread{(pending == 1 ? "" : "s")} still missing node id (deleted upstream?).";
+        }
+        catch (Exception ex)
+        {
+            Log.LogError(ex, "Manual node-id refresh failed for {Url}", Url);
+            _refreshMessage = $"Refresh failed: {ex.Message}";
+        }
+        finally
+        {
+            _refreshing = false;
+        }
     }
 
     private async Task LoadAsync()
@@ -221,8 +266,7 @@ else
     private void ToggleSelected(string nodeId, bool selected)
     {
         if (selected) _selected.Add(nodeId);
-        else _selected.Remove(nodeId);
-    }
+        else _selected.Remove(nodeId);    }
 
     private void SelectGroup(Func<ThreadVm, bool> predicate)
     {

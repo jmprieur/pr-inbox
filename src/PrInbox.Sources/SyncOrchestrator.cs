@@ -344,6 +344,40 @@ public sealed class SyncOrchestrator
         await _pullRequests.UpsertAsync(row, ct);
     }
 
+    /// <summary>
+    /// Forced single-PR enrichment: bypasses
+    /// <see cref="PullRequestRepository.ListNeedingEnrichmentAsync"/> so it
+    /// also re-enriches PRs that the candidate filter would skip (e.g.
+    /// rows already at the current dossier version but whose threads were
+    /// captured before a schema bump added a column). Returns the URL of
+    /// the row enriched, or <c>null</c> if the URL is not tracked by this
+    /// source / identity binding. Throws on enrichment failure.
+    /// </summary>
+    public async Task<string?> RunEnrichOneAsync(string prUrl, CancellationToken ct)
+    {
+        var row = await _pullRequests.GetAsync(prUrl, ct);
+        if (row is null) return null;
+
+        // Only this source's binding is allowed to enrich this row.
+        if (!string.Equals(row.SourceId, _source.SourceId, StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        var runId = await _syncRuns.StartAsync(_source.SourceId, row.IdentityUsed, ct);
+        try
+        {
+            await EnrichOneAsync(row, ct);
+            await _syncRuns.CompleteAsync(runId, SyncRunStatus.Ok, 1, null, CancellationToken.None);
+            return row.Identity.Url;
+        }
+        catch (Exception ex)
+        {
+            await _syncRuns.CompleteAsync(runId, SyncRunStatus.Failed, 0, $"{ex.GetType().Name}: {ex.Message}", CancellationToken.None);
+            throw;
+        }
+    }
+
     private async Task EnrichOneAsync(PullRequestRow row, CancellationToken ct)
     {
         var enrichedAt = DateTimeOffset.UtcNow;
