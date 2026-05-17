@@ -1,0 +1,388 @@
+@page "/settings"
+@rendermode InteractiveServer
+@using PrInbox.Core.Config
+@using PrInbox.Core.Credentials
+@inject IConfigService ConfigSvc
+@inject ILogger<Settings> Log
+
+<h1>Settings</h1>
+
+@if (_cfg is null)
+{
+    <p class="empty">Loading…</p>
+}
+else
+{
+    @if (_isFirstRun)
+    {
+        <div class="settings-banner first-run">
+            <strong>First run.</strong> Add at least one source below to start seeing PRs.
+        </div>
+    }
+    else if (!string.IsNullOrEmpty(_lastMessage))
+    {
+        <div class="settings-banner @( _lastWasError ? "error" : "ok")">@_lastMessage</div>
+    }
+
+    <p class="muted">Config file: <code>@ConfigSvc.ConfigPath</code></p>
+
+    <section class="settings-section">
+        <h2>Sources</h2>
+        @if (_cfg.Sources.Count == 0)
+        {
+            <p class="empty">No sources yet.</p>
+        }
+        else
+        {
+            <table class="settings-table">
+                <thead>
+                    <tr><th>ID</th><th>Kind</th><th>Host</th><th>Identity</th><th>Enabled</th><th></th></tr>
+                </thead>
+                <tbody>
+                    @foreach (var s in _cfg.Sources)
+                    {
+                        <tr>
+                            <td><code>@s.Id</code></td>
+                            <td>@KindLabel(s.Kind)</td>
+                            <td>@(s.Host ?? "—")</td>
+                            <td>@s.Identity</td>
+                            <td>@(s.Enabled ? "yes" : "no")</td>
+                            <td>
+                                <button class="link-button danger"
+                                        @onclick="@(() => RemoveSourceAsync(s.Id))"
+                                        disabled="@_busy">Remove</button>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        }
+
+        <div class="settings-actions">
+            <button @onclick="AddGitHubComAsync" disabled="@_busy">+ Add GitHub.com</button>
+            <button @onclick="@(() => _showGheForm = !_showGheForm)" disabled="@_busy">+ Add GitHub Enterprise…</button>
+        </div>
+
+        @if (_showGheForm)
+        {
+            <div class="settings-inline-form">
+                <label>Host
+                    <input @bind="_gheHost" placeholder="github.contoso.com" />
+                </label>
+                <label>Custom id (optional)
+                    <input @bind="_gheCustomId" placeholder="ghe.contoso" />
+                </label>
+                <div class="settings-inline-form-actions">
+                    <button @onclick="AddGheAsync" disabled="@_busy">Add</button>
+                    <button class="link-button" @onclick="CancelGheForm">Cancel</button>
+                </div>
+            </div>
+        }
+    </section>
+
+    <section class="settings-section">
+        <h2>Azure DevOps projects</h2>
+        @if (_cfg.Ado.Projects.Count == 0)
+        {
+            <p class="empty">No ADO projects.</p>
+        }
+        else
+        {
+            <table class="settings-table">
+                <thead>
+                    <tr><th>Org</th><th>Project</th><th></th></tr>
+                </thead>
+                <tbody>
+                    @foreach (var p in _cfg.Ado.Projects)
+                    {
+                        <tr>
+                            <td>@p.Org</td>
+                            <td>@p.Project</td>
+                            <td>
+                                <button class="link-button danger"
+                                        @onclick="@(() => RemoveAdoAsync(p.Org, p.Project))"
+                                        disabled="@_busy">Remove</button>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        }
+        <div class="settings-actions">
+            <button @onclick="@(() => _showAdoForm = !_showAdoForm)" disabled="@_busy">+ Add ADO project…</button>
+        </div>
+        @if (_showAdoForm)
+        {
+            <div class="settings-inline-form">
+                <label>Org   <input @bind="_adoOrg"     placeholder="mseng" /></label>
+                <label>Project <input @bind="_adoProject" placeholder="Context" /></label>
+                <div class="settings-inline-form-actions">
+                    <button @onclick="AddAdoAsync" disabled="@_busy">Add</button>
+                    <button class="link-button" @onclick="CancelAdoForm">Cancel</button>
+                </div>
+            </div>
+        }
+    </section>
+
+    <section class="settings-section">
+        <h2>Doctor</h2>
+        <p class="muted">Check that <code>gh</code> / <code>az</code> auth is healthy and that each source can mint a token.</p>
+        <div class="settings-actions">
+            <button @onclick="RunDoctorAsync" disabled="@_busy || _cfg.Sources.Count == 0">
+                @(_doctorBusy ? "Running…" : "Run checks")
+            </button>
+            @if (_doctorReport is not null)
+            {
+                <span class="muted">
+                    @(_doctorReport.AllOk ? "All sources healthy." : "One or more sources failed.")
+                </span>
+            }
+        </div>
+        @if (_doctorReport is not null)
+        {
+            <table class="settings-table doctor-table">
+                <thead>
+                    <tr><th>ID</th><th>Kind</th><th>Status</th><th>Identity / Error</th></tr>
+                </thead>
+                <tbody>
+                    @foreach (var r in _doctorReport.Sources)
+                    {
+                        <tr class="@(r.Ok ? "ok" : "fail")">
+                            <td><code>@r.Id</code></td>
+                            <td>@KindLabel(r.Kind)</td>
+                            <td>
+                                @if (!r.Enabled) { <span class="muted">disabled</span> }
+                                else if (r.Ok)   { <span class="status-ok">● ok</span> }
+                                else             { <span class="status-fail">● failed</span> }
+                            </td>
+                            <td>
+                                @if (r.Ok && r.Identity is not null)
+                                {
+                                    <span>@r.Identity <span class="muted">(token len @r.TokenLength)</span></span>
+                                }
+                                else if (r.Error is not null)
+                                {
+                                    <span class="muted">@r.Error</span>
+                                }
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        }
+    </section>
+
+    <section class="settings-section">
+        <h2>Ignored repos</h2>
+        <p class="muted">One regex per line. PRs whose display repo (e.g. <code>1ES/Spmi</code>) matches one of these are hidden by default in the Inbox.</p>
+        <textarea class="settings-textarea" rows="6" @bind="_ignoredReposText"></textarea>
+        <div class="settings-actions">
+            <button @onclick="SaveIgnoredReposAsync" disabled="@_busy">Save</button>
+        </div>
+    </section>
+
+    <p class="muted">
+        Some changes take effect immediately (ignored repos, next sync tick). Adding or removing a source updates publisher wiring only after the next app restart.
+    </p>
+}
+
+@code {
+    private PrInboxConfig? _cfg;
+    private DoctorReport? _doctorReport;
+    private string _ignoredReposText = string.Empty;
+
+    private bool _showGheForm;
+    private string _gheHost = string.Empty;
+    private string _gheCustomId = string.Empty;
+
+    private bool _showAdoForm;
+    private string _adoOrg = string.Empty;
+    private string _adoProject = string.Empty;
+
+    private bool _busy;
+    private bool _doctorBusy;
+    private bool _isFirstRun;
+    private string? _lastMessage;
+    private bool _lastWasError;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _isFirstRun = !ConfigSvc.ConfigFileExists();
+        await ReloadAsync();
+    }
+
+    private async Task ReloadAsync()
+    {
+        _cfg = await ConfigSvc.GetAsync();
+        _ignoredReposText = string.Join("\n", _cfg.IgnoredRepos);
+    }
+
+    private static string KindLabel(SourceConfigKind kind) => kind switch
+    {
+        SourceConfigKind.GitHub => "github",
+        SourceConfigKind.GitHubEnterprise => "github-enterprise",
+        SourceConfigKind.AzureDevOps => "azure-devops",
+        _ => kind.ToString(),
+    };
+
+    private async Task AddGitHubComAsync()
+    {
+        await WrapAsync(async () =>
+        {
+            var added = await ConfigSvc.AddGitHubSourceAsync(SourceConfigKind.GitHub, "github.com");
+            SetMessage(added ? "Added github.com source." : "github.com source already exists.", isError: !added);
+        });
+    }
+
+    private async Task AddGheAsync()
+    {
+        var host = _gheHost?.Trim() ?? "";
+        if (string.IsNullOrEmpty(host))
+        {
+            SetMessage("Host is required.", isError: true);
+            return;
+        }
+        await WrapAsync(async () =>
+        {
+            var id = string.IsNullOrWhiteSpace(_gheCustomId) ? null : _gheCustomId.Trim();
+            var added = await ConfigSvc.AddGitHubSourceAsync(SourceConfigKind.GitHubEnterprise, host, id);
+            if (added)
+            {
+                SetMessage($"Added GitHub Enterprise source for {host}.");
+                _showGheForm = false;
+                _gheHost = string.Empty;
+                _gheCustomId = string.Empty;
+            }
+            else
+            {
+                SetMessage($"A source with the same id already exists.", isError: true);
+            }
+        });
+    }
+
+    private void CancelGheForm()
+    {
+        _showGheForm = false;
+        _gheHost = string.Empty;
+        _gheCustomId = string.Empty;
+    }
+
+    private async Task AddAdoAsync()
+    {
+        var org = _adoOrg?.Trim() ?? "";
+        var project = _adoProject?.Trim() ?? "";
+        if (string.IsNullOrEmpty(org) || string.IsNullOrEmpty(project))
+        {
+            SetMessage("Org and project are required.", isError: true);
+            return;
+        }
+        await WrapAsync(async () =>
+        {
+            var added = await ConfigSvc.AddAdoProjectAsync(org, project);
+            if (added)
+            {
+                SetMessage($"Added ADO project {org}/{project}.");
+                _showAdoForm = false;
+                _adoOrg = string.Empty;
+                _adoProject = string.Empty;
+            }
+            else
+            {
+                SetMessage("That ADO project is already configured.", isError: true);
+            }
+        });
+    }
+
+    private void CancelAdoForm()
+    {
+        _showAdoForm = false;
+        _adoOrg = string.Empty;
+        _adoProject = string.Empty;
+    }
+
+    private async Task RemoveSourceAsync(string id)
+    {
+        await WrapAsync(async () =>
+        {
+            var removed = await ConfigSvc.RemoveSourceAsync(id);
+            SetMessage(removed ? $"Removed source {id}." : $"No source with id {id}.", isError: !removed);
+        });
+    }
+
+    private async Task RemoveAdoAsync(string org, string project)
+    {
+        await WrapAsync(async () =>
+        {
+            var removed = await ConfigSvc.RemoveAdoProjectAsync(org, project);
+            SetMessage(
+                removed
+                    ? $"Removed ADO project {org}/{project}."
+                    : $"That ADO project wasn't configured.",
+                isError: !removed);
+        });
+    }
+
+    private async Task SaveIgnoredReposAsync()
+    {
+        await WrapAsync(async () =>
+        {
+            var patterns = (_ignoredReposText ?? "")
+                .Split('\n', StringSplitOptions.RemoveEmptyEntries)
+                .Select(p => p.Trim())
+                .Where(p => !string.IsNullOrEmpty(p))
+                .ToArray();
+            await ConfigSvc.SetIgnoredReposAsync(patterns);
+            SetMessage($"Saved {patterns.Length} ignored-repo pattern(s).");
+        });
+    }
+
+    private async Task RunDoctorAsync()
+    {
+        if (_doctorBusy) return;
+        _doctorBusy = true;
+        _busy = true;
+        try
+        {
+            _doctorReport = await ConfigSvc.RunDoctorAsync();
+            SetMessage(_doctorReport.AllOk ? "Doctor: all sources healthy." : "Doctor: one or more sources failed.",
+                       isError: !_doctorReport.AllOk);
+        }
+        catch (Exception ex)
+        {
+            Log.LogError(ex, "Doctor run failed.");
+            SetMessage($"Doctor failed: {ex.Message}", isError: true);
+        }
+        finally
+        {
+            _doctorBusy = false;
+            _busy = false;
+        }
+    }
+
+    private async Task WrapAsync(Func<Task> action)
+    {
+        if (_busy) return;
+        _busy = true;
+        try
+        {
+            await action();
+            await ReloadAsync();
+            _isFirstRun = false;
+        }
+        catch (Exception ex)
+        {
+            Log.LogError(ex, "Settings action failed.");
+            SetMessage($"Error: {ex.Message}", isError: true);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private void SetMessage(string text, bool isError = false)
+    {
+        _lastMessage = text;
+        _lastWasError = isError;
+    }
+}

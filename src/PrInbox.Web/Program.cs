@@ -1,3 +1,4 @@
+using PrInbox.Core.Config;
 using PrInbox.Core.Credentials;
 using PrInbox.Core.Storage;
 using PrInbox.Publishers;
@@ -33,6 +34,12 @@ builder.Services.AddSingleton(bootCfg);
 builder.Services.AddSingleton(sp => new PullRequestRepository(sp.GetRequiredService<PrInboxDb>()));
 builder.Services.AddSingleton(sp => new PostedReviewRepository(sp.GetRequiredService<PrInboxDb>()));
 builder.Services.AddSingleton(sp => new UiPreferencesRepository(sp.GetRequiredService<PrInboxDb>()));
+
+// Config service: read/write façade over PrInboxConfig used by the Settings
+// page. Mutations persist to disk and mirror back onto the singleton so
+// live consumers (Inbox.razor IgnoredRepos read, etc.) refresh in-place.
+builder.Services.AddSingleton<IConfigService>(sp =>
+    new ConfigService(sp.GetRequiredService<PrInboxConfig>()));
 
 builder.Services.AddHttpClient("publisher", c => c.Timeout = TimeSpan.FromSeconds(30));
 builder.Services.AddSingleton<IPublisherSelector>(sp =>

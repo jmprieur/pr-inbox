@@ -6,7 +6,7 @@
 [![Status: v0.2](https://img.shields.io/badge/status-v0.2-brightgreen)](#status)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 [![.NET 10](https://img.shields.io/badge/.NET-10.0-512BD4)](https://dotnet.microsoft.com/)
-[![Tests: 173](https://img.shields.io/badge/tests-173_passing-brightgreen)](#development)
+[![Tests: 190](https://img.shields.io/badge/tests-190_passing-brightgreen)](#development)
 
 `pr-inbox` is the harness for review-at-scale. It does not review code itself —
 it tells you which PRs need attention, what changed since the last time you
@@ -51,6 +51,7 @@ GitHub Enterprise, and Azure DevOps.
 | Surface | Purpose | Status |
 |---|---|---|
 | Inbox page | Live PR list across sources, source-class chips, per-PR Ignore button, Show closed / ignored toggles | ✅ Done |
+| Settings page | Add/remove sources & ADO projects, run Doctor, manage ignored-repo regexes; first-run redirects here | ✅ Done |
 | Review page | One-click "Review" launches a Windows Terminal tab running `agency copilot` with the brief pre-loaded; tab title = `<repo> #<N>` | ✅ Done |
 | Background sync | Fast pass (every 30s) + enrich pass + Option-C dual sweep (disappeared-diff + TTL re-enrich) so merged/closed PRs drop out of the inbox automatically | ✅ Done |
 | UI preferences | Source-filter + closed/ignored toggles persist in SQLite (`ui_preferences` table) | ✅ Done |
@@ -101,6 +102,25 @@ pr-inbox config doctor   # checks gh + az auth, ADO project access
 
 ## Quick start
 
+### Option A — Web UI only (recommended for new users)
+
+```powershell
+# 1. Build
+dotnet build PrInbox.slnx
+
+# 2. Start the web UI. On first run, it routes you to /settings to
+# add at least one source (no CLI required).
+$env:ASPNETCORE_URLS = "http://localhost:7341"
+dotnet run --project src/PrInbox.Web
+
+# 3. Open http://localhost:7341 — you'll be redirected to /settings.
+# Click "Add GitHub.com" (one click) and/or "Add GitHub Enterprise…"
+# and/or "Add ADO project…". Run the "Doctor" check to verify auth.
+# Then go back to the Inbox tab and click Review on any row.
+```
+
+### Option B — CLI
+
 ```powershell
 # 1. Initialize config (one time)
 pr-inbox config init
@@ -119,18 +139,12 @@ pr-inbox sync
 # 5. See what needs attention
 pr-inbox list
 
-# 6. Start a review session on a specific PR (CLI path)
+# 6. Start a review session on a specific PR
 pr-inbox review gh.com:agency-microsoft/playground#4248
 # Prints: brief path + recommended `copilot` invocation
-
-# 7. ...or use the web UI instead (recommended)
-$env:ASPNETCORE_URLS = "http://localhost:7341"
-dotnet run --project src/PrInbox.Web
-# Then open http://localhost:7341 and click "Review" on any row.
-# Each click spawns a Windows Terminal tab running:
-#   agency copilot --plugin <plugin> --model <model> --agent <agent>
-# with the brief loaded in the run-directory cwd.
 ```
+
+Both surfaces read/write the same `%APPDATA%\PrInbox\config.json`. Use whichever feels right; the Web UI's Settings page covers everything `pr-inbox config` does except identity multi-account (deferred).
 
 ---
 

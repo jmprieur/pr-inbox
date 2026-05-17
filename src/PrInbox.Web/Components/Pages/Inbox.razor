@@ -3,6 +3,7 @@
 @implements IDisposable
 @using System.Text.Json
 @using System.Text.RegularExpressions
+@using PrInbox.Core.Config
 @using PrInbox.Core.Credentials
 @using PrInbox.Core.Models
 @using PrInbox.Core.Storage
@@ -13,6 +14,8 @@
 @inject PullRequestRepository PrRepo
 @inject UiPreferencesRepository Prefs
 @inject PrInboxConfig Config
+@inject IConfigService ConfigSvc
+@inject NavigationManager Nav
 @inject ILogger<Inbox> Log
 
 <h1>Pull requests assigned to me</h1>
@@ -283,6 +286,15 @@ else
 
     protected override async Task OnInitializedAsync()
     {
+        // First-run redirect: if no config file exists, kick the user to
+        // /settings so they can add at least one source before doing
+        // anything else. Without sources, the inbox would just sit empty.
+        if (!ConfigSvc.ConfigFileExists())
+        {
+            Nav.NavigateTo("/settings", forceLoad: false);
+            return;
+        }
+
         State.Changed += OnStateChanged;
         Runs.Changed += OnStateChanged;
         await LoadPrefsAsync();
