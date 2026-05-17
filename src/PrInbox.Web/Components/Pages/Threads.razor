@@ -103,7 +103,24 @@ else
                     <td>
                         @if (!string.IsNullOrEmpty(t.AnchorPath))
                         {
-                            <code>@t.AnchorPath@(t.AnchorLine.HasValue ? $":{t.AnchorLine}" : "")</code>
+                            @if (!string.IsNullOrEmpty(t.CommentUrl))
+                            {
+                                <a href="@t.CommentUrl" target="_blank" rel="noopener"
+                                   title="Open this comment on the platform">
+                                    <code>@t.AnchorPath@(t.AnchorLine.HasValue ? $":{t.AnchorLine}" : "")</code>
+                                </a>
+                            }
+                            else
+                            {
+                                <code>@t.AnchorPath@(t.AnchorLine.HasValue ? $":{t.AnchorLine}" : "")</code>
+                            }
+                        }
+                        else if (!string.IsNullOrEmpty(t.CommentUrl))
+                        {
+                            <a href="@t.CommentUrl" target="_blank" rel="noopener"
+                               title="Open this comment on the platform" class="muted">
+                                @t.KindLabel
+                            </a>
                         }
                         else
                         {
@@ -254,7 +271,7 @@ else
                 return;
             }
             var rows = await ThreadRepo.GetOpenThreadsAsync(pr.Identity, CancellationToken.None);
-            _threads = rows.Select(ThreadVm.From).ToList();
+            _threads = rows.Select(r => ThreadVm.From(r, Url ?? string.Empty)).ToList();
         }
         catch (Exception ex)
         {
@@ -355,6 +372,32 @@ else
         return "just now";
     }
 
+    /// <summary>
+    /// Build a deep link to the comment / thread on github.com / GHE / ADO,
+    /// derived from the prefixed PlatformThreadId (e.g. "review-comment:42").
+    /// Returns null for kinds we cannot anchor reliably.
+    /// </summary>
+    private static string? BuildCommentUrl(string prUrl, string platformThreadId, ThreadKind kind)
+    {
+        if (string.IsNullOrEmpty(prUrl) || string.IsNullOrEmpty(platformThreadId))
+        {
+            return null;
+        }
+        var colon = platformThreadId.IndexOf(':');
+        if (colon < 0 || colon == platformThreadId.Length - 1) return null;
+        var id = platformThreadId.Substring(colon + 1);
+        return kind switch
+        {
+            ThreadKind.ReviewComment => $"{prUrl}#discussion_r{id}",
+            ThreadKind.IssueComment  => $"{prUrl}#issuecomment-{id}",
+            ThreadKind.ReviewBody    => $"{prUrl}#pullrequestreview-{id}",
+            // ADO carries threadId in the platform id; surface as a query
+            // param the Files Discussion tab understands.
+            ThreadKind.AdoThread     => $"{prUrl}?_a=files&discussionId={id}",
+            _ => null,
+        };
+    }
+
     private sealed record ThreadVm(
         string PlatformThreadId,
         string? NodeId,
@@ -369,9 +412,10 @@ else
         bool CanResolve,
         string KindLabel,
         string NonResolveableLabel,
-        string NonResolveableReason)
+        string NonResolveableReason,
+        string? CommentUrl)
     {
-        public static ThreadVm From(ObservedThreadRow row)
+        public static ThreadVm From(ObservedThreadRow row, string prUrl)
         {
             var isCopilot = row.BotKind is BotKind.CopilotReview or BotKind.CopilotCodingAgent;
             // Three non-resolveable states:
@@ -415,7 +459,8 @@ else
                 CanResolve: canResolve,
                 KindLabel: row.Kind.ToString(),
                 NonResolveableLabel: label,
-                NonResolveableReason: reason);
+                NonResolveableReason: reason,
+                CommentUrl: BuildCommentUrl(prUrl, row.PlatformThreadId, row.Kind));
         }
     }
 }
