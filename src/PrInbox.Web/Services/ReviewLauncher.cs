@@ -63,13 +63,14 @@ public sealed class ReviewLauncher : IReviewLauncher, IAsyncDisposable
             return ex.Message;
         }
 
-        // Build a "<repo> #<number> @<short-sha>" title for the wt tab and
-        // the underlying agent's session name. Including the short HEAD SHA
-        // lets independent reviews of different PRs (and of the same PR
-        // across force-pushes) own distinct copilot session names — so the
-        // CLI no longer collides multiple briefs onto a single resumable
-        // session. Same-PR-same-HEAD relaunch keeps the same name, which is
-        // a feature (continuing where you left off).
+        // Build a "<repo> #<number> @<short-sha> <HH:mm>" title for the wt
+        // tab and the underlying agent's session name. Including the short
+        // HEAD SHA *and* a minute-resolution timestamp guarantees each launch
+        // claims a fresh copilot session — without the timestamp, copilot
+        // refuses to start a session whose name collides with an existing
+        // one (it tries to auto-resume and then errors because --name and
+        // --resume are mutually exclusive). The HH:mm suffix is short and
+        // human-readable so the --resume picker stays scannable.
         string tabTitle = "pr-inbox review";
         try
         {
@@ -77,7 +78,8 @@ public sealed class ReviewLauncher : IReviewLauncher, IAsyncDisposable
             if (row is not null)
             {
                 var shortSha = brief.HeadSha.Length >= 7 ? brief.HeadSha[..7] : brief.HeadSha;
-                tabTitle = $"{row.DisplayRepo} #{row.Number} @{shortSha}";
+                var hhmm = DateTimeOffset.Now.ToString("HH:mm");
+                tabTitle = $"{row.DisplayRepo} #{row.Number} @{shortSha} {hhmm}";
             }
         }
         catch (Exception ex)
