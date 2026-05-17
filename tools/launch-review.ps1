@@ -34,10 +34,11 @@
 
 .PARAMETER SessionName
     Optional human-readable name for the underlying copilot session.
-    Passed through to `agency copilot ... -- --name "<value>"`. Lets
-    the user pick this review back out of the `--resume` picker by
-    name, and prevents multiple reviews of different PRs from
-    colliding onto a single resumable session.
+    When set, the agency invocation gains a trailing `--name "<value>"`
+    that agency forwards to copilot as a pass-through flag. Lets the
+    user pick this review back out of the `--resume` picker by name,
+    and prevents multiple reviews of different PRs from colliding onto
+    a single resumable session.
 #>
 
 param(
@@ -103,17 +104,19 @@ Write-Host (' Findings: ' + $findingsPath) -ForegroundColor DarkGray
 Write-Host '------------------------------------------------------------' -ForegroundColor DarkGray
 Write-Host ''
 
-# Build the agency invocation. Anything after `--` is forwarded by agency
-# to the underlying engine CLI (copilot), so `--name` lands as a copilot
-# flag — that's what tags this session so independent reviews don't
-# collide on the same default name.
+# Build the agency invocation. Pass-through args (anything agency doesn't
+# recognize as its own option) are forwarded to the underlying engine CLI
+# (copilot), so `--name <session>` lands as a copilot flag — that's what
+# tags this session so independent reviews don't collide on the same
+# default name. Note: do NOT use `--` to separate; copilot treats `--`
+# as "end of flag parsing" and rejects the trailing tokens as positional.
 $agencyArgs = @('copilot') + $mcpArgs + @(
     '--plugin', $Plugin,
     '--model',  $Model,
     '--agent',  $Agent
 )
 if ($SessionName) {
-    $agencyArgs += @('--', '--name', $SessionName)
+    $agencyArgs += @('--name', $SessionName)
 }
 
 & agency @agencyArgs
