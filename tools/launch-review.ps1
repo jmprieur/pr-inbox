@@ -105,11 +105,10 @@ Write-Host '------------------------------------------------------------' -Foreg
 Write-Host ''
 
 # Clear session-tagging env vars inherited from the parent copilot/agency
-# process tree (pr-inbox-web → wt → pwsh → agency copilot). Without this,
-# the new agency copilot invocation auto-resumes the parent's session and
-# errors with `--name cannot be used with --resume` (they're mutually
-# exclusive). Each entry below was confirmed present in the leaked env;
-# add more here if a future agency build introduces additional ones.
+# process tree (pr-inbox-web → wt → pwsh → agency copilot). Defensive:
+# stops the new agency from confusing itself with the parent session. Not
+# strictly required for correctness today (agency generates its own fresh
+# session ID per invocation), but keeps the child shell hygienic.
 $inherited = @(
     'AGENCY_SESSION_ID', 'COPILOT_AGENT_SESSION_ID',
     'AGENCY_OPERATION_ID', 'AGENCY_LOG_SESSION_DIR', 'AGENCY_PLUGIN_DIR',
@@ -120,19 +119,26 @@ foreach ($name in $inherited) {
     Remove-Item -Path "env:$name" -ErrorAction SilentlyContinue
 }
 
-# Build the agency invocation. Pass-through args (anything agency doesn't
-# recognize as its own option) are forwarded to the underlying engine CLI
-# (copilot), so `--name <session>` lands as a copilot flag — that's what
-# tags this session so independent reviews don't collide on the same
-# default name. Note: do NOT use `--` to separate; copilot treats `--`
-# as "end of flag parsing" and rejects the trailing tokens as positional.
+# Build the agency invocation.
+#
+# About session names: `agency copilot` *always* drives the underlying
+# copilot CLI with `--resume <fresh-uuid>` — that's how agency manages
+# its on-disk session directory at `.copilot/session-state/<uuid>/`.
+# Copilot's own `--name` flag is mutually exclusive with `--resume`,
+# so passing `--name` as a pass-through arg ends with:
+#
+#     error: option '-n, --name <name>' cannot be used with option
+#            '--resume[=value]'
+#
+# There is no workaround inside the agency flow. The user-visible
+# identifier for each review is the wt tab title (set by ReviewLauncher),
+# not the copilot session name. SessionName is still accepted as a
+# parameter and surfaced in the banner above for diagnostics, but it
+# is intentionally NOT forwarded to agency.
 $agencyArgs = @('copilot') + $mcpArgs + @(
     '--plugin', $Plugin,
     '--model',  $Model,
     '--agent',  $Agent
 )
-if ($SessionName) {
-    $agencyArgs += @('--name', $SessionName)
-}
 
 & agency @agencyArgs
