@@ -6,7 +6,7 @@
 [![Status: v0.2](https://img.shields.io/badge/status-v0.2-brightgreen)](#status)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 [![.NET 10](https://img.shields.io/badge/.NET-10.0-512BD4)](https://dotnet.microsoft.com/)
-[![Tests: 148](https://img.shields.io/badge/tests-148_passing-brightgreen)](#development)
+[![Tests: 173](https://img.shields.io/badge/tests-173_passing-brightgreen)](#development)
 
 `pr-inbox` is the harness for review-at-scale. It does not review code itself —
 it tells you which PRs need attention, what changed since the last time you
@@ -68,11 +68,18 @@ convergence/asymmetry telemetry dashboards.
 
 ## Install
 
-Prerequisites:
+### Required to build, sync, and list
 
 - [.NET 10 SDK](https://dotnet.microsoft.com/download)
-- [`gh`](https://cli.github.com/) — GitHub CLI, authenticated for github.com and any GHE host you use
-- [`az`](https://learn.microsoft.com/cli/azure/install-azure-cli) — Azure CLI, signed in (`az login`)
+- [`gh`](https://cli.github.com/) — GitHub CLI, authenticated for github.com and any GHE host you use (`gh auth login --hostname github.com`)
+- [`az`](https://learn.microsoft.com/cli/azure/install-azure-cli) — Azure CLI, signed in (`az login`) — only needed if you add ADO sources
+
+### Required to click "Review" (launcher tab)
+
+- [PowerShell 7+](https://learn.microsoft.com/powershell/scripting/install/installing-powershell-on-windows) (`pwsh`) — `tools/launch-review.ps1` runs under it
+- [Windows Terminal](https://aka.ms/terminal) (`wt.exe`) — each Review opens in a new tab
+- `agency` CLI on `PATH`, authenticated to your model providers — the launcher invokes `agency copilot …`
+- Read access to the plugin source. Default is the Microsoft-internal `1ES-microsoft/ai-plugins` repo on github.com. If you can't reach it, point `PRINBOX_REVIEW_PLUGIN` at a local clone or a different plugin (see [Review launcher overrides](#review-launcher-overrides))
 
 From source (until published to NuGet):
 
@@ -117,12 +124,41 @@ pr-inbox review gh.com:agency-microsoft/playground#4248
 # Prints: brief path + recommended `copilot` invocation
 
 # 7. ...or use the web UI instead (recommended)
+$env:ASPNETCORE_URLS = "http://localhost:7341"
 dotnet run --project src/PrInbox.Web
-# Then open http://localhost:5xxx and click "Review" on any row.
+# Then open http://localhost:7341 and click "Review" on any row.
 # Each click spawns a Windows Terminal tab running:
 #   agency copilot --plugin <plugin> --model <model> --agent <agent>
 # with the brief loaded in the run-directory cwd.
 ```
+
+---
+
+## Review launcher overrides
+
+`tools/launch-review.ps1` reads four env vars. Defaults shown — set any of them
+before launching the web UI to change what the Review tab spins up:
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `PRINBOX_REVIEW_AGENT` | `security-toolkit:dual-model-review` | Agency agent id |
+| `PRINBOX_REVIEW_PLUGIN` | `github:1ES-microsoft/ai-plugins:plugins/security-toolkit` | Plugin source (use `local:<path>` if the default repo is unreachable) |
+| `PRINBOX_REVIEW_MODEL` | `claude-opus-4.7-xhigh` | Model id passed to `agency copilot` |
+| `PRINBOX_REVIEW_MCPS` | `workiq,teams` | Comma-separated MCP servers; set to empty string to disable |
+
+---
+
+## First-run troubleshooting
+
+| Symptom | Likely cause | Fix |
+|---|---|---|
+| `config doctor` red on GitHub | Not signed in to `gh` | `gh auth login --hostname github.com` |
+| `config doctor` red on Azure DevOps | `az login` expired, or you don't actually have an ADO source | `az login`, or skip the ADO step |
+| `sync` runs but inbox is empty | `gh` identity differs from the login the PRs are assigned to | `config doctor` prints the identity it's using; compare with PR assignee |
+| Review tab opens then exits immediately with "agency: command not found" | `agency` CLI not on `PATH` | Install agency, or set `PRINBOX_REVIEW_AGENT` / `PRINBOX_REVIEW_PLUGIN` to point at a tool you do have |
+| Review tab opens but plugin fetch fails | No access to `1ES-microsoft/ai-plugins` | Point `PRINBOX_REVIEW_PLUGIN` at a local clone or a plugin you can reach |
+| Review tab opens but model call fails | `agency` not authenticated to the chosen model | Authenticate `agency` to your providers, or change `PRINBOX_REVIEW_MODEL` |
+| Web UI says port already in use | Another instance running, or stale Kestrel | `Get-NetTCPConnection -LocalPort 7341 \| Stop-Process -Force` |
 
 ---
 
