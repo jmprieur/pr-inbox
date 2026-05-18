@@ -6,12 +6,15 @@
 [![Status: v0.2](https://img.shields.io/badge/status-v0.2-brightgreen)](#status)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 [![.NET 10](https://img.shields.io/badge/.NET-10.0-512BD4)](https://dotnet.microsoft.com/)
-[![Tests: 190](https://img.shields.io/badge/tests-190_passing-brightgreen)](#development)
+[![Tests: 304](https://img.shields.io/badge/tests-304_passing-brightgreen)](#development)
 
 `pr-inbox` is the harness for review-at-scale. It does not review code itself —
 it tells you which PRs need attention, what changed since the last time you
 looked, and hands a fully-bootstrapped brief to the Copilot session that
 will run the actual `dual-model-review`.
+
+> **Looking for the "what can I do, when, why" tour?**
+> → [**USER_GUIDE.md**](USER_GUIDE.md) — end-to-end walkthroughs of every surface.
 
 ---
 
@@ -50,11 +53,13 @@ GitHub Enterprise, and Azure DevOps.
 
 | Surface | Purpose | Status |
 |---|---|---|
-| Inbox page | Live PR list across sources, source-class chips, per-PR Ignore button, Show closed / ignored toggles | ✅ Done |
-| Settings page | Add/remove sources & ADO projects, run Doctor, manage ignored-repo regexes; first-run redirects here | ✅ Done |
-| Review page | One-click "Review" launches a Windows Terminal tab running `agency copilot` with the brief pre-loaded; tab title = `<repo> #<N>` | ✅ Done |
+| Inbox page | Live PR list across sources, source-class chips, per-repo + per-author denylists, per-PR Ignore button, Show closed / ignored toggles | ✅ Done |
+| Inbox cues | Drift chips (`+N` / `⚠ force-push`), `✓ clean` pill, convergence badge (⇆ converged / ⚠ asymmetric), `✓ N ready` pill when threads have likely-done replies | ✅ Done |
+| Settings page | Add/remove sources & ADO projects, run Doctor, manage ignored-repo regexes, persisted Review-launcher toggles (AutoSend, Yolo); first-run redirects here | ✅ Done |
+| Review page | One-click "Review" launches a Windows Terminal tab running `agency copilot` with the brief pre-loaded; tab title = `<repo> #<N>`; inline convergence callout + HEAD-drift chip; per-finding edit + publish toggle | ✅ Done |
+| Threads page | Per-PR open-thread list with per-row + bulk resolve (dry-run by default); `✓ done` badge on threads whose latest reply matches the done/fixed heuristic; `✓ Done replies (N)` one-click bulk resolve | ✅ Done |
 | Background sync | Fast pass (every 30s) + enrich pass + Option-C dual sweep (disappeared-diff + TTL re-enrich) so merged/closed PRs drop out of the inbox automatically | ✅ Done |
-| UI preferences | Source-filter + closed/ignored toggles persist in SQLite (`ui_preferences` table) | ✅ Done |
+| UI preferences | Source chips, repo denylist, author denylist, closed/ignored toggles, AutoSend/Yolo all persist in SQLite (`ui_preferences` table) | ✅ Done |
 
 ### Publisher
 
@@ -62,8 +67,8 @@ GitHub Enterprise, and Azure DevOps.
 |---|---|---|
 | `findings.yaml` watcher | Parses curated findings written by the review session; posts to GitHub / GHE / ADO via per-platform publishers | ✅ Done (dry-run default; per-finding idempotency) |
 
-**Out of scope** (deferred): `followup` verb, thread-resolution UI,
-convergence/asymmetry telemetry dashboards.
+**Out of scope** (deferred): `followup` verb,
+convergence/asymmetry telemetry dashboards (data is captured, queries land in v0.3).
 
 ---
 
