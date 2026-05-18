@@ -88,7 +88,10 @@ else if (_run.Findings is null)
 }
 else if (_run.Findings.Findings.Count == 0)
 {
-    <p class="empty">No findings reported — the agent ran clean.</p>
+    <div class="clean-callout" role="status">
+        <span class="clean-pill clean-pill-lg">✓ clean</span>
+        <span>@CleanVerdict.BuildTooltip(_run.Findings, DateTimeOffset.UtcNow)</span>
+    </div>
 }
 else
 {

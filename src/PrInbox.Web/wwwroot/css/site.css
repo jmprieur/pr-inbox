@@ -222,6 +222,39 @@ button.review:hover { background: rgba(93,164,255,0.12); }
 .sev-medium   { background: #ec3; color: #111; }
 .sev-low      { background: #6c6; color: #111; }
 
+/* Inbox "clean" pill. Green and semibold so a zero-finding row jumps out
+   from the inbox-row scan instead of looking like a no-review row. */
+.findings-counts > .clean-pill,
+.findings-counts > a.clean-pill {
+    background: #d4edda;
+    color: #155724;
+    font-weight: 600;
+    border: 1px solid #b7dfc1;
+}
+.clean-pill:hover { filter: brightness(1.05); }
+
+/* Review-page callout for a zero-finding run. Larger green badge + the
+   verdict text inline so the reviewer doesn't have to hover. */
+.clean-callout {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    padding: 0.6rem 0.8rem;
+    margin: 0.5rem 0 1rem 0;
+    background: #f0f9f1;
+    border: 1px solid #b7dfc1;
+    border-radius: 6px;
+    color: #155724;
+}
+.clean-pill-lg {
+    display: inline-block;
+    padding: 0.2rem 0.55rem;
+    border-radius: 4px;
+    background: #d4edda;
+    border: 1px solid #b7dfc1;
+    font-weight: 600;
+}
+
 /* --- review page --- */
 .severity-filters {
     display: flex;

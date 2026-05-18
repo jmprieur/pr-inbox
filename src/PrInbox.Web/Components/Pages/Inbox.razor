@@ -209,8 +209,9 @@ else
                                 }
                                 @if (total == 0)
                                 {
-                                    <a class="findings-link muted"
-                                       href="@($"/review?url={Uri.EscapeDataString(row.Url)}")">clean</a>
+                                    <a class="findings-link clean-pill"
+                                       title="@CleanVerdict.BuildTooltip(run.Findings, DateTimeOffset.UtcNow)"
+                                       href="@($"/review?url={Uri.EscapeDataString(row.Url)}")">✓ clean</a>
                                 }
                             </span>
                         }
