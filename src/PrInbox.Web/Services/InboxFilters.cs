@@ -106,12 +106,12 @@ public sealed record InboxFilters(
     /// <summary>Visible on the dashboard right now? (Sync-side overload.)</summary>
     public bool ShouldShow(PullRequestRow row) => ShouldShowCore(
         row.Status, row.SourceId, row.DisplayRepo, row.AuthorLogin,
-        row.IsIgnored, row.DisappearedAt);
+        row.IsIgnored);
 
     /// <summary>Visible on the dashboard right now? (UI-side overload.)</summary>
     public bool ShouldShow(InboxRow row) => ShouldShowCore(
         row.Status, row.SourceId, row.DisplayRepo, row.AuthorLogin,
-        row.IsIgnored, row.DisappearedAt);
+        row.IsIgnored);
 
     /// <summary>
     /// Map a SourceId to the UI chip class. Exposed because the chip
@@ -136,8 +136,7 @@ public sealed record InboxFilters(
         string sourceId,
         string displayRepo,
         string? authorLogin,
-        bool isIgnored,
-        DateTimeOffset? disappearedAt)
+        bool isIgnored)
     {
         // 1. Closed unless "Show closed".
         if (!ShowClosed && status != PullRequestStatus.Open) return false;
@@ -158,11 +157,14 @@ public sealed record InboxFilters(
         // 4. Per-author denylist (with null-safe bucketing).
         if (ExcludedAuthors.Count > 0 && ExcludedAuthors.Contains(AuthorKeyOf(authorLogin))) return false;
 
-        // 5. Ignored / disappeared (per-PR flag + config regex list).
+        // 5. Ignored (per-PR flag + config regex list).
+        // Note: `disappeared_at != null` does NOT hide the row — disappeared
+        // PRs surface in the main inbox with a "no longer assigned" chip so
+        // the user can still see and act on them if they want to. Explicit
+        // ignore (per-PR or regex) is the only way to hide them.
         if (!ShowIgnored)
         {
             if (isIgnored) return false;
-            if (disappearedAt is not null && status == PullRequestStatus.Open) return false;
             if (MatchesIgnoredRepoRegex(displayRepo)) return false;
         }
 

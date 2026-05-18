@@ -226,16 +226,42 @@ public class InboxFiltersTests
     }
 
     [Fact]
-    public void Open_pr_with_disappearedAt_is_hidden_by_default()
+    public void Open_pr_with_disappearedAt_is_visible_by_default()
     {
+        // Behavior change vs. prior versions: disappeared PRs surface in
+        // the main inbox with a "no longer assigned" chip so the user can
+        // still see them. Only explicit ignore (per-PR or regex) hides.
         DefaultFilters().ShouldShow(MakePr(
             status: PullRequestStatus.Open,
+            disappearedAt: DateTimeOffset.UnixEpoch)).Should().BeTrue();
+    }
+
+    [Fact]
+    public void Closed_pr_with_disappearedAt_is_still_hidden_by_status()
+    {
+        // The disappear chip is open-only. A closed/merged PR that's also
+        // disappeared is still hidden by the !ShowClosed rule.
+        DefaultFilters().ShouldShow(MakePr(
+            status: PullRequestStatus.Closed,
             disappearedAt: DateTimeOffset.UnixEpoch)).Should().BeFalse();
     }
 
     [Fact]
-    public void ShowIgnored_reveals_open_pr_with_disappearedAt()
+    public void Ignored_pr_with_disappearedAt_is_still_hidden_by_isIgnored()
     {
+        // If the user explicitly ignored a PR AND it later disappeared,
+        // the explicit ignore wins — keep it hidden.
+        DefaultFilters().ShouldShow(MakePr(
+            status: PullRequestStatus.Open,
+            isIgnored: true,
+            disappearedAt: DateTimeOffset.UnixEpoch)).Should().BeFalse();
+    }
+
+    [Fact]
+    public void ShowIgnored_keeps_disappeared_pr_visible()
+    {
+        // ShowIgnored=true should be a strict superset — disappeared still
+        // visible (because they were already visible at the default).
         var filters = InboxFilters.From(
             showClosed: false, showIgnored: true,
             enabledSources: InboxFilters.KnownSourceClasses,

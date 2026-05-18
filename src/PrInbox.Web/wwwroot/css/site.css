@@ -711,6 +711,22 @@ button.ignore:hover {
 tr.row-hidden { opacity: 0.55; }
 tr.row-hidden td.title { font-style: italic; }
 
+/* Disappeared rows (you're no longer a requested reviewer, but the PR is
+   still open upstream). Slightly demoted but kept legible — the user may
+   still want to look at the diff or post a final review. */
+tr.row-disappeared { opacity: 0.78; }
+
+.badge.disappeared-pill {
+    background: #f3f4f6;          /* gray-100 */
+    color: #4b5563;               /* gray-600 */
+    border: 1px solid #d1d5db;    /* gray-300 */
+    font-size: 0.78em;
+    font-weight: 500;
+    margin-left: 0.25rem;
+    padding: 0.05rem 0.45rem;
+}
+
+/* Legacy class — retained for any caller that still references it. */
 .disappeared {
     font-size: 0.85em;
     font-style: italic;

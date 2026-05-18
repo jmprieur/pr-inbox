@@ -214,7 +214,7 @@ else
         <tbody>
             @foreach (var row in visible)
             {
-                <tr class="@(RowIsHidden(row) ? "row-hidden" : "")">
+                <tr class="@RowClasses(row)">
                     <td><span class="badge @SourceClass(row)">@SourceLabel(row)</span></td>
                     <td>
                         <a href="@row.Url" target="_blank" rel="noopener">
@@ -260,8 +260,9 @@ else
                         <span class="badge @StatusClass(row.Status)">@StatusLabel(row.Status)</span>
                         @if (row.DisappearedAt is not null && row.Status == PullRequestStatus.Open)
                         {
-                            <span class="muted disappeared" title="No longer in your review queue (still open upstream).">
-                                · gone
+                            <span class="badge disappeared-pill"
+                                  title="You're no longer a requested reviewer on this PR (still open upstream). Ignore it to hide.">
+                                no longer assigned
                             </span>
                         }
                     </td>
@@ -455,6 +456,18 @@ else
         row.IsIgnored || RowMatchesIgnoredRepoRegex(row);
 
     /// <summary>
+    /// Combines row-level state into the CSS class list. Ignored / hidden
+    /// rows are dimmed and italicized; rows the user has been de-assigned
+    /// from get a subtler demotion that keeps them legible.
+    /// </summary>
+    private string RowClasses(InboxRow row)
+    {
+        if (RowIsHidden(row)) return "row-hidden";
+        if (row.DisappearedAt is not null && row.Status == PullRequestStatus.Open) return "row-disappeared";
+        return "";
+    }
+
+    /// <summary>
     /// Build a fresh <see cref="InboxFilters"/> snapshot from the local
     /// UI state. The popovers update <c>_excludedRepos</c> / <c>_excludedAuthors</c>
     /// in place; this getter is the bridge to the shared filter pipeline
@@ -619,9 +632,7 @@ else
             if (_enabledSources.Count < SourceChips.Length)
                 src = src.Where(r => _enabledSources.Contains(SourceClass(r)));
             if (!_showIgnored)
-                src = src.Where(r =>
-                    !(r.DisappearedAt is not null && r.Status == PullRequestStatus.Open)
-                    && !RowIsHidden(r));
+                src = src.Where(r => !RowIsHidden(r));
 
             var byName = src
                 .GroupBy(r => r.DisplayRepo, StringComparer.OrdinalIgnoreCase)
@@ -749,9 +760,7 @@ else
             if (_excludedRepos.Count > 0)
                 src = src.Where(r => !_excludedRepos.Contains(r.DisplayRepo));
             if (!_showIgnored)
-                src = src.Where(r =>
-                    !(r.DisappearedAt is not null && r.Status == PullRequestStatus.Open)
-                    && !RowIsHidden(r));
+                src = src.Where(r => !RowIsHidden(r));
 
             var byKey = src
                 .GroupBy(r => AuthorKeyOf(r), StringComparer.OrdinalIgnoreCase)
