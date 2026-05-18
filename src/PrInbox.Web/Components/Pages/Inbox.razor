@@ -87,6 +87,53 @@
         }
     </div>
 
+    <div class="repo-filter">
+        <button type="button"
+                class="repo-pill @(_excludedAuthors.Count > 0 ? "active" : "") @(_authorFilterOpen ? "open" : "")"
+                @onclick="ToggleAuthorFilterPopover"
+                title="@AuthorFilterTooltip">
+            @AuthorFilterPillLabel
+            <span class="repo-pill-caret">▾</span>
+        </button>
+        @if (_authorFilterOpen)
+        {
+            <div class="repo-popover-backdrop" @onclick="CloseAuthorFilterPopover"></div>
+            <div class="repo-popover" role="dialog" aria-label="Per-author filter">
+                <input type="search"
+                       class="repo-popover-search"
+                       placeholder="Filter authors…"
+                       @bind="_authorFilterSearch"
+                       @bind:event="oninput" />
+                <div class="repo-popover-actions">
+                    <button type="button"
+                            class="link-like"
+                            disabled="@(_excludedAuthors.Count == 0)"
+                            @onclick="OnShowAllAuthorsAsync">Show all</button>
+                    <span class="muted">@AuthorFilterStatusLine</span>
+                </div>
+                <ul class="repo-list">
+                    @foreach (var item in FilteredAuthorListItems)
+                    {
+                        var isChecked = !item.Excluded;
+                        <li>
+                            <label>
+                                <input type="checkbox"
+                                       checked="@isChecked"
+                                       @onchange="@(e => OnAuthorToggleAsync(item.Name, (bool)e.Value!))" />
+                                <span class="repo-name">@item.DisplayLabel</span>
+                                <span class="repo-count @(item.Count == 0 ? "zero" : "")">@item.Count</span>
+                            </label>
+                        </li>
+                    }
+                    @if (FilteredAuthorListItems.Count == 0)
+                    {
+                        <li class="empty muted">No authors match.</li>
+                    }
+                </ul>
+            </div>
+        }
+    </div>
+
     <label class="show-closed">
         <input type="checkbox" checked="@_showClosed"
                @onchange="@(e => OnShowClosedToggleAsync((bool)e.Value!))" />
@@ -337,6 +384,7 @@ else
     private const string PrefShowIgnored  = "inbox.show_ignored";
     private const string PrefSourceFilter = "inbox.source_filter";
     private const string PrefExcludedRepos = "inbox.excluded_repos";
+    private const string PrefExcludedAuthors = "inbox.excluded_authors";
 
     private IReadOnlyList<InboxRow> _rows = Array.Empty<InboxRow>();
     private IReadOnlyDictionary<string, ReviewRun> _runMap = new Dictionary<string, ReviewRun>();
@@ -359,6 +407,19 @@ else
     // Repo-filter popover UI state — not persisted.
     private bool _repoFilterOpen;
     private string _repoFilterSearch = string.Empty;
+
+    // Per-author denylist (PR author login). Empty = no filter; default
+    // for unknown authors is "visible", same opt-out shape as repos. Null
+    // / empty author logins are bucketed under <see cref="UnknownAuthorKey"/>
+    // so they can be filtered as a group.
+    private HashSet<string> _excludedAuthors =
+        new(StringComparer.OrdinalIgnoreCase);
+
+    // Author-filter popover UI state — not persisted.
+    private bool _authorFilterOpen;
+    private string _authorFilterSearch = string.Empty;
+
+    private const string UnknownAuthorKey = "(unknown)";
 
     // Compiled IgnoredRepos regex list. Invalid patterns are dropped with
     // a debug log; we never crash the page over bad config.
@@ -419,6 +480,13 @@ else
             if (_excludedRepos.Count > 0)
             {
                 query = query.Where(r => !_excludedRepos.Contains(r.DisplayRepo));
+            }
+
+            // Per-author denylist. Same opt-out shape as repos. Null /
+            // empty author logins are bucketed under UnknownAuthorKey.
+            if (_excludedAuthors.Count > 0)
+            {
+                query = query.Where(r => !_excludedAuthors.Contains(AuthorKeyOf(r)));
             }
 
             // disappeared_at: hide PRs that left the review queue but are
@@ -497,6 +565,23 @@ else
                 catch (Exception ex)
                 {
                     Log.LogDebug(ex, "Could not parse {Key}; falling back to empty set.", PrefExcludedRepos);
+                }
+            }
+
+            var rawExcludedAuthors = await Prefs.GetAsync(PrefExcludedAuthors);
+            if (!string.IsNullOrWhiteSpace(rawExcludedAuthors))
+            {
+                try
+                {
+                    var arr = JsonSerializer.Deserialize<string[]>(rawExcludedAuthors);
+                    if (arr is not null)
+                    {
+                        _excludedAuthors = new HashSet<string>(arr, StringComparer.OrdinalIgnoreCase);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Log.LogDebug(ex, "Could not parse {Key}; falling back to empty set.", PrefExcludedAuthors);
                 }
             }
         }
@@ -670,6 +755,139 @@ else
                 JsonSerializer.Serialize(_excludedRepos.ToArray()));
         }
         catch (Exception ex) { Log.LogDebug(ex, "Persist {Key} failed.", PrefExcludedRepos); }
+    }
+
+    // ----- Per-author filter helpers -----------------------------------
+
+    private sealed record AuthorFilterItem(string Name, string DisplayLabel, int Count, bool Excluded);
+
+    private static string AuthorKeyOf(InboxRow row) =>
+        string.IsNullOrWhiteSpace(row.AuthorLogin) ? UnknownAuthorKey : row.AuthorLogin!;
+
+    private static string AuthorDisplayLabel(string key) =>
+        key == UnknownAuthorKey ? "(unknown)" : "@" + key;
+
+    /// <summary>
+    /// Authors that <em>could</em> show up given the current source-chip /
+    /// closed / ignored / repo settings, with their post-source-filter PR
+    /// counts. We do NOT apply <see cref="_excludedAuthors"/> here so the
+    /// popover always lists every author the user could re-enable. Excluded
+    /// authors with zero matching rows still appear with count = 0 so
+    /// they're recoverable from the UI alone.
+    /// </summary>
+    private IReadOnlyList<AuthorFilterItem> AllAuthorFilterItems
+    {
+        get
+        {
+            var src = _rows.AsEnumerable();
+            if (!_showClosed)
+                src = src.Where(r => r.Status == PullRequestStatus.Open);
+            if (_enabledSources.Count < SourceChips.Length)
+                src = src.Where(r => _enabledSources.Contains(SourceClass(r)));
+            if (_excludedRepos.Count > 0)
+                src = src.Where(r => !_excludedRepos.Contains(r.DisplayRepo));
+            if (!_showIgnored)
+                src = src.Where(r =>
+                    !(r.DisappearedAt is not null && r.Status == PullRequestStatus.Open)
+                    && !RowIsHidden(r));
+
+            var byKey = src
+                .GroupBy(r => AuthorKeyOf(r), StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(g => g.Key, g => g.Count(), StringComparer.OrdinalIgnoreCase);
+
+            foreach (var name in _excludedAuthors)
+            {
+                if (!byKey.ContainsKey(name)) byKey[name] = 0;
+            }
+
+            return byKey
+                .Select(kv => new AuthorFilterItem(
+                    kv.Key, AuthorDisplayLabel(kv.Key), kv.Value, _excludedAuthors.Contains(kv.Key)))
+                .OrderByDescending(i => i.Count)
+                .ThenBy(i => i.Name, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+    }
+
+    private IReadOnlyList<AuthorFilterItem> FilteredAuthorListItems
+    {
+        get
+        {
+            var items = AllAuthorFilterItems;
+            if (string.IsNullOrWhiteSpace(_authorFilterSearch)) return items;
+            var needle = _authorFilterSearch.Trim();
+            return items
+                .Where(i => i.Name.Contains(needle, StringComparison.OrdinalIgnoreCase)
+                         || i.DisplayLabel.Contains(needle, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+        }
+    }
+
+    private string AuthorFilterPillLabel =>
+        _excludedAuthors.Count == 0
+            ? "Authors"
+            : $"Authors: {_excludedAuthors.Count} hidden";
+
+    private string AuthorFilterTooltip
+    {
+        get
+        {
+            if (_excludedAuthors.Count == 0) return "Filter inbox by PR author.";
+            var sample = _excludedAuthors
+                .OrderBy(x => x, StringComparer.OrdinalIgnoreCase)
+                .Take(8)
+                .Select(AuthorDisplayLabel);
+            var more = _excludedAuthors.Count > 8 ? $", … (+{_excludedAuthors.Count - 8} more)" : "";
+            return "Hidden: " + string.Join(", ", sample) + more;
+        }
+    }
+
+    private string AuthorFilterStatusLine
+    {
+        get
+        {
+            var total = AllAuthorFilterItems.Count;
+            return _excludedAuthors.Count == 0
+                ? $"{total} author(s)"
+                : $"{_excludedAuthors.Count} of {total} hidden";
+        }
+    }
+
+    private void ToggleAuthorFilterPopover()
+    {
+        _authorFilterOpen = !_authorFilterOpen;
+        if (!_authorFilterOpen) _authorFilterSearch = string.Empty;
+    }
+
+    private void CloseAuthorFilterPopover()
+    {
+        _authorFilterOpen = false;
+        _authorFilterSearch = string.Empty;
+    }
+
+    private async Task OnAuthorToggleAsync(string authorKey, bool visible)
+    {
+        if (string.IsNullOrWhiteSpace(authorKey)) return;
+        if (visible) _excludedAuthors.Remove(authorKey);
+        else _excludedAuthors.Add(authorKey);
+        await PersistExcludedAuthorsAsync();
+    }
+
+    private async Task OnShowAllAuthorsAsync()
+    {
+        if (_excludedAuthors.Count == 0) return;
+        _excludedAuthors.Clear();
+        await PersistExcludedAuthorsAsync();
+    }
+
+    private async Task PersistExcludedAuthorsAsync()
+    {
+        try
+        {
+            await Prefs.SetAsync(PrefExcludedAuthors,
+                JsonSerializer.Serialize(_excludedAuthors.ToArray()));
+        }
+        catch (Exception ex) { Log.LogDebug(ex, "Persist {Key} failed.", PrefExcludedAuthors); }
     }
 
     private async Task OnToggleIgnoreAsync(InboxRow row)
