@@ -453,6 +453,27 @@ button.link-like.done-bulk {
     vertical-align: middle;
 }
 
+/* Inbox-row "ready" pill — surfaces N likely-done threads at scan distance
+   so the reviewer doesn't have to open /threads to discover them. Clicks
+   through to the same Threads page where the bulk-select button finishes
+   the job. Same green palette as the per-row done-badge for visual
+   consistency. */
+.ready-pill {
+    display: inline-block;
+    margin-left: 0.4rem;
+    padding: 0.05rem 0.45rem;
+    border-radius: 3px;
+    font-size: 0.72rem;
+    font-weight: 600;
+    background: #d4edda;
+    color: #155724 !important;
+    border: 1px solid #b7dfc1;
+    line-height: 1.4;
+    vertical-align: middle;
+    text-decoration: none;
+}
+.ready-pill:hover { filter: brightness(1.05); text-decoration: none; }
+
 .findings-table {
     width: 100%;
     border-collapse: collapse;

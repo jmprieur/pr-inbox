@@ -396,10 +396,15 @@ else
             var openThreads = await ThreadRepo.GetOpenThreadsAsync(pr.Identity, CancellationToken.None);
             var openCount = openThreads.Count;
             var unresolvedBot = openThreads.Count(t => t.IsBot);
+            var likelyDone = openThreads
+                .Where(t => !string.IsNullOrEmpty(t.PlatformThreadNodeId))
+                .GroupBy(t => t.PlatformThreadNodeId!, StringComparer.Ordinal)
+                .Count(g => DoneReplyHeuristic.IsDoneReply(
+                    g.OrderByDescending(r => r.FirstSeenAt).First().LastCommentBody));
             var snap = await SnapRepo.GetLatestAsync(pr.Identity, CancellationToken.None);
             var drift = DriftInfo.Compute(pr, snap);
 
-            State.Upsert(InboxRow.FromRow(pr, openCount, unresolvedBot, drift));
+            State.Upsert(InboxRow.FromRow(pr, openCount, unresolvedBot, drift, likelyDone));
         }
         catch (Exception ex)
         {

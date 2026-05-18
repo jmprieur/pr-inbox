@@ -27,9 +27,15 @@ public sealed record InboxRow(
     string? LastReviewedHeadSha,
     string? CurrentHeadSha,
     bool IsIgnored = false,
-    DateTimeOffset? DisappearedAt = null)
+    DateTimeOffset? DisappearedAt = null,
+    int LikelyDoneCount = 0)
 {
-    public static InboxRow FromRow(PullRequestRow row, int openThreads, int unresolvedBot, DriftInfo? drift = null)
+    public static InboxRow FromRow(
+        PullRequestRow row,
+        int openThreads,
+        int unresolvedBot,
+        DriftInfo? drift = null,
+        int likelyDone = 0)
     {
         drift ??= DriftInfo.Unknown;
         return new(
@@ -51,7 +57,8 @@ public sealed record InboxRow(
             drift.LastReviewedHeadSha,
             drift.CurrentHeadSha,
             row.IsIgnored,
-            row.DisappearedAt);
+            row.DisappearedAt,
+            likelyDone);
     }
 }
 

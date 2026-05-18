@@ -191,6 +191,14 @@ else
                             {
                                 <span class="muted"> (@row.UnresolvedBotCount bot)</span>
                             }
+                            @if (row.LikelyDoneCount > 0)
+                            {
+                                <a href="@($"/threads?url={Uri.EscapeDataString(row.Url)}")"
+                                   class="ready-pill"
+                                   title="@row.LikelyDoneCount thread@(row.LikelyDoneCount == 1 ? "" : "s") have a 'done' / 'fixed' / 'addressed' / '+1' reply. Click to review and resolve.">
+                                    ✓ @row.LikelyDoneCount ready
+                                </a>
+                            }
                         }
                         else
                         {

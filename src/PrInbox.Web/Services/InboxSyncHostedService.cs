@@ -130,10 +130,10 @@ public sealed class InboxSyncHostedService : BackgroundService
         var rows = new List<InboxRow>(prs.Count);
         foreach (var pr in prs)
         {
-            var (open, bot) = await CountThreadsAsync(threadRepo, pr.Identity, ct);
+            var (open, bot, likelyDone) = await CountThreadsAsync(threadRepo, pr.Identity, ct);
             var snap = await snapRepo.GetLatestAsync(pr.Identity, ct);
             var drift = DriftInfo.Compute(pr, snap);
-            rows.Add(InboxRow.FromRow(pr, open, bot, drift));
+            rows.Add(InboxRow.FromRow(pr, open, bot, drift, likelyDone));
         }
         _state.ReplaceAll(rows);
     }
@@ -251,10 +251,10 @@ public sealed class InboxSyncHostedService : BackgroundService
                 var fresh = await prRepo.GetAsync(prUrl, ct);
                 if (fresh is not null)
                 {
-                    var (open, bot) = await CountThreadsAsync(threadRepo, fresh.Identity, ct);
+                    var (open, bot, likelyDone) = await CountThreadsAsync(threadRepo, fresh.Identity, ct);
                     var snap = await snapRepo.GetLatestAsync(fresh.Identity, ct);
                     var drift = DriftInfo.Compute(fresh, snap);
-                    _state.Upsert(InboxRow.FromRow(fresh, open, bot, drift));
+                    _state.Upsert(InboxRow.FromRow(fresh, open, bot, drift, likelyDone));
                 }
             }
             catch (Exception ex)
@@ -271,7 +271,7 @@ public sealed class InboxSyncHostedService : BackgroundService
         }
     }
 
-    private static async Task<(int open, int bot)> CountThreadsAsync(
+    private static async Task<(int open, int bot, int likelyDone)> CountThreadsAsync(
         ObservedThreadRepository repo, PrIdentity id, CancellationToken ct)
     {
         try
@@ -279,11 +279,21 @@ public sealed class InboxSyncHostedService : BackgroundService
             var threads = await repo.GetOpenThreadsAsync(id, ct);
             var open = threads.Count;
             var bot = threads.Count(t => t.IsBot);
-            return (open, bot);
+
+            // "Likely done" = number of distinct thread node ids whose
+            // LATEST row matches DoneReplyHeuristic. Keep this in sync
+            // with the per-row computation in Threads.razor.LoadAsync.
+            var likelyDone = threads
+                .Where(t => !string.IsNullOrEmpty(t.PlatformThreadNodeId))
+                .GroupBy(t => t.PlatformThreadNodeId!, StringComparer.Ordinal)
+                .Count(g => DoneReplyHeuristic.IsDoneReply(
+                    g.OrderByDescending(r => r.FirstSeenAt).First().LastCommentBody));
+
+            return (open, bot, likelyDone);
         }
         catch
         {
-            return (0, 0);
+            return (0, 0, 0);
         }
     }
 
