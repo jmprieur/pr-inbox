@@ -95,6 +95,15 @@ else if (_run.Findings.Findings.Count == 0)
 }
 else
 {
+    var conv = ConvergenceVerdict.Compute(_run.Findings);
+    @if (conv.State != ConvergenceState.Hidden)
+    {
+        <div class="convergence-callout convergence-callout-@conv.CssClass" role="status">
+            <span class="convergence-pill-lg @conv.CssClass">@conv.Glyph</span>
+            <span>@conv.Tooltip</span>
+        </div>
+    }
+
     <div class="severity-filters">
         <span class="muted">Filter:</span>
         <label><input type="checkbox" @bind="_showCritical" /> <span class="sev-critical">critical</span></label>

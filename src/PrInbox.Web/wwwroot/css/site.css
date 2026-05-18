@@ -282,6 +282,47 @@ button.review:hover { background: rgba(93,164,255,0.12); }
     font-weight: 600;
 }
 
+/* Review-page callout for a findings-bearing run; mirrors .clean-callout in
+   structure but uses convergence colours (green for ✓✓ converged, amber for
+   ⚠ asymmetric). The reviewer sees the verdict at scan distance before
+   scrolling the findings table. */
+.convergence-callout {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    padding: 0.6rem 0.8rem;
+    margin: 0.5rem 0 1rem 0;
+    border-radius: 6px;
+    border: 1px solid transparent;
+}
+.convergence-callout-converged {
+    background: #f0f9f1;
+    border-color: #b7dfc1;
+    color: #155724;
+}
+.convergence-callout-asymmetric {
+    background: #fffbe6;
+    border-color: #ffe69a;
+    color: #7a5d05;
+}
+.convergence-pill-lg {
+    display: inline-block;
+    padding: 0.2rem 0.55rem;
+    border-radius: 4px;
+    font-weight: 700;
+    border: 1px solid transparent;
+}
+.convergence-pill-lg.converged {
+    background: #d4edda;
+    border-color: #b7dfc1;
+    color: #155724;
+}
+.convergence-pill-lg.asymmetric {
+    background: #fff3cd;
+    border-color: #ffe69a;
+    color: #7a5d05;
+}
+
 /* --- review page --- */
 .severity-filters {
     display: flex;
