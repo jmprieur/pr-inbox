@@ -6,10 +6,12 @@
 .DESCRIPTION
     Run inside a new Windows Terminal tab spawned by pr-inbox-web.
 
-    By default (-AutoSend, on) the brief is passed straight to copilot
-    via the pass-through `-i "<brief>"` flag, which starts the session
-    interactively AND auto-executes the prompt — no Ctrl+V needed. The
-    terminal stays open after the agent finishes so you can follow up.
+    By default (-AutoSend, on) a tiny bootstrap message is passed to
+    copilot via the pass-through `-i "<message>"` flag — "Read brief.md
+    and proceed." — and the agent reads brief.md from its current
+    directory itself. The terminal stays open after the agent finishes
+    so you can follow up. (`-i` keeps the session interactive; `-p`
+    would exit on completion, which we explicitly don't want.)
 
     Pass -NoAutoSend to fall back to the legacy "copy to clipboard +
     paste manually" flow. Useful if you want to eyeball/edit the brief
@@ -85,19 +87,12 @@ if (-not (Test-Path $briefPath)) {
 
 $brief    = Get-Content -Raw -Path $briefPath
 $autoSend = -not $NoAutoSend
-# Windows CreateProcess command-line limit is ~32K. If a brief gets near
-# that, fall back to clipboard so the launch doesn't fail silently.
-$briefBytes  = [System.Text.Encoding]::UTF8.GetByteCount($brief)
-$autoTooLong = $briefBytes -gt 30000
-if ($autoSend -and $autoTooLong) {
-    $autoSend = $false
-    $autoForcedOff = $true
-} else {
-    $autoForcedOff = $false
-}
 
 # Only copy-to-clipboard when we're NOT auto-sending; the user needs the
-# clipboard for the manual Ctrl+V fallback.
+# clipboard for the manual Ctrl+V fallback. When auto-sending we hand the
+# agent a tiny "Read brief.md and proceed." bootstrap and let it read the
+# brief off disk itself — keeps the command line short and lets the
+# brief stay editable up until the agent reads it.
 $copied = $false
 if (-not $autoSend) {
     try {
@@ -122,15 +117,7 @@ foreach ($m in ($Mcps -split ',')) {
 Write-Host ''
 Write-Host '------------------------------------------------------------' -ForegroundColor DarkGray
 if ($autoSend) {
-    Write-Host (' Brief auto-send ON (' + $brief.Length + ' chars).') -ForegroundColor Green
-    Write-Host ' Brief will be passed inline via copilot -i; session stays interactive.' -ForegroundColor DarkGray
-} elseif ($autoForcedOff) {
-    Write-Host (' Brief too long for auto-send (' + $briefBytes + ' bytes) — falling back to clipboard.') -ForegroundColor Yellow
-    if ($copied) {
-        Write-Host (' Brief copied to clipboard. Ctrl+V into agency, press Enter to send.') -ForegroundColor Yellow
-    } else {
-        Write-Host (' Brief at: ' + $briefPath) -ForegroundColor Yellow
-    }
+    Write-Host (' Brief auto-send ON (agent reads brief.md from disk; ' + $brief.Length + ' chars on disk).') -ForegroundColor Green
 } else {
     if ($copied) {
         Write-Host (' Brief copied to clipboard (' + $brief.Length + ' chars).') -ForegroundColor Cyan
@@ -191,19 +178,24 @@ $agencyArgs = @('copilot') + $mcpArgs + @(
     '--agent',  $Agent
 )
 
-# Pass-through args go after `--`. -i keeps the session interactive but
-# auto-executes the brief as the first turn (unlike -p which exits
-# after completion — we DON'T want that, the user needs to follow up).
+# Forward unknown flags (-i, --yolo) straight to copilot. Empirical:
+# agency's clap config treats unknown flags as pass-through to the
+# engine. Importantly, do NOT use the `--` separator: when present,
+# agency includes it in the args it spawns copilot with and copilot
+# parses everything past `--` as positional, which it doesn't accept
+# (error: too many arguments, expected 0, got N).
+#
+# -i (not -p) keeps the session interactive but auto-executes the
+# bootstrap message as the first turn. The agent's cwd is the run
+# directory (set by wt's `-d "<runDir>"` on the parent terminal), so
+# `brief.md` is a bare-filename Read away.
 $passThrough = @()
-if ($autoSend -or $Yolo) {
-    $passThrough += '--'
-    if ($autoSend) {
-        $passThrough += '-i'
-        $passThrough += $brief
-    }
-    if ($Yolo) {
-        $passThrough += '--yolo'
-    }
+if ($autoSend) {
+    $passThrough += '-i'
+    $passThrough += 'Read brief.md and proceed.'
+}
+if ($Yolo) {
+    $passThrough += '--yolo'
 }
 
 & agency @agencyArgs @passThrough
