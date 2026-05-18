@@ -15,6 +15,7 @@ builder.Services.AddRazorComponents()
 // way the CLI does; no shared state file beyond %APPDATA%\PrInbox.
 builder.Services.AddSingleton<InboxState>();
 builder.Services.AddSingleton<ReviewRunStore>();
+builder.Services.AddSingleton<ConsoleWindowRegistry>();
 builder.Services.AddSingleton<IReviewLauncher, ReviewLauncher>();
 builder.Services.AddSingleton<InboxSyncHostedService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<InboxSyncHostedService>());
@@ -84,5 +85,13 @@ if (app.Services.GetRequiredService<IReviewLauncher>() is ReviewLauncher rl)
 {
     rl.RehydrateInFlightRuns();
 }
+
+// Belt-and-braces: on graceful shutdown, restore every minimized console
+// so a pr-inbox exit never leaves a review window orphaned out of view.
+app.Lifetime.ApplicationStopping.Register(() =>
+{
+    try { app.Services.GetRequiredService<ConsoleWindowRegistry>().RestoreAll(); }
+    catch { /* shutdown best-effort */ }
+});
 
 app.Run();

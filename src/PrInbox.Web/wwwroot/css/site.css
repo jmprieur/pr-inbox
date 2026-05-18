@@ -44,6 +44,27 @@ h1 { font-size: 1.4rem; margin: 0 0 0.5rem 0; }
     flex-wrap: wrap;
 }
 
+.console-strip {
+    align-items: center;
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 0.4rem 0.6rem;
+    margin-bottom: 0.75rem;
+    font-size: 0.85em;
+}
+.console-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.15rem 0.5rem;
+    background: var(--bg);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    font-family: var(--mono, monospace);
+    font-size: 0.78em;
+}
+
 .muted { color: var(--muted); }
 .empty { color: var(--muted); padding: 1rem 0; }
 

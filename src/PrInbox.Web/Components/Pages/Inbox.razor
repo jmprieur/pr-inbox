@@ -15,6 +15,7 @@
 @inject UiPreferencesRepository Prefs
 @inject PrInboxConfig Config
 @inject IConfigService ConfigSvc
+@inject ConsoleWindowRegistry Consoles
 @inject NavigationManager Nav
 @inject ILogger<Inbox> Log
 
@@ -54,6 +55,37 @@
         <span class="muted">@_lastLaunchMessage</span>
     }
 </div>
+
+@{
+    var consoles = Consoles.List();
+}
+@if (consoles.Count > 0)
+{
+    <div class="toolbar console-strip" role="group" aria-label="Review consoles">
+        <span class="muted">@consoles.Count review console@(consoles.Count == 1 ? "" : "s") open:</span>
+        <button type="button" class="link-like" @onclick="OnMinimizeAllConsoles"
+                title="Minimize every tracked review console (does not close them).">
+            Minimize all
+        </button>
+        <button type="button" class="link-like" @onclick="OnShowAllConsoles"
+                title="Restore every tracked review console to the foreground.">
+            Show all
+        </button>
+        <span class="muted">·</span>
+        @foreach (var c in consoles)
+        {
+            var isVisible = c.IsVisible();
+            <span class="console-pill" title="@($"Launched at {c.LaunchedAt.ToLocalTime():HH:mm}")">
+                @c.DisplayTitle
+                <button type="button" class="link-like"
+                        @onclick="() => OnToggleConsole(c.RunId, !isVisible)"
+                        title="@(isVisible ? "Minimize this console" : "Restore this console")">
+                    @(isVisible ? "minimize" : "show")
+                </button>
+            </span>
+        }
+    </div>
+}
 
 @{
     var visible = VisibleRows;
@@ -308,6 +340,7 @@ else
 
         State.Changed += OnStateChanged;
         Runs.Changed += OnStateChanged;
+        Consoles.Changed += OnStateChanged;
         await LoadPrefsAsync();
         CompileIgnoredRepoRegexes();
         SnapshotAll();
@@ -431,6 +464,24 @@ else
         }
     }
 
+    private void OnToggleConsole(long runId, bool show)
+    {
+        try { Consoles.Toggle(runId, show); }
+        catch (Exception ex) { Log.LogWarning(ex, "Toggle console for run {RunId} failed.", runId); }
+    }
+
+    private void OnMinimizeAllConsoles()
+    {
+        try { Consoles.ToggleAll(show: false); }
+        catch (Exception ex) { Log.LogWarning(ex, "Minimize-all consoles failed."); }
+    }
+
+    private void OnShowAllConsoles()
+    {
+        try { Consoles.ToggleAll(show: true); }
+        catch (Exception ex) { Log.LogWarning(ex, "Show-all consoles failed."); }
+    }
+
     private async Task OnRefreshAsync()
     {
         if (_refreshing) return;
@@ -510,5 +561,6 @@ else
     {
         State.Changed -= OnStateChanged;
         Runs.Changed -= OnStateChanged;
+        Consoles.Changed -= OnStateChanged;
     }
 }

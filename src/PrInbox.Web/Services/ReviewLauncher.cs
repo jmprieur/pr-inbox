@@ -38,14 +38,17 @@ public sealed class ReviewLauncher : IReviewLauncher, IAsyncDisposable
     private readonly ILogger<ReviewLauncher> _log;
     private readonly ILoggerFactory _logFactory;
     private readonly PrInboxConfig _config;
+    private readonly ConsoleWindowRegistry _consoles;
     private readonly ConcurrentDictionary<string, FindingsWatcher> _watchers = new(StringComparer.OrdinalIgnoreCase);
 
-    public ReviewLauncher(ReviewRunStore runs, ILogger<ReviewLauncher> log, ILoggerFactory logFactory, PrInboxConfig config)
+    public ReviewLauncher(ReviewRunStore runs, ILogger<ReviewLauncher> log, ILoggerFactory logFactory,
+        PrInboxConfig config, ConsoleWindowRegistry consoles)
     {
         _runs = runs;
         _log = log;
         _logFactory = logFactory;
         _config = config;
+        _consoles = consoles;
     }
 
     public async Task<string> LaunchAsync(string prUrl, CancellationToken ct)
@@ -88,7 +91,7 @@ public sealed class ReviewLauncher : IReviewLauncher, IAsyncDisposable
         }
 
         StartWatcher(brief.PrUrl, brief.RunDirectory, brief.RunId, brief.HeadSha);
-        SpawnConsole(brief.RunDirectory, tabTitle);
+        SpawnConsole(brief.RunDirectory, tabTitle, brief.RunId);
 
         return $"Review run #{brief.RunId} opened in a new window. Findings will land in {brief.RunDirectory}\\findings.yaml.";
     }
@@ -179,7 +182,7 @@ public sealed class ReviewLauncher : IReviewLauncher, IAsyncDisposable
         _watchers[prUrl] = watcher;
     }
 
-    private void SpawnConsole(string runDir, string tabTitle)
+    private void SpawnConsole(string runDir, string tabTitle, long runId)
     {
         var ps1 = FindLauncherScript();
         if (ps1 is null)
@@ -207,22 +210,31 @@ public sealed class ReviewLauncher : IReviewLauncher, IAsyncDisposable
 
         // Strip embedded quotes from the tab title so wt doesn't mis-parse
         // the command line. Falls back to the generic title on empty.
-        var safeTitle = string.IsNullOrWhiteSpace(tabTitle)
+        // Append a stable, machine-readable token containing the run id so
+        // ConsoleWindowRegistry can find and validate this window even when
+        // a human renames the tab — defeats HWND recycling.
+        var humanTitle = string.IsNullOrWhiteSpace(tabTitle)
             ? "pr-inbox review"
             : tabTitle.Replace("\"", "");
+        var token = ConsoleWindowRegistry.TokenFor(runId);
+        var safeTitle = $"{humanTitle} [{token}]";
 
         var wt = ResolveOnPath("wt.exe");
         try
         {
             if (wt is not null)
             {
-                var args = $"-w 0 nt --title \"{safeTitle}\" -d \"{runDir}\" pwsh -NoExit -File \"{ps1}\" {launcherArgs}";
+                // -w new gives each review its own Windows Terminal window
+                // so the inbox UI can minimize / restore one without
+                // affecting the others.
+                var args = $"-w new nt --title \"{safeTitle}\" -d \"{runDir}\" pwsh -NoExit -File \"{ps1}\" {launcherArgs}";
                 Process.Start(new ProcessStartInfo
                 {
                     FileName = wt,
                     Arguments = args,
                     UseShellExecute = true,
                 });
+                _consoles.RegisterInBackground(runId, humanTitle);
                 return;
             }
 
@@ -235,6 +247,7 @@ public sealed class ReviewLauncher : IReviewLauncher, IAsyncDisposable
                 Arguments = fallbackArgs,
                 UseShellExecute = true,
             });
+            _consoles.RegisterInBackground(runId, humanTitle);
         }
         catch (Exception ex)
         {
