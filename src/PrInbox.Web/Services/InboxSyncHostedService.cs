@@ -185,30 +185,127 @@ public sealed class InboxSyncHostedService : BackgroundService
         var (prRepo, threadRepo, snapRepo, syncRunRepo) = OpenFullRepos();
         var runtimes = new SourceFactory().Build(config);
 
+        // Pin the filter snapshot to the START of the cycle. Filter changes
+        // that happen mid-cycle apply on the *next* iteration — keeps both
+        // passes evaluating against the same set so the visible/hidden
+        // partition is consistent across all sources.
+        InboxFilters filters;
+        try
+        {
+            var prefsDb = new PrInboxDb(PrInboxDb.DefaultUserConnectionString());
+            var prefsRepo = new UiPreferencesRepository(prefsDb);
+            filters = await InboxFilters.LoadAsync(prefsRepo, config, ct);
+        }
+        catch (Exception ex)
+        {
+            // If we can't load filters, fall back to "everything is visible"
+            // so the legacy single-pass behavior still runs.
+            _log.LogWarning(ex, "Could not load inbox filters; running enrich without priority partitioning.");
+            filters = InboxFilters.From(
+                showClosed: true, showIgnored: true,
+                enabledSources: InboxFilters.KnownSourceClasses,
+                excludedRepos: Array.Empty<string>(),
+                excludedAuthors: Array.Empty<string>(),
+                ignoredRepoRegexes: Array.Empty<System.Text.RegularExpressions.Regex>());
+        }
+
+        // Partition each source's candidates ONCE: one DB query per source,
+        // then visible/hidden split in memory.
+        var partitions = new List<(RuntimeSource Runtime, SyncOrchestrator Orch,
+                                   List<PullRequestRow> Visible, List<PullRequestRow> Hidden)>();
         foreach (var rt in runtimes)
         {
             if (ct.IsCancellationRequested) return;
             try
             {
                 var orchestrator = new SyncOrchestrator(rt.Source, prRepo, snapRepo, threadRepo, syncRunRepo);
-                var progress = new Progress<SyncProgress>();
-                await orchestrator.RunEnrichAsync(rt.Identity, progress, ct);
-
-                // Sweep B: re-enrich the oldest-swept open rows this
-                // source owns, catching state drift on PRs that never
-                // leave the fast-sync result set.
-                try
+                var candidates = await prRepo.ListNeedingEnrichmentAsync(
+                    rt.Source.SourceId, rt.Identity,
+                    minDossierVersion: PrInbox.Core.Reviewing.BriefService.CurrentDossierVersion,
+                    ct);
+                var visible = new List<PullRequestRow>();
+                var hidden = new List<PullRequestRow>();
+                foreach (var row in candidates)
                 {
-                    await orchestrator.RunTtlSweepAsync(rt.Identity, n: 10, ct);
+                    if (filters.ShouldShow(row)) visible.Add(row);
+                    else hidden.Add(row);
                 }
-                catch (Exception ex)
-                {
-                    _log.LogDebug(ex, "TTL sweep of {SourceId} failed", rt.Source.SourceId);
-                }
+                partitions.Add((rt, orchestrator, visible, hidden));
             }
             catch (Exception ex)
             {
-                _log.LogWarning(ex, "Enrich of {SourceId} failed", rt.Source.SourceId);
+                _log.LogWarning(ex, "Building enrich partition for {SourceId} failed", rt.Source.SourceId);
+            }
+        }
+
+        var totalVisible = partitions.Sum(p => p.Visible.Count);
+        var totalHidden = partitions.Sum(p => p.Hidden.Count);
+
+        // Pass 1: visible across every source. Done first so the rows the
+        // user can see on the dashboard refresh as quickly as possible.
+        foreach (var (rt, orch, visible, _) in partitions)
+        {
+            if (ct.IsCancellationRequested) return;
+            if (visible.Count == 0) continue;
+            try
+            {
+                var progress = new Progress<SyncProgress>();
+                await orch.RunEnrichAsync(
+                    rt.Identity, progress, ct,
+                    precomputedCandidates: visible,
+                    tierLabel: "visible");
+            }
+            catch (Exception ex)
+            {
+                _log.LogWarning(ex, "Visible-pass enrich of {SourceId} failed", rt.Source.SourceId);
+            }
+        }
+
+        // Refresh InboxState NOW so the dashboard reflects fresh visible
+        // data before the slower background pass starts. Without this, the
+        // user wouldn't *see* the visible-first benefit — state is pushed
+        // to the UI only after every enrich call has run.
+        if (totalVisible > 0)
+        {
+            try { await RefreshFromCacheAsync(ct); } catch (Exception ex) { _log.LogDebug(ex, "Mid-cycle refresh failed"); }
+            if (totalHidden > 0)
+            {
+                _state.NoteSync($"Visible synced at {DateTimeOffset.Now:HH:mm:ss} · background syncing…");
+            }
+        }
+
+        // Pass 2: hidden across every source.
+        foreach (var (rt, orch, _, hidden) in partitions)
+        {
+            if (ct.IsCancellationRequested) return;
+            if (hidden.Count == 0) continue;
+            try
+            {
+                var progress = new Progress<SyncProgress>();
+                await orch.RunEnrichAsync(
+                    rt.Identity, progress, ct,
+                    precomputedCandidates: hidden,
+                    tierLabel: "background");
+            }
+            catch (Exception ex)
+            {
+                _log.LogWarning(ex, "Background-pass enrich of {SourceId} failed", rt.Source.SourceId);
+            }
+        }
+
+        // TTL sweep per source. Lower priority than either enrich pass —
+        // catches state drift on PRs that never leave the fast-sync result
+        // set. Capped to N=10 per source so it doesn't dominate the cycle.
+        foreach (var (rt, orch, _, _) in partitions)
+        {
+            if (ct.IsCancellationRequested) return;
+            try
+            {
+                await orch.RunTtlSweepAsync(rt.Identity, n: 10, ct);
+            }
+            catch (Exception ex)
+            {
+                _log.LogDebug(ex, "TTL sweep of {SourceId} failed", rt.Source.SourceId);
             }
         }
     }

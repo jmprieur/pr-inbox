@@ -238,7 +238,22 @@ public sealed class SyncOrchestrator
     /// persist them. Candidates are scoped via <c>pr_source_bindings</c> so
     /// the runtime never tries to enrich a PR its identity cannot see.
     /// </summary>
-    public async Task<SyncResult> RunEnrichAsync(string identityUsed, IProgress<SyncProgress>? progress, CancellationToken ct)
+    /// <param name="precomputedCandidates">
+    /// If non-null, used directly instead of fetching via
+    /// <see cref="PullRequestRepository.ListNeedingEnrichmentAsync"/>. Lets
+    /// callers split one DB-side candidate set into priority tiers
+    /// (e.g. UI-visible PRs first, hidden PRs second) without re-querying.
+    /// </param>
+    /// <param name="tierLabel">
+    /// Optional progress label (e.g. <c>"visible"</c>, <c>"background"</c>).
+    /// Appears in progress messages so the UI can distinguish staged passes.
+    /// </param>
+    public async Task<SyncResult> RunEnrichAsync(
+        string identityUsed,
+        IProgress<SyncProgress>? progress,
+        CancellationToken ct,
+        IReadOnlyList<PullRequestRow>? precomputedCandidates = null,
+        string? tierLabel = null)
     {
         var runId = await _syncRuns.StartAsync(_source.SourceId, identityUsed, ct);
         var prsSeen = 0;
@@ -248,11 +263,12 @@ public sealed class SyncOrchestrator
 
         try
         {
-            var candidates = await _pullRequests.ListNeedingEnrichmentAsync(
+            var candidates = precomputedCandidates ?? await _pullRequests.ListNeedingEnrichmentAsync(
                 _source.SourceId, identityUsed,
                 minDossierVersion: PrInbox.Core.Reviewing.BriefService.CurrentDossierVersion,
                 ct);
-            progress?.Report(new SyncProgress(_source.SourceId, $"Enriching: {candidates.Count} PR(s)", 0, candidates.Count));
+            var label = string.IsNullOrEmpty(tierLabel) ? "Enriching" : $"Enriching ({tierLabel})";
+            progress?.Report(new SyncProgress(_source.SourceId, $"{label}: {candidates.Count} PR(s)", 0, candidates.Count));
 
             string? firstError = null;
             foreach (var row in candidates)

@@ -419,7 +419,7 @@ else
     private bool _authorFilterOpen;
     private string _authorFilterSearch = string.Empty;
 
-    private const string UnknownAuthorKey = "(unknown)";
+    private const string UnknownAuthorKey = InboxFilters.UnknownAuthorKey;
 
     // Compiled IgnoredRepos regex list. Invalid patterns are dropped with
     // a debug log; we never crash the page over bad config.
@@ -454,57 +454,26 @@ else
     private bool RowIsHidden(InboxRow row) =>
         row.IsIgnored || RowMatchesIgnoredRepoRegex(row);
 
+    /// <summary>
+    /// Build a fresh <see cref="InboxFilters"/> snapshot from the local
+    /// UI state. The popovers update <c>_excludedRepos</c> / <c>_excludedAuthors</c>
+    /// in place; this getter is the bridge to the shared filter pipeline
+    /// used by <see cref="InboxSyncHostedService"/>.
+    /// </summary>
+    private InboxFilters CurrentFilters => InboxFilters.From(
+        _showClosed,
+        _showIgnored,
+        _enabledSources,
+        _excludedRepos,
+        _excludedAuthors,
+        _ignoredRepoRegexes);
+
     private IReadOnlyList<InboxRow> VisibleRows
     {
         get
         {
-            var query = _rows.AsEnumerable();
-
-            if (!_showClosed)
-            {
-                query = query.Where(r => r.Status == PullRequestStatus.Open);
-            }
-
-            // Source chips. If every chip is enabled, skip the filter; that
-            // keeps rows with unknown sources visible.
-            if (_enabledSources.Count < SourceChips.Length)
-            {
-                query = query.Where(r => _enabledSources.Contains(SourceClass(r)));
-            }
-
-            // Per-repo denylist. Empty set = no filter; otherwise drop rows
-            // whose DisplayRepo the user has explicitly unchecked. Defaults
-            // to "visible" for any repo not in the set, so newly-opened PRs
-            // in unfamiliar repos always show up — the user opts them out,
-            // never the other way around.
-            if (_excludedRepos.Count > 0)
-            {
-                query = query.Where(r => !_excludedRepos.Contains(r.DisplayRepo));
-            }
-
-            // Per-author denylist. Same opt-out shape as repos. Null /
-            // empty author logins are bucketed under UnknownAuthorKey.
-            if (_excludedAuthors.Count > 0)
-            {
-                query = query.Where(r => !_excludedAuthors.Contains(AuthorKeyOf(r)));
-            }
-
-            // disappeared_at: hide PRs that left the review queue but are
-            // still upstream-open. Toggled in via "Show ignored" since the
-            // semantics overlap ("I don't want to see this PR").
-            if (!_showIgnored)
-            {
-                query = query.Where(r =>
-                    !(r.DisappearedAt is not null && r.Status == PullRequestStatus.Open));
-            }
-
-            // Ignore filter — combined per-PR flag + config regex list.
-            if (!_showIgnored)
-            {
-                query = query.Where(r => !RowIsHidden(r));
-            }
-
-            return query.ToArray();
+            var filters = CurrentFilters;
+            return _rows.Where(filters.ShouldShow).ToArray();
         }
     }
 
@@ -594,18 +563,11 @@ else
     private void CompileIgnoredRepoRegexes()
     {
         _ignoredRepoRegexes.Clear();
-        foreach (var pattern in Config.IgnoredRepos ?? new())
+        // Delegate to the shared compiler so the regex timeout + error
+        // policy stays consistent with the sync-side filter.
+        foreach (var re in InboxFilters.CompileIgnoredRepoRegexes(Config.IgnoredRepos))
         {
-            if (string.IsNullOrWhiteSpace(pattern)) continue;
-            try
-            {
-                _ignoredRepoRegexes.Add(new Regex(pattern,
-                    RegexOptions.Compiled | RegexOptions.CultureInvariant | RegexOptions.IgnoreCase));
-            }
-            catch (Exception ex)
-            {
-                Log.LogWarning(ex, "Ignoring invalid IgnoredRepos regex '{Pattern}'.", pattern);
-            }
+            _ignoredRepoRegexes.Add(re);
         }
     }
 
@@ -984,14 +946,7 @@ else
         _ => row.SourceId,
     };
 
-    private static string SourceClass(InboxRow row) => row.SourceId switch
-    {
-        "gh.com:emu"    => "src-emu",
-        "gh.com:public" => "src-public",
-        var id when id.StartsWith("ghe.", StringComparison.Ordinal) => "src-ghe",
-        var id when id.StartsWith("ado:", StringComparison.Ordinal) => "src-ado",
-        _ => "src-other",
-    };
+    private static string SourceClass(InboxRow row) => InboxFilters.SourceClassOf(row.SourceId);
 
     private static string StatusLabel(PullRequestStatus s) => s switch
     {
