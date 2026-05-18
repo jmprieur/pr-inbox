@@ -467,6 +467,117 @@ button.link-like:disabled { color: var(--muted); cursor: default; text-decoratio
     cursor: pointer;
 }
 
+/* ---------- Per-repo filter (denylist popover) -------------------- */
+
+.repo-filter {
+    position: relative;
+    display: inline-block;
+}
+.repo-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    background: var(--card);
+    color: var(--muted);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 0.2rem 0.55rem;
+    font: inherit;
+    font-size: 0.85rem;
+    cursor: pointer;
+    user-select: none;
+}
+.repo-pill:hover { color: var(--fg); }
+.repo-pill.active {
+    color: var(--fg);
+    background: rgba(93, 164, 255, 0.10);
+    border-color: rgba(93, 164, 255, 0.35);
+}
+.repo-pill.open {
+    box-shadow: 0 0 0 2px rgba(93, 164, 255, 0.20);
+}
+.repo-pill-caret { font-size: 0.75rem; }
+
+.repo-popover-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 50;
+    background: transparent;
+}
+.repo-popover {
+    position: absolute;
+    top: calc(100% + 0.25rem);
+    left: 0;
+    z-index: 60;
+    width: 22rem;
+    max-width: 90vw;
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 5px;
+    box-shadow: 0 6px 22px rgba(0, 0, 0, 0.45);
+    padding: 0.5rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+}
+.repo-popover-search {
+    width: 100%;
+    background: var(--bg);
+    color: var(--fg);
+    border: 1px solid var(--line);
+    border-radius: 3px;
+    padding: 0.3rem 0.5rem;
+    font-size: 0.9rem;
+}
+.repo-popover-actions {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 0.85rem;
+}
+.repo-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    max-height: 18rem;
+    overflow-y: auto;
+    border-top: 1px solid var(--line);
+}
+.repo-list li { padding: 0; }
+.repo-list li.empty {
+    padding: 0.5rem;
+    font-size: 0.85rem;
+}
+.repo-list label {
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.25rem 0.25rem;
+    cursor: pointer;
+    font-size: 0.88rem;
+}
+.repo-list label:hover { background: rgba(93, 164, 255, 0.06); }
+.repo-list input[type=checkbox] {
+    margin: 0;
+    accent-color: var(--accent);
+}
+.repo-list .repo-name {
+    color: var(--fg);
+    font-family: 'Cascadia Mono', 'Consolas', monospace;
+    font-size: 0.85rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.repo-list .repo-count {
+    color: var(--muted);
+    font-size: 0.78rem;
+    min-width: 1.5rem;
+    text-align: right;
+}
+.repo-list .repo-count.zero { opacity: 0.45; }
+
 .row-actions {
     display: flex;
     gap: 0.25rem;

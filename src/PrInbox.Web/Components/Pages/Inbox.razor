@@ -40,6 +40,53 @@
         }
     </div>
 
+    <div class="repo-filter">
+        <button type="button"
+                class="repo-pill @(_excludedRepos.Count > 0 ? "active" : "") @(_repoFilterOpen ? "open" : "")"
+                @onclick="ToggleRepoFilterPopover"
+                title="@RepoFilterTooltip">
+            @RepoFilterPillLabel
+            <span class="repo-pill-caret">▾</span>
+        </button>
+        @if (_repoFilterOpen)
+        {
+            <div class="repo-popover-backdrop" @onclick="CloseRepoFilterPopover"></div>
+            <div class="repo-popover" role="dialog" aria-label="Per-repo filter">
+                <input type="search"
+                       class="repo-popover-search"
+                       placeholder="Filter repos…"
+                       @bind="_repoFilterSearch"
+                       @bind:event="oninput" />
+                <div class="repo-popover-actions">
+                    <button type="button"
+                            class="link-like"
+                            disabled="@(_excludedRepos.Count == 0)"
+                            @onclick="OnShowAllReposAsync">Show all</button>
+                    <span class="muted">@RepoFilterStatusLine</span>
+                </div>
+                <ul class="repo-list">
+                    @foreach (var item in FilteredRepoListItems)
+                    {
+                        var isChecked = !item.Excluded;
+                        <li>
+                            <label>
+                                <input type="checkbox"
+                                       checked="@isChecked"
+                                       @onchange="@(e => OnRepoToggleAsync(item.Name, (bool)e.Value!))" />
+                                <span class="repo-name">@item.Name</span>
+                                <span class="repo-count @(item.Count == 0 ? "zero" : "")">@item.Count</span>
+                            </label>
+                        </li>
+                    }
+                    @if (FilteredRepoListItems.Count == 0)
+                    {
+                        <li class="empty muted">No repos match.</li>
+                    }
+                </ul>
+            </div>
+        }
+    </div>
+
     <label class="show-closed">
         <input type="checkbox" checked="@_showClosed"
                @onchange="@(e => OnShowClosedToggleAsync((bool)e.Value!))" />
@@ -98,7 +145,7 @@
     }
     else
     {
-        <p class="empty">No rows match the current filters. Try toggling "Show closed / merged" or "Show ignored", or re-enabling a source chip.</p>
+        <p class="empty">No rows match the current filters. Try toggling "Show closed / merged" or "Show ignored", re-enabling a source chip, or clearing the repo filter.</p>
     }
 }
 else
@@ -271,6 +318,7 @@ else
     private const string PrefShowClosed   = "inbox.show_closed";
     private const string PrefShowIgnored  = "inbox.show_ignored";
     private const string PrefSourceFilter = "inbox.source_filter";
+    private const string PrefExcludedRepos = "inbox.excluded_repos";
 
     private IReadOnlyList<InboxRow> _rows = Array.Empty<InboxRow>();
     private IReadOnlyDictionary<string, ReviewRun> _runMap = new Dictionary<string, ReviewRun>();
@@ -283,6 +331,16 @@ else
     // chips on; loaded from prefs in OnInitializedAsync.
     private HashSet<string> _enabledSources =
         new(SourceChips.Select(c => c.Class), StringComparer.OrdinalIgnoreCase);
+
+    // Per-repo denylist (DisplayRepo strings). Empty = no filter; default
+    // for unknown repos is "visible" so a freshly opened PR in a new repo
+    // never silently disappears from the inbox.
+    private HashSet<string> _excludedRepos =
+        new(StringComparer.OrdinalIgnoreCase);
+
+    // Repo-filter popover UI state — not persisted.
+    private bool _repoFilterOpen;
+    private string _repoFilterSearch = string.Empty;
 
     // Compiled IgnoredRepos regex list. Invalid patterns are dropped with
     // a debug log; we never crash the page over bad config.
@@ -333,6 +391,16 @@ else
             if (_enabledSources.Count < SourceChips.Length)
             {
                 query = query.Where(r => _enabledSources.Contains(SourceClass(r)));
+            }
+
+            // Per-repo denylist. Empty set = no filter; otherwise drop rows
+            // whose DisplayRepo the user has explicitly unchecked. Defaults
+            // to "visible" for any repo not in the set, so newly-opened PRs
+            // in unfamiliar repos always show up — the user opts them out,
+            // never the other way around.
+            if (_excludedRepos.Count > 0)
+            {
+                query = query.Where(r => !_excludedRepos.Contains(r.DisplayRepo));
             }
 
             // disappeared_at: hide PRs that left the review queue but are
@@ -396,6 +464,23 @@ else
                     Log.LogDebug(ex, "Could not parse {Key}; falling back to defaults.", PrefSourceFilter);
                 }
             }
+
+            var rawExcluded = await Prefs.GetAsync(PrefExcludedRepos);
+            if (!string.IsNullOrWhiteSpace(rawExcluded))
+            {
+                try
+                {
+                    var arr = JsonSerializer.Deserialize<string[]>(rawExcluded);
+                    if (arr is not null)
+                    {
+                        _excludedRepos = new HashSet<string>(arr, StringComparer.OrdinalIgnoreCase);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Log.LogDebug(ex, "Could not parse {Key}; falling back to empty set.", PrefExcludedRepos);
+                }
+            }
         }
         catch (Exception ex)
         {
@@ -445,6 +530,128 @@ else
                 JsonSerializer.Serialize(_enabledSources.ToArray()));
         }
         catch (Exception ex) { Log.LogDebug(ex, "Persist {Key} failed.", PrefSourceFilter); }
+    }
+
+    // ----- Per-repo filter helpers -------------------------------------
+
+    private sealed record RepoFilterItem(string Name, int Count, bool Excluded);
+
+    /// <summary>
+    /// Repos that <em>could</em> show up given the current source-chip /
+    /// closed / ignored settings, with their post-source-filter PR counts.
+    /// We do NOT apply <see cref="_excludedRepos"/> here so the popover
+    /// always lists every repo the user could re-enable. Repos in the
+    /// excluded set that no longer have any matching rows still appear
+    /// with count = 0 so they're recoverable from the UI alone.
+    /// </summary>
+    private IReadOnlyList<RepoFilterItem> AllRepoFilterItems
+    {
+        get
+        {
+            var src = _rows.AsEnumerable();
+            if (!_showClosed)
+                src = src.Where(r => r.Status == PullRequestStatus.Open);
+            if (_enabledSources.Count < SourceChips.Length)
+                src = src.Where(r => _enabledSources.Contains(SourceClass(r)));
+            if (!_showIgnored)
+                src = src.Where(r =>
+                    !(r.DisappearedAt is not null && r.Status == PullRequestStatus.Open)
+                    && !RowIsHidden(r));
+
+            var byName = src
+                .GroupBy(r => r.DisplayRepo, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(g => g.Key, g => g.Count(), StringComparer.OrdinalIgnoreCase);
+
+            // Surface any excluded repo that no longer has matching rows so
+            // the user can still un-exclude it from the popover.
+            foreach (var name in _excludedRepos)
+            {
+                if (!byName.ContainsKey(name)) byName[name] = 0;
+            }
+
+            return byName
+                .Select(kv => new RepoFilterItem(kv.Key, kv.Value, _excludedRepos.Contains(kv.Key)))
+                .OrderByDescending(i => i.Count)
+                .ThenBy(i => i.Name, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+    }
+
+    private IReadOnlyList<RepoFilterItem> FilteredRepoListItems
+    {
+        get
+        {
+            var items = AllRepoFilterItems;
+            if (string.IsNullOrWhiteSpace(_repoFilterSearch)) return items;
+            var needle = _repoFilterSearch.Trim();
+            return items
+                .Where(i => i.Name.Contains(needle, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+        }
+    }
+
+    private string RepoFilterPillLabel =>
+        _excludedRepos.Count == 0
+            ? "Repos"
+            : $"Repos: {_excludedRepos.Count} hidden";
+
+    private string RepoFilterTooltip
+    {
+        get
+        {
+            if (_excludedRepos.Count == 0) return "Filter inbox by repo.";
+            var sample = _excludedRepos.OrderBy(x => x, StringComparer.OrdinalIgnoreCase).Take(8);
+            var more = _excludedRepos.Count > 8 ? $", … (+{_excludedRepos.Count - 8} more)" : "";
+            return "Hidden: " + string.Join(", ", sample) + more;
+        }
+    }
+
+    private string RepoFilterStatusLine
+    {
+        get
+        {
+            var total = AllRepoFilterItems.Count;
+            return _excludedRepos.Count == 0
+                ? $"{total} repo(s)"
+                : $"{_excludedRepos.Count} of {total} hidden";
+        }
+    }
+
+    private void ToggleRepoFilterPopover()
+    {
+        _repoFilterOpen = !_repoFilterOpen;
+        if (!_repoFilterOpen) _repoFilterSearch = string.Empty;
+    }
+
+    private void CloseRepoFilterPopover()
+    {
+        _repoFilterOpen = false;
+        _repoFilterSearch = string.Empty;
+    }
+
+    private async Task OnRepoToggleAsync(string repoName, bool visible)
+    {
+        if (string.IsNullOrWhiteSpace(repoName)) return;
+        if (visible) _excludedRepos.Remove(repoName);
+        else _excludedRepos.Add(repoName);
+        await PersistExcludedReposAsync();
+    }
+
+    private async Task OnShowAllReposAsync()
+    {
+        if (_excludedRepos.Count == 0) return;
+        _excludedRepos.Clear();
+        await PersistExcludedReposAsync();
+    }
+
+    private async Task PersistExcludedReposAsync()
+    {
+        try
+        {
+            await Prefs.SetAsync(PrefExcludedRepos,
+                JsonSerializer.Serialize(_excludedRepos.ToArray()));
+        }
+        catch (Exception ex) { Log.LogDebug(ex, "Persist {Key} failed.", PrefExcludedRepos); }
     }
 
     private async Task OnToggleIgnoreAsync(InboxRow row)
