@@ -260,6 +260,16 @@ else
                                        title="@CleanVerdict.BuildTooltip(run.Findings, DateTimeOffset.UtcNow)"
                                        href="@($"/review?url={Uri.EscapeDataString(row.Url)}")">✓ clean</a>
                                 }
+                                else
+                                {
+                                    var conv = ConvergenceVerdict.Compute(run.Findings);
+                                    if (conv.State != ConvergenceState.Hidden)
+                                    {
+                                        <a class="convergence-badge @conv.CssClass"
+                                           title="@conv.Tooltip"
+                                           href="@($"/review?url={Uri.EscapeDataString(row.Url)}")">@conv.Glyph</a>
+                                    }
+                                }
                             </span>
                         }
                         @if (row.DriftKind == DriftKind.Ahead)

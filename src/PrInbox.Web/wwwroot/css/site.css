@@ -233,6 +233,33 @@ button.review:hover { background: rgba(93,164,255,0.12); }
 }
 .clean-pill:hover { filter: brightness(1.05); }
 
+/* Inbox convergence badge — sits next to the C:H:M:L counts on
+   findings-bearing rows. Two colors:
+     converged   = green, both reviewers flagged every finding
+     asymmetric  = amber, one reviewer flagged something the other did not */
+.convergence-badge {
+    display: inline-block;
+    padding: 0.1rem 0.4rem;
+    border-radius: 3px;
+    font-size: 0.72rem;
+    font-weight: 700;
+    margin-right: 0.25rem;
+    text-decoration: none;
+    line-height: 1.2;
+    border: 1px solid transparent;
+}
+.convergence-badge:hover { text-decoration: none; filter: brightness(1.1); }
+.convergence-badge.converged {
+    background: #d4edda;
+    color: #155724;
+    border-color: #b7dfc1;
+}
+.convergence-badge.asymmetric {
+    background: #fff3cd;
+    color: #7a5d05;
+    border-color: #ffe69a;
+}
+
 /* Review-page callout for a zero-finding run. Larger green badge + the
    verdict text inline so the reviewer doesn't have to hover. */
 .clean-callout {
