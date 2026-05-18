@@ -175,13 +175,18 @@ public sealed class ReviewLauncherSettings
     public List<string> AdditionalMcps { get; init; } = new() { "workiq", "teams" };
 
     /// <summary>
-    /// When true (default), the brief is passed straight to copilot via
-    /// <c>-i "&lt;brief&gt;"</c> on the pass-through command line so the
-    /// session starts interactively AND auto-executes the prompt — no
-    /// Ctrl+V needed. When false, falls back to the legacy "copy brief
+    /// When true (default), the launcher sends a short bootstrap prompt
+    /// to copilot via <c>-i "Read brief.md and proceed."</c> so the
+    /// session starts interactively AND auto-executes immediately — no
+    /// Ctrl+V paste. When false, falls back to the legacy "copy brief
     /// to clipboard, user pastes manually" flow.
     /// </summary>
-    public bool AutoSend { get; init; } = true;
+    /// <remarks>
+    /// Mutable (<c>set</c> not <c>init</c>) so the Settings page can
+    /// toggle it on the live DI singleton and the next review launch
+    /// picks it up without a process restart.
+    /// </remarks>
+    public bool AutoSend { get; set; } = true;
 
     /// <summary>
     /// When true, appends <c>--yolo</c> to copilot's pass-through args
@@ -190,5 +195,10 @@ public sealed class ReviewLauncherSettings
     /// for the session. Default <c>false</c>: opt in per environment if
     /// you want the unattended experience.
     /// </summary>
-    public bool Yolo { get; init; } = false;
+    /// <remarks>
+    /// Mutable (<c>set</c> not <c>init</c>) so the Settings page can
+    /// toggle it on the live DI singleton and the next review launch
+    /// picks it up without a process restart.
+    /// </remarks>
+    public bool Yolo { get; set; } = false;
 }

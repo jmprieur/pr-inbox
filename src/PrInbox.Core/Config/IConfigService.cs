@@ -64,6 +64,15 @@ public interface IConfigService
     Task SetIgnoredReposAsync(IReadOnlyList<string> patterns, CancellationToken ct = default);
 
     /// <summary>
+    /// Updates the two live-toggleable Review-launcher flags
+    /// (<see cref="ReviewLauncherSettings.AutoSend"/> and
+    /// <see cref="ReviewLauncherSettings.Yolo"/>) and mirrors them onto
+    /// the DI singleton so the next review launch picks them up without
+    /// a process restart.
+    /// </summary>
+    Task SetReviewLauncherFlagsAsync(bool autoSend, bool yolo, CancellationToken ct = default);
+
+    /// <summary>
     /// Runs the same auth/identity checks the CLI <c>config doctor</c>
     /// runs and returns a structured report. Shell-outs to <c>gh</c> and
     /// the Azure CLI happen inside; expect a few hundred ms per source.

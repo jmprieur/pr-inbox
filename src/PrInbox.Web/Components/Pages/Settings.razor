@@ -181,6 +181,42 @@ else
         </div>
     </section>
 
+    <section class="settings-section">
+        <h2>Review launcher</h2>
+        <p class="muted">
+            How the Review button drives the dual-model-review agent.
+            Both flags take effect immediately on the <em>next</em> review you launch — running consoles are unaffected.
+        </p>
+        <div class="settings-toggle">
+            <label>
+                <input type="checkbox"
+                       checked="@_autoSend"
+                       @onchange="@(e => OnAutoSendChanged((bool)e.Value!))"
+                       disabled="@_busy" />
+                <strong>Auto-send brief</strong>
+                <span class="muted">
+                    On: launcher hands the brief to the agent via <code>-i</code> so the run starts hands-free.
+                    Off: brief is copied to the clipboard and you paste it (Ctrl+V) yourself.
+                </span>
+            </label>
+        </div>
+        <div class="settings-toggle">
+            <label>
+                <input type="checkbox"
+                       checked="@_yolo"
+                       @onchange="@(e => OnYoloChanged((bool)e.Value!))"
+                       disabled="@_busy" />
+                <strong>Yolo</strong>
+                <span class="muted">
+                    Appends <code>--yolo</code> to copilot
+                    (= <code>--allow-all-tools --allow-all-paths --allow-all-urls</code>):
+                    every permission prompt is auto-approved.
+                    Faster + truly unattended, but no per-action gates — use only when you trust the agent's plugin/agent.
+                </span>
+            </label>
+        </div>
+    </section>
+
     <p class="muted">
         Some changes take effect immediately (ignored repos, next sync tick). Adding or removing a source updates publisher wiring only after the next app restart.
     </p>
@@ -190,6 +226,8 @@ else
     private PrInboxConfig? _cfg;
     private DoctorReport? _doctorReport;
     private string _ignoredReposText = string.Empty;
+    private bool _autoSend = true;
+    private bool _yolo;
 
     private bool _showGheForm;
     private string _gheHost = string.Empty;
@@ -215,6 +253,8 @@ else
     {
         _cfg = await ConfigSvc.GetAsync();
         _ignoredReposText = string.Join("\n", _cfg.IgnoredRepos);
+        _autoSend = _cfg.ReviewLauncher.AutoSend;
+        _yolo = _cfg.ReviewLauncher.Yolo;
     }
 
     private static string KindLabel(SourceConfigKind kind) => kind switch
@@ -333,6 +373,27 @@ else
                 .ToArray();
             await ConfigSvc.SetIgnoredReposAsync(patterns);
             SetMessage($"Saved {patterns.Length} ignored-repo pattern(s).");
+        });
+    }
+
+    private Task OnAutoSendChanged(bool value)
+    {
+        _autoSend = value;
+        return PersistLauncherFlagsAsync($"Auto-send brief {(value ? "ON" : "OFF")}.");
+    }
+
+    private Task OnYoloChanged(bool value)
+    {
+        _yolo = value;
+        return PersistLauncherFlagsAsync($"Yolo {(value ? "ON" : "OFF")}.");
+    }
+
+    private async Task PersistLauncherFlagsAsync(string okMessage)
+    {
+        await WrapAsync(async () =>
+        {
+            await ConfigSvc.SetReviewLauncherFlagsAsync(_autoSend, _yolo);
+            SetMessage(okMessage);
         });
     }
 

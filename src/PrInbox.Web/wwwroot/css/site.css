@@ -641,6 +641,27 @@ tr.row-hidden td.title { font-style: italic; }
     font-size: 0.9rem;
 }
 
+.settings-toggle {
+    margin: 0.5rem 0;
+}
+.settings-toggle label {
+    display: grid;
+    grid-template-columns: auto auto 1fr;
+    column-gap: 0.5rem;
+    align-items: baseline;
+    cursor: pointer;
+}
+.settings-toggle input[type="checkbox"] {
+    margin: 0;
+    transform: translateY(2px);
+}
+.settings-toggle strong {
+    font-weight: 600;
+}
+.settings-toggle .muted {
+    font-size: 0.85rem;
+}
+
 .doctor-table tr.ok      td { background: rgba(80,160,80,0.04); }
 .doctor-table tr.fail    td { background: rgba(180,80,80,0.06); }
 .status-ok   { color: #6fbf72; }

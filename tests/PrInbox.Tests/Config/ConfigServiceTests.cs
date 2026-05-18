@@ -213,6 +213,31 @@ public sealed class ConfigServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task SetReviewLauncherFlagsAsync_Persists_And_Mirrors_Singleton()
+    {
+        var singleton = new PrInboxConfig();
+        var svc = new ConfigService(singleton, _path);
+        singleton.ReviewLauncher.AutoSend.Should().BeTrue();   // baseline default
+        singleton.ReviewLauncher.Yolo.Should().BeFalse();
+
+        await svc.SetReviewLauncherFlagsAsync(autoSend: false, yolo: true);
+
+        // Singleton mirrored in-place (same instance — ReviewLauncher reads this).
+        singleton.ReviewLauncher.AutoSend.Should().BeFalse();
+        singleton.ReviewLauncher.Yolo.Should().BeTrue();
+
+        // And persisted to disk.
+        var reloaded = await svc.GetAsync();
+        reloaded.ReviewLauncher.AutoSend.Should().BeFalse();
+        reloaded.ReviewLauncher.Yolo.Should().BeTrue();
+
+        // Round-trip toggling back also works.
+        await svc.SetReviewLauncherFlagsAsync(autoSend: true, yolo: false);
+        singleton.ReviewLauncher.AutoSend.Should().BeTrue();
+        singleton.ReviewLauncher.Yolo.Should().BeFalse();
+    }
+
+    [Fact]
     public void ConfigPath_Reflects_Constructor_Arg()
     {
         var svc = new ConfigService(_path);

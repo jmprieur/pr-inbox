@@ -143,6 +143,15 @@ public sealed class ConfigService : IConfigService
     }
 
     /// <inheritdoc />
+    public async Task SetReviewLauncherFlagsAsync(bool autoSend, bool yolo, CancellationToken ct = default)
+    {
+        var cfg = await PrInboxConfig.LoadAsync(_configPath, ct);
+        cfg.ReviewLauncher.AutoSend = autoSend;
+        cfg.ReviewLauncher.Yolo = yolo;
+        await SaveAndRefreshAsync(cfg, ct);
+    }
+
+    /// <inheritdoc />
     public async Task<DoctorReport> RunDoctorAsync(CancellationToken ct = default)
     {
         var cfg = await PrInboxConfig.LoadAsync(_configPath, ct);
@@ -214,6 +223,13 @@ public sealed class ConfigService : IConfigService
 
         _singleton.Bots.ExtraLogins.Clear();
         foreach (var b in cfg.Bots.ExtraLogins) _singleton.Bots.ExtraLogins.Add(b);
+
+        // ReviewLauncher: the singleton's ReviewLauncher instance is the
+        // same reference ReviewLauncher.SpawnConsole reads each launch,
+        // so mutating these two fields in place is what makes Settings
+        // changes effective without a restart.
+        _singleton.ReviewLauncher.AutoSend = cfg.ReviewLauncher.AutoSend;
+        _singleton.ReviewLauncher.Yolo = cfg.ReviewLauncher.Yolo;
     }
 
     private static string DefaultIdFor(SourceConfigKind kind, string host) => kind switch
