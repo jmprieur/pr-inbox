@@ -48,6 +48,21 @@ internal static class WindowInterop
     [return: MarshalAs(UnmanagedType.Bool)]
     public static extern bool ShowWindowAsync(IntPtr hwnd, int nCmdShow);
 
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint lpdwProcessId);
+
+    /// <summary>
+    /// Returns the process id that owns <paramref name="hwnd"/>, or 0 if
+    /// the window is gone / the call failed. Used to anchor liveness to a
+    /// stable identity — the running process inside the window can rewrite
+    /// its own title, but it cannot change its PID.
+    /// </summary>
+    public static uint GetOwningProcessId(IntPtr hwnd)
+    {
+        if (hwnd == IntPtr.Zero) return 0;
+        return GetWindowThreadProcessId(hwnd, out var pid) == 0 ? 0 : pid;
+    }
+
     /// <summary>
     /// Read a window's title via <c>GetWindowText</c>. Returns empty string
     /// when the window is gone or the title is empty.

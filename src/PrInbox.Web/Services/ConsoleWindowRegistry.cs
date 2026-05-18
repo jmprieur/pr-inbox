@@ -11,18 +11,22 @@ public sealed record ConsoleWindowEntry(
     string TitleToken,
     string DisplayTitle,
     IntPtr Hwnd,
+    uint OwnerPid,
     DateTimeOffset LaunchedAt)
 {
     /// <summary>True when <see cref="WindowInterop.IsWindow"/> still
-    /// returns true AND the live window title still contains our token —
-    /// guards against HWND recycling.</summary>
+    /// returns true AND the owning process id still matches the one we
+    /// captured at registration. Anchoring to PID (not title) guards
+    /// against HWND recycling while remaining immune to the running
+    /// process rewriting its own window/tab title — which Windows
+    /// Terminal review agents routinely do.</summary>
     public bool IsAlive()
     {
         if (Hwnd == IntPtr.Zero) return false;
         if (!OperatingSystem.IsWindows()) return false;
         if (!WindowInterop.IsWindow(Hwnd)) return false;
-        var title = WindowInterop.GetTitle(Hwnd);
-        return title.Contains(TitleToken, StringComparison.Ordinal);
+        var nowPid = WindowInterop.GetOwningProcessId(Hwnd);
+        return nowPid != 0 && nowPid == OwnerPid;
     }
 
     /// <summary>True when the window is currently visible AND not minimized.</summary>
@@ -42,10 +46,14 @@ public sealed record ConsoleWindowEntry(
 ///   <item>Every launch embeds a unique <c>pr-inbox:run-{runId}</c> token in
 ///         the wt tab title. We poll <see cref="WindowInterop.FindByTitleToken"/>
 ///         in the background for up to 10 seconds after spawn.</item>
-///   <item>Every <see cref="Toggle"/> call re-validates that the HWND still
-///         belongs to a window whose title contains our token. This defeats
-///         HWND recycling — if Windows handed our cached HWND to an unrelated
-///         window, the title check fails and we refuse to act.</item>
+///   <item>The token is used ONLY at discovery time (the only place we have
+///         a name-based way to identify which window is ours). After we have
+///         the HWND, every <see cref="Toggle"/> call re-validates that the
+///         HWND still maps to the same owner process id we recorded at
+///         registration. This defeats HWND recycling — if Windows handed our
+///         cached HWND to an unrelated window the PID will differ. The title
+///         is NOT used for revalidation because review agents routinely
+///         rewrite their own window/tab title at runtime.</item>
 ///   <item>"Hide" uses <see cref="WindowInterop.SW_MINIMIZE"/> rather than
 ///         <see cref="WindowInterop.SW_HIDE"/> so a pr-inbox crash leaves
 ///         the console reachable via the taskbar.</item>
@@ -106,16 +114,25 @@ public sealed class ConsoleWindowRegistry : IDisposable
                     var hwnd = WindowInterop.FindByTitleToken(token);
                     if (hwnd != IntPtr.Zero)
                     {
-                        var entry = new ConsoleWindowEntry(
-                            RunId: runId,
-                            TitleToken: token,
-                            DisplayTitle: displayTitle,
-                            Hwnd: hwnd,
-                            LaunchedAt: launchedAt);
-                        _entries[runId] = entry;
-                        _log.LogInformation("Tracked console for run {RunId} (hwnd={Hwnd}).", runId, hwnd.ToInt64());
-                        try { Changed?.Invoke(); } catch { }
-                        return;
+                        var ownerPid = WindowInterop.GetOwningProcessId(hwnd);
+                        if (ownerPid == 0)
+                        {
+                            _log.LogDebug("Found hwnd for run {RunId} but PID lookup failed; will retry.", runId);
+                        }
+                        else
+                        {
+                            var entry = new ConsoleWindowEntry(
+                                RunId: runId,
+                                TitleToken: token,
+                                DisplayTitle: displayTitle,
+                                Hwnd: hwnd,
+                                OwnerPid: ownerPid,
+                                LaunchedAt: launchedAt);
+                            _entries[runId] = entry;
+                            _log.LogInformation("Tracked console for run {RunId} (hwnd={Hwnd}, pid={Pid}).", runId, hwnd.ToInt64(), ownerPid);
+                            try { Changed?.Invoke(); } catch { }
+                            return;
+                        }
                     }
                 }
                 catch (Exception ex)
