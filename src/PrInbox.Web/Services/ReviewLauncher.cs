@@ -206,7 +206,9 @@ public sealed class ReviewLauncher : IReviewLauncher, IAsyncDisposable
             $" -Model \"{rl.Model}\"" +
             $" -Agent \"{rl.Agent}\"" +
             $" -SessionName \"{safeSessionName}\"" +
-            (string.IsNullOrEmpty(mcps) ? "" : $" -Mcps \"{mcps}\"");
+            (string.IsNullOrEmpty(mcps) ? "" : $" -Mcps \"{mcps}\"") +
+            (rl.AutoSend ? "" : " -NoAutoSend") +
+            (rl.Yolo     ? " -Yolo"       : "");
 
         // Strip embedded quotes from the tab title so wt doesn't mis-parse
         // the command line. Falls back to the generic title on empty.

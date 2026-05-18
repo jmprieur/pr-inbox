@@ -6,13 +6,21 @@
 .DESCRIPTION
     Run inside a new Windows Terminal tab spawned by pr-inbox-web.
 
-    1. Reads brief.md from the run directory.
-    2. Copies it to the clipboard.
-    3. Launches the agency CLI with the dual-model-review agent.
+    By default (-AutoSend, on) the brief is passed straight to copilot
+    via the pass-through `-i "<brief>"` flag, which starts the session
+    interactively AND auto-executes the prompt — no Ctrl+V needed. The
+    terminal stays open after the agent finishes so you can follow up.
 
-    You paste the brief (Ctrl+V), review/edit if you want, and press
-    Enter to send. The agent writes findings.yaml back into the run
-    directory; pr-inbox-web watches for it.
+    Pass -NoAutoSend to fall back to the legacy "copy to clipboard +
+    paste manually" flow. Useful if you want to eyeball/edit the brief
+    before sending it.
+
+    Pass -Yolo to add `--yolo` to copilot's pass-through args (equivalent
+    to --allow-all-tools --allow-all-paths --allow-all-urls). Skips every
+    permission prompt for the duration of this session.
+
+    The agent writes findings.yaml back into the run directory;
+    pr-inbox-web watches for it.
 
 .PARAMETER RunDirectory
     Absolute path to the run directory. Required.
@@ -34,11 +42,19 @@
 
 .PARAMETER SessionName
     Optional human-readable name for the underlying copilot session.
-    When set, the agency invocation gains a trailing `--name "<value>"`
-    that agency forwards to copilot as a pass-through flag. Lets the
-    user pick this review back out of the `--resume` picker by name,
-    and prevents multiple reviews of different PRs from colliding onto
-    a single resumable session.
+    Diagnostic-only: agency uses `--resume <uuid>` internally so the
+    pass-through `--name` flag is intentionally NOT forwarded (it's
+    mutually exclusive with --resume). The wt tab title is the user-
+    visible identifier.
+
+.PARAMETER NoAutoSend
+    Opt out of the default "send the brief automatically" behaviour.
+    When set, the brief is copied to the clipboard and you Ctrl+V it
+    into the agency prompt manually.
+
+.PARAMETER Yolo
+    Pass `--yolo` to copilot. Auto-approves all tool / path / URL
+    permission prompts for the session. Off by default.
 #>
 
 param(
@@ -47,7 +63,9 @@ param(
     [string] $Plugin      = $env:PRINBOX_REVIEW_PLUGIN,
     [string] $Model       = $env:PRINBOX_REVIEW_MODEL,
     [string] $Mcps        = $env:PRINBOX_REVIEW_MCPS,
-    [string] $SessionName = ''
+    [string] $SessionName = '',
+    [switch] $NoAutoSend,
+    [switch] $Yolo
 )
 
 if (-not $Agent)  { $Agent  = 'security-toolkit:dual-model-review' }
@@ -65,12 +83,29 @@ if (-not (Test-Path $briefPath)) {
     exit 1
 }
 
-$brief = Get-Content -Raw -Path $briefPath
-try {
-    Set-Clipboard -Value $brief
-    $copied = $true
-} catch {
-    $copied = $false
+$brief    = Get-Content -Raw -Path $briefPath
+$autoSend = -not $NoAutoSend
+# Windows CreateProcess command-line limit is ~32K. If a brief gets near
+# that, fall back to clipboard so the launch doesn't fail silently.
+$briefBytes  = [System.Text.Encoding]::UTF8.GetByteCount($brief)
+$autoTooLong = $briefBytes -gt 30000
+if ($autoSend -and $autoTooLong) {
+    $autoSend = $false
+    $autoForcedOff = $true
+} else {
+    $autoForcedOff = $false
+}
+
+# Only copy-to-clipboard when we're NOT auto-sending; the user needs the
+# clipboard for the manual Ctrl+V fallback.
+$copied = $false
+if (-not $autoSend) {
+    try {
+        Set-Clipboard -Value $brief
+        $copied = $true
+    } catch {
+        $copied = $false
+    }
 }
 
 # Expand the MCP list into a flat array of --mcp / <name> tokens
@@ -86,12 +121,24 @@ foreach ($m in ($Mcps -split ',')) {
 
 Write-Host ''
 Write-Host '------------------------------------------------------------' -ForegroundColor DarkGray
-if ($copied) {
-    Write-Host (' Brief copied to clipboard (' + $brief.Length + ' chars).') -ForegroundColor Cyan
-    Write-Host ' Ctrl+V into agency. Edit if needed. Press Enter to send.' -ForegroundColor Cyan
+if ($autoSend) {
+    Write-Host (' Brief auto-send ON (' + $brief.Length + ' chars).') -ForegroundColor Green
+    Write-Host ' Brief will be passed inline via copilot -i; session stays interactive.' -ForegroundColor DarkGray
+} elseif ($autoForcedOff) {
+    Write-Host (' Brief too long for auto-send (' + $briefBytes + ' bytes) — falling back to clipboard.') -ForegroundColor Yellow
+    if ($copied) {
+        Write-Host (' Brief copied to clipboard. Ctrl+V into agency, press Enter to send.') -ForegroundColor Yellow
+    } else {
+        Write-Host (' Brief at: ' + $briefPath) -ForegroundColor Yellow
+    }
 } else {
-    Write-Host (' Brief at: ' + $briefPath) -ForegroundColor Yellow
-    Write-Host ' (Clipboard copy failed -- open the file manually.)' -ForegroundColor Yellow
+    if ($copied) {
+        Write-Host (' Brief copied to clipboard (' + $brief.Length + ' chars).') -ForegroundColor Cyan
+        Write-Host ' Ctrl+V into agency. Edit if needed. Press Enter to send.' -ForegroundColor Cyan
+    } else {
+        Write-Host (' Brief at: ' + $briefPath) -ForegroundColor Yellow
+        Write-Host ' (Clipboard copy failed -- open the file manually.)' -ForegroundColor Yellow
+    }
 }
 Write-Host (' Agent:    ' + $Agent)  -ForegroundColor DarkGray
 Write-Host (' Plugin:   ' + $Plugin) -ForegroundColor DarkGray
@@ -99,6 +146,9 @@ Write-Host (' Model:    ' + $Model)  -ForegroundColor DarkGray
 Write-Host (' MCPs:     ' + $Mcps)   -ForegroundColor DarkGray
 if ($SessionName) {
     Write-Host (' Session:  ' + $SessionName) -ForegroundColor DarkGray
+}
+if ($Yolo) {
+    Write-Host ' Yolo:     ON (--yolo — all permission prompts auto-approved)' -ForegroundColor Yellow
 }
 Write-Host (' Findings: ' + $findingsPath) -ForegroundColor DarkGray
 Write-Host '------------------------------------------------------------' -ForegroundColor DarkGray
@@ -141,4 +191,20 @@ $agencyArgs = @('copilot') + $mcpArgs + @(
     '--agent',  $Agent
 )
 
-& agency @agencyArgs
+# Pass-through args go after `--`. -i keeps the session interactive but
+# auto-executes the brief as the first turn (unlike -p which exits
+# after completion — we DON'T want that, the user needs to follow up).
+$passThrough = @()
+if ($autoSend -or $Yolo) {
+    $passThrough += '--'
+    if ($autoSend) {
+        $passThrough += '-i'
+        $passThrough += $brief
+    }
+    if ($Yolo) {
+        $passThrough += '--yolo'
+    }
+}
+
+& agency @agencyArgs @passThrough
+

@@ -173,4 +173,22 @@ public sealed class ReviewLauncherSettings
 
     /// <summary>MCP servers to enable (each becomes one <c>--mcp</c> flag).</summary>
     public List<string> AdditionalMcps { get; init; } = new() { "workiq", "teams" };
+
+    /// <summary>
+    /// When true (default), the brief is passed straight to copilot via
+    /// <c>-i "&lt;brief&gt;"</c> on the pass-through command line so the
+    /// session starts interactively AND auto-executes the prompt — no
+    /// Ctrl+V needed. When false, falls back to the legacy "copy brief
+    /// to clipboard, user pastes manually" flow.
+    /// </summary>
+    public bool AutoSend { get; init; } = true;
+
+    /// <summary>
+    /// When true, appends <c>--yolo</c> to copilot's pass-through args
+    /// (equivalent to <c>--allow-all-tools --allow-all-paths
+    /// --allow-all-urls</c>) — every permission prompt is auto-approved
+    /// for the session. Default <c>false</c>: opt in per environment if
+    /// you want the unattended experience.
+    /// </summary>
+    public bool Yolo { get; init; } = false;
 }
