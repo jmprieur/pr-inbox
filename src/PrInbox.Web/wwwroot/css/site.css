@@ -432,6 +432,27 @@ button.link-like {
 button.link-like:hover { filter: brightness(1.1); }
 button.link-like:disabled { color: var(--muted); cursor: default; text-decoration: none; }
 
+/* "Done replies" bulk button + per-row "✓ done" badge on the Threads page.
+   Same green palette as the convergence/clean badges so the visual signal is
+   consistent: green = high-confidence positive outcome. */
+button.link-like.done-bulk {
+    color: #1e7e34;
+    font-weight: 600;
+}
+.done-badge {
+    display: inline-block;
+    margin-left: 0.4rem;
+    padding: 0.05rem 0.4rem;
+    border-radius: 3px;
+    font-size: 0.72rem;
+    font-weight: 600;
+    background: #d4edda;
+    color: #155724;
+    border: 1px solid #b7dfc1;
+    line-height: 1.4;
+    vertical-align: middle;
+}
+
 .findings-table {
     width: 100%;
     border-collapse: collapse;
