@@ -65,6 +65,56 @@ h1 { font-size: 1.4rem; margin: 0 0 0.5rem 0; }
     font-size: 0.78em;
 }
 
+/* HEAD-drift chip on inbox rows: shows when the PR has moved since the
+   last review. "Ahead" is amber; "force-push" is red. Hidden entirely
+   for clean rows so silence is information. */
+.drift {
+    display: inline-block;
+    margin-left: 0.4rem;
+    padding: 0.05rem 0.4rem;
+    border-radius: 10px;
+    font-size: 0.78em;
+    font-family: var(--mono, monospace);
+    text-decoration: none;
+    border: 1px solid transparent;
+    white-space: nowrap;
+    vertical-align: middle;
+}
+a.drift:hover { text-decoration: underline; }
+.drift-ahead {
+    background: #fef3c7;
+    color: #92400e;
+    border-color: #fde68a;
+}
+.drift-forcepush {
+    background: #fee2e2;
+    color: #991b1b;
+    border-color: #fecaca;
+}
+
+/* Banner on the Review page when HEAD has moved since the review ran.
+   Same amber/red palette as the inbox chip for consistency. */
+.drift-banner {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.6rem 0.9rem;
+    border-radius: 4px;
+    margin-bottom: 0.75rem;
+    border: 1px solid transparent;
+}
+.drift-banner.drift-ahead {
+    background: #fef3c7;
+    color: #78350f;
+    border-color: #fde68a;
+}
+.drift-banner.drift-forcepush {
+    background: #fee2e2;
+    color: #7f1d1d;
+    border-color: #fecaca;
+}
+.drift-banner a { color: inherit; text-decoration: underline; }
+
 .muted { color: var(--muted); }
 .empty { color: var(--muted); padding: 1rem 0; }
 

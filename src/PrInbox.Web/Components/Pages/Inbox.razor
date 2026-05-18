@@ -214,6 +214,32 @@ else
                                 }
                             </span>
                         }
+                        @if (row.DriftKind == DriftKind.Ahead)
+                        {
+                            var url     = BuildCompareUrl(row);
+                            var title   = $"+{row.DriftCount} commit{(row.DriftCount == 1 ? "" : "s")} since last review @ {ShortSha(row.LastReviewedHeadSha)}";
+                            if (url is not null)
+                            {
+                                <a class="drift drift-ahead" href="@url" target="_blank" rel="noopener" title="@title">+@row.DriftCount</a>
+                            }
+                            else
+                            {
+                                <span class="drift drift-ahead" title="@title">+@row.DriftCount</span>
+                            }
+                        }
+                        else if (row.DriftKind == DriftKind.ForcePushed)
+                        {
+                            var url     = BuildCompareUrl(row);
+                            var title   = $"Force-push since last review @ {ShortSha(row.LastReviewedHeadSha)} — old HEAD no longer in history";
+                            if (url is not null)
+                            {
+                                <a class="drift drift-forcepush" href="@url" target="_blank" rel="noopener" title="@title">⚠ force-push</a>
+                            }
+                            else
+                            {
+                                <span class="drift drift-forcepush" title="@title">⚠ force-push</span>
+                            }
+                        }
                     </td>
                     <td class="row-actions">
                         <button class="review" @onclick="() => OnReviewAsync(row)">Review</button>
@@ -555,6 +581,19 @@ else
         if (delta.TotalMinutes < 60) return $"{(int)delta.TotalMinutes}m ago";
         if (delta.TotalHours   < 24) return $"{(int)delta.TotalHours}h ago";
         return $"{(int)delta.TotalDays}d ago";
+    }
+
+    private static string ShortSha(string? sha)
+    {
+        if (string.IsNullOrEmpty(sha)) return "?";
+        return sha.Length >= 7 ? sha[..7] : sha;
+    }
+
+    private static string? BuildCompareUrl(InboxRow row)
+    {
+        if (string.IsNullOrEmpty(row.LastReviewedHeadSha) || string.IsNullOrEmpty(row.CurrentHeadSha)) return null;
+        var info = new DriftInfo(row.DriftKind, row.DriftCount, row.LastReviewedHeadSha, row.CurrentHeadSha);
+        return info.BuildCompareUrl(row.Url);
     }
 
     public void Dispose()

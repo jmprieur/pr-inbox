@@ -36,6 +36,7 @@ builder.Services.AddSingleton(sp => new PullRequestRepository(sp.GetRequiredServ
 builder.Services.AddSingleton(sp => new PostedReviewRepository(sp.GetRequiredService<PrInboxDb>()));
 builder.Services.AddSingleton(sp => new UiPreferencesRepository(sp.GetRequiredService<PrInboxDb>()));
 builder.Services.AddSingleton(sp => new ObservedThreadRepository(sp.GetRequiredService<PrInboxDb>()));
+builder.Services.AddSingleton(sp => new PrSnapshotRepository(sp.GetRequiredService<PrInboxDb>()));
 
 // Config service: read/write façade over PrInboxConfig used by the Settings
 // page. Mutations persist to disk and mirror back onto the singleton so

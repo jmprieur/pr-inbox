@@ -124,14 +124,16 @@ public sealed class InboxSyncHostedService : BackgroundService
 
     private async Task RefreshFromCacheAsync(CancellationToken ct)
     {
-        var (prRepo, threadRepo) = OpenRepos();
+        var (prRepo, threadRepo, snapRepo, _) = OpenFullRepos();
         var prs = await prRepo.ListAllAsync(ct);
 
         var rows = new List<InboxRow>(prs.Count);
         foreach (var pr in prs)
         {
             var (open, bot) = await CountThreadsAsync(threadRepo, pr.Identity, ct);
-            rows.Add(InboxRow.FromRow(pr, open, bot));
+            var snap = await snapRepo.GetLatestAsync(pr.Identity, ct);
+            var drift = DriftInfo.Compute(pr, snap);
+            rows.Add(InboxRow.FromRow(pr, open, bot, drift));
         }
         _state.ReplaceAll(rows);
     }
@@ -250,7 +252,9 @@ public sealed class InboxSyncHostedService : BackgroundService
                 if (fresh is not null)
                 {
                     var (open, bot) = await CountThreadsAsync(threadRepo, fresh.Identity, ct);
-                    _state.Upsert(InboxRow.FromRow(fresh, open, bot));
+                    var snap = await snapRepo.GetLatestAsync(fresh.Identity, ct);
+                    var drift = DriftInfo.Compute(fresh, snap);
+                    _state.Upsert(InboxRow.FromRow(fresh, open, bot, drift));
                 }
             }
             catch (Exception ex)

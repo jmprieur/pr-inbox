@@ -3,10 +3,13 @@
 @using System.Collections.Generic
 @using System.IO
 @using PrInbox.Core.Findings
+@using PrInbox.Core.Models
+@using PrInbox.Core.Storage
 @using PrInbox.Publishers
 @using PrInbox.Web.Services
 @inject ReviewRunStore Runs
 @inject ReviewPublishOrchestrator Orchestrator
+@inject PrSnapshotRepository SnapRepo
 @inject IJSRuntime Js
 @inject ILogger<Review> Log
 @inject NavigationManager Nav
@@ -41,6 +44,39 @@
         </button>
     }
 </div>
+
+    @if (_run is not null && _drift is not null
+         && (_drift.Kind == DriftKind.Ahead || _drift.Kind == DriftKind.ForcePushed))
+    {
+        var compareUrl = _drift.BuildCompareUrl(Url ?? string.Empty);
+        if (_drift.Kind == DriftKind.Ahead)
+        {
+            <div class="drift-banner drift-ahead" role="status">
+                <span>
+                    <strong>+@_drift.CommitsAhead commit@(_drift.CommitsAhead == 1 ? "" : "s")</strong>
+                    landed since this review ran at <code>@ShortSha(_run.HeadSha)</code>.
+                    Findings may not reflect the latest code.
+                </span>
+                @if (compareUrl is not null)
+                {
+                    <a href="@compareUrl" target="_blank" rel="noopener">See what changed</a>
+                }
+            </div>
+        }
+        else
+        {
+            <div class="drift-banner drift-forcepush" role="alert">
+                <span>
+                    ⚠ <strong>Force-push</strong> since this review ran at <code>@ShortSha(_run.HeadSha)</code>.
+                    Comments may anchor to lines that no longer exist.
+                </span>
+                @if (compareUrl is not null)
+                {
+                    <a href="@compareUrl" target="_blank" rel="noopener">See what changed</a>
+                }
+            </div>
+        }
+    }
 
 @if (_run is null)
 {
@@ -203,6 +239,7 @@ else
     public string? Show { get; set; }
 
     private ReviewRun? _run;
+    private DriftInfo? _drift;
     private HashSet<string> _selected = new();
     private bool _showCritical = true;
     private bool _showHigh = true;
@@ -218,12 +255,14 @@ else
         Runs.Changed += OnRunsChanged;
         ApplyShowOverride();
         RefreshRun();
+        _ = RefreshDriftAsync();
     }
 
     protected override void OnParametersSet()
     {
         ApplyShowOverride();
         RefreshRun();
+        _ = RefreshDriftAsync();
     }
 
     /// <summary>
@@ -250,7 +289,50 @@ else
     private void OnRunsChanged()
     {
         RefreshRun();
+        _ = RefreshDriftAsync();
         InvokeAsync(StateHasChanged);
+    }
+
+    /// <summary>
+    /// Fetch the most recent snapshot for this PR and compare it against
+    /// the HEAD that the active review was authored at. Renders the drift
+    /// banner when current HEAD has moved (ahead) or the branch was
+    /// force-pushed since the run. Silently no-ops on lookup failures.
+    /// </summary>
+    private async Task RefreshDriftAsync()
+    {
+        try
+        {
+            if (_run is null || string.IsNullOrEmpty(Url))
+            {
+                _drift = null;
+                return;
+            }
+            var identity = new PrIdentity(Url, string.Empty);
+            var snap = await SnapRepo.GetLatestAsync(identity, CancellationToken.None);
+            if (snap is null)
+            {
+                _drift = null;
+                return;
+            }
+            // The anchor here is the HEAD the active review ran at,
+            // not the row's persisted LastReviewRunHeadSha, because the
+            // user is editing THIS review and wants to know if it has gone
+            // stale.
+            _drift = DriftInfo.Compute(_run.HeadSha, snap);
+        }
+        catch (Exception ex)
+        {
+            Log.LogDebug(ex, "Drift refresh failed for {Url}", Url);
+            _drift = null;
+        }
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private static string ShortSha(string? sha)
+    {
+        if (string.IsNullOrEmpty(sha)) return "?";
+        return sha.Length >= 7 ? sha[..7] : sha;
     }
 
     private void RefreshRun()

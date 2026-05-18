@@ -22,25 +22,37 @@ public sealed record InboxRow(
     DateTimeOffset LastSyncedAt,
     int OpenThreadCount,
     int UnresolvedBotCount,
+    DriftKind DriftKind,
+    int DriftCount,
+    string? LastReviewedHeadSha,
+    string? CurrentHeadSha,
     bool IsIgnored = false,
     DateTimeOffset? DisappearedAt = null)
 {
-    public static InboxRow FromRow(PullRequestRow row, int openThreads, int unresolvedBot) => new(
-        row.Url,
-        row.DisplayRepo,
-        row.Number,
-        row.Title,
-        row.AuthorLogin,
-        row.SourceId,
-        row.SourceKind,
-        row.IdentityUsed,
-        row.Status,
-        row.EnrichState,
-        row.LastSyncedAt,
-        openThreads,
-        unresolvedBot,
-        row.IsIgnored,
-        row.DisappearedAt);
+    public static InboxRow FromRow(PullRequestRow row, int openThreads, int unresolvedBot, DriftInfo? drift = null)
+    {
+        drift ??= DriftInfo.Unknown;
+        return new(
+            row.Url,
+            row.DisplayRepo,
+            row.Number,
+            row.Title,
+            row.AuthorLogin,
+            row.SourceId,
+            row.SourceKind,
+            row.IdentityUsed,
+            row.Status,
+            row.EnrichState,
+            row.LastSyncedAt,
+            openThreads,
+            unresolvedBot,
+            drift.Kind,
+            drift.CommitsAhead,
+            drift.LastReviewedHeadSha,
+            drift.CurrentHeadSha,
+            row.IsIgnored,
+            row.DisappearedAt);
+    }
 }
 
 /// <summary>
