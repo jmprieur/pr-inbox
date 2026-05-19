@@ -5,7 +5,7 @@
 > and architecture. If you're new, start with [§ First ten minutes](#first-ten-minutes).
 
 [![.NET 10](https://img.shields.io/badge/.NET-10.0-512BD4)](https://dotnet.microsoft.com/)
-[![Tests: 304](https://img.shields.io/badge/tests-304_passing-brightgreen)](#)
+[![Tests: 360](https://img.shields.io/badge/tests-360_passing-brightgreen)](#)
 
 ---
 
@@ -14,6 +14,7 @@
 - [Mental model in one paragraph](#mental-model-in-one-paragraph)
 - [First ten minutes](#first-ten-minutes)
 - [Daily flow 1 — Triage the inbox](#daily-flow-1--triage-the-inbox)
+  - [Disappeared PRs](#disappeared-prs)
 - [Daily flow 2 — Review a PR](#daily-flow-2--review-a-pr)
 - [Daily flow 3 — Close the loop](#daily-flow-3--close-the-loop)
 - [When something looks off](#when-something-looks-off)
@@ -98,12 +99,18 @@ terminal.** That's the point.
 The Inbox page is your morning triage view. Pulled-down summary:
 
 ```
-Source chips: [✓ EMU] [✓ public] [✓ proxima] [✓ ADO]   ← click to filter
-Repos: 3 hidden ▾                                       ← click to filter
-Authors: 1 hidden ▾                                     ← click to filter
+Source chips: [✓ EMU] [✓ public] [✓ proxima] [✓ ADO]    ← click to filter
+Repos • 23 / 3 hidden ▾                                  ← click to filter
+Authors • 24 / 1 hidden ▾                                ← click to filter
 [  Show closed   ]   [  Show ignored  ]
 [ Refresh now ]   12 shown · 47 total      Last sync: 2026-05-18 13:42
 ```
+
+The number on each filter pill is **honest**: `visible / hidden` only
+counts groups that actually have at least one matching row, so stale
+exclusions (still in the denylist but no longer matching anything)
+don't inflate the tally. When nothing is hidden the pill collapses to
+just `Repos • 23` / `Authors • 24`.
 
 ### Reading a row
 
@@ -117,6 +124,10 @@ Authors: 1 hidden ▾                                     ← click to filter
 | **Findings** | Per-severity pills `C:0 H:1 M:2 L:0`, plus `✓ clean` or convergence badge | Click any pill → opens Review page filtered to that severity |
 | **Threads** | `N open · M bot` and (when applicable) `✓ K ready` | "ready" = K threads have a likely-done reply (see flow 3) |
 | **Actions** | `Review`, `Ignore` / `Unignore` | |
+
+Rows you used to track but are no longer assigned to appear muted with
+a small **`no longer assigned`** chip — see [§ Disappeared PRs](#disappeared-prs)
+below.
 
 ### Filters you'll actually use
 
@@ -136,11 +147,25 @@ All four filters persist per-user in SQLite (`ui_preferences` table).
 **Repo filter** (the **Repos** pill): click it, search-as-you-type,
 check/uncheck. Default: every repo visible. Excluded repos still appear
 in the popover (with count 0 if no current rows) so you can always
-re-enable them. **Show all** clears the denylist.
+re-enable them. Two action buttons live above the list:
 
-**Author filter** (the **Authors** pill): same shape as Repos. Useful
-when one team's PRs are dominating the inbox and you want to skim
-without losing them. Authors with missing logins are bucketed as
+- **Show all** — clear the denylist.
+- **Hide visible** — hide everything currently shown in the popover. If
+  you've typed `bot` in the search box, one click hides every matching
+  bot repo. Disabled when there's nothing to hide.
+
+A second toolbar lets you flip the sort:
+
+- **PRs** (default) — highest count first, then alphabetic.
+- **Recent** — repos with the most recent upstream activity first (using
+  the PR's upstream "updated at" timestamp). Repos with no observed
+  activity yet are demoted to the bottom. Your choice is persisted
+  per popover, so you can have `Repos sorted by Recent` and
+  `Authors sorted by PRs` at the same time.
+
+**Author filter** (the **Authors** pill): identical shape to Repos.
+Useful when one team's PRs are dominating the inbox and you want to
+skim without losing them. Authors with missing logins are bucketed as
 `(unknown)`.
 
 **Source chips**: top-level cohort filter — EMU, public, GHE (proxima),
@@ -149,7 +174,25 @@ that platform.
 
 **Show closed / Show ignored**: hidden by default to keep the inbox
 focused on actionable PRs. Closed = PR is merged/closed upstream.
-Ignored = you (or an `IgnoredRepos` regex) said "hide this."
+Ignored = you (or an `IgnoredRepos` regex) said "hide this," or the PR
+was reported as disappeared by the sweep.
+
+### Disappeared PRs
+
+When an upstream sync stops returning a PR you were tracking (someone
+removed you as a reviewer, the PR was deleted, or the sweep simply
+hasn't re-seen it for a while), `pr-inbox` does **not** delete the row.
+Instead it stamps `disappeared_at` and:
+
+- The row stays in the table, but is rendered muted with a
+  **`no longer assigned`** chip next to the title.
+- The **Show ignored** toggle controls visibility (off by default).
+- The PR can still be opened, reviewed, and un-ignored manually — the
+  data is intact, just demoted from your active queue.
+
+This protects you from losing context when a PR drops off temporarily
+(e.g. you got removed from reviewers, then re-added). If you decide
+it's truly gone, ignoring it is one click.
 
 ### What if a repo I want to ignore isn't in the popover?
 
@@ -350,6 +393,18 @@ Copilot coding agent, and any logins you added to `bots.extraLogins`
 in config. Useful for distinguishing "5 open threads I started" from
 "5 open threads the bot started."
 
+### `no longer assigned` chip
+
+A muted row with this chip means the upstream sync has stopped returning
+the PR (you got removed from reviewers, the PR was deleted, you're no
+longer assigned, etc.). The data is still there — `pr-inbox` never
+hard-deletes — and **Show ignored** brings it back into view. Click
+through to verify on the platform; if it really is gone, hit **Ignore**
+to demote it permanently.
+
+This is the safety net for "wait, where did that PR go?" — a question
+that used to require searching the platform manually.
+
 ---
 
 ## Settings tour
@@ -540,7 +595,8 @@ Logs: `%APPDATA%\PrInbox\logs\pr-inbox-*.log` (rolling daily).
 | **Drift** | The PR moved since the run was anchored (new commits or force-push) |
 | **Ready** | A thread whose latest reply matches the "done/fixed" heuristic |
 | **Ignore** | Per-PR hide flag; does not delete |
-| **Disappeared** | A previously-tracked PR no longer returned by upstream — likely closed |
+| **Disappeared** | A previously-tracked PR no longer returned by upstream — surfaced with a `no longer assigned` chip |
+| **Hide visible** | One-click button on filter popovers that hides everything currently shown (respects the search box) |
 | **dry-run** | The publisher tells you what it would do, without making API calls |
 
 ---
