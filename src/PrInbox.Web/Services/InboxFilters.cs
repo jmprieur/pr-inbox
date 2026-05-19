@@ -117,11 +117,20 @@ public sealed record InboxFilters(
     /// Map a SourceId to the UI chip class. Exposed because the chip
     /// classes are also persisted (the <c>source_filter</c> pref stores
     /// chip-class strings, not raw SourceIds) — both halves need to agree.
+    /// <para>
+    /// History note: older configs (and the existing test fixtures) used
+    /// the two-part ids <c>gh.com:emu</c> / <c>gh.com:public</c>. The
+    /// Settings UI's "+ Add GitHub.com" button writes the bare id
+    /// <c>gh.com</c>. Both forms — and any future identity-suffixed form
+    /// other than <c>:emu</c> — are treated as public.
+    /// </para>
     /// </summary>
     public static string SourceClassOf(string sourceId) => sourceId switch
     {
         "gh.com:emu"    => "src-emu",
+        "gh.com"        => "src-public",
         "gh.com:public" => "src-public",
+        var id when id.StartsWith("gh.com:", StringComparison.Ordinal) => "src-public",
         var id when id.StartsWith("ghe.", StringComparison.Ordinal) => "src-ghe",
         var id when id.StartsWith("ado:", StringComparison.Ordinal) => "src-ado",
         _ => "src-other",
@@ -145,10 +154,20 @@ public sealed record InboxFilters(
         //    so rows from new/unknown sources stay visible by default. This
         //    mirrors the Razor behavior — when the chip set is "full", we
         //    don't enforce an allow-list.
-        if (EnabledSources.Count < KnownSourceClasses.Count
-            && !EnabledSources.Contains(SourceClassOf(sourceId)))
+        //    Important: only enforce the chip filter for source classes the
+        //    UI actually surfaces (KnownSourceClasses). A row whose class
+        //    falls through to "src-other" — which can't be toggled because
+        //    no chip exists for it — must never be hidden by unchecking an
+        //    unrelated chip. Otherwise users see "uncheck ANY chip → all
+        //    rows vanish" the moment they have a source the UI doesn't
+        //    know about.
+        if (EnabledSources.Count < KnownSourceClasses.Count)
         {
-            return false;
+            var cls = SourceClassOf(sourceId);
+            if (KnownSourceClasses.Contains(cls) && !EnabledSources.Contains(cls))
+            {
+                return false;
+            }
         }
 
         // 3. Per-repo denylist.

@@ -59,7 +59,9 @@ public class InboxFiltersTests
 
     [Theory]
     [InlineData("gh.com:emu", "src-emu")]
+    [InlineData("gh.com", "src-public")]
     [InlineData("gh.com:public", "src-public")]
+    [InlineData("gh.com:work", "src-public")]
     [InlineData("ghe.contoso", "src-ghe")]
     [InlineData("ghe.northwind.com", "src-ghe")]
     [InlineData("ado:mseng", "src-ado")]
@@ -130,11 +132,15 @@ public class InboxFiltersTests
     }
 
     [Fact]
-    public void Partial_chip_set_also_hides_unknown_sources()
+    public void Partial_chip_set_keeps_unknown_sources_visible()
     {
-        // Once the user has actively unchecked any chip, unknown sources
-        // are no longer free-passed — matches Razor behavior (a row only
-        // passes if its class is in the explicit allow-list).
+        // Defense-in-depth: a row whose class is "src-other" can't be
+        // toggled (no chip exists for it), so it must remain visible even
+        // when the user has actively unchecked one or more chips. Without
+        // this, a user with a single source whose id maps to "src-other"
+        // would see ALL rows vanish the moment they uncheck any chip —
+        // which is exactly the bug reported on the bare "gh.com" id
+        // before SourceClassOf was extended to recognise it.
         var filters = InboxFilters.From(
             showClosed: false, showIgnored: false,
             enabledSources: new[] { "src-public", "src-emu", "src-ghe" }, // ado off
@@ -142,7 +148,42 @@ public class InboxFiltersTests
             excludedAuthors: Array.Empty<string>(),
             ignoredRepoRegexes: Array.Empty<Regex>());
 
-        filters.ShouldShow(MakePr(sourceId: "unknown:thing")).Should().BeFalse();
+        filters.ShouldShow(MakePr(sourceId: "unknown:thing")).Should().BeTrue();
+    }
+
+    [Fact]
+    public void Bare_gh_com_source_stays_visible_when_other_chip_unchecked()
+    {
+        // Regression: ConfigService.DefaultIdFor writes the bare id
+        // "gh.com" when the user clicks "+ Add GitHub.com" in Settings.
+        // Without the new SourceClassOf branch this fell through to
+        // src-other, which combined with the old "any non-listed class
+        // is hidden under partial chips" rule meant unchecking ANY of
+        // EMU/proxima/ADO made the user's entire inbox disappear.
+        var filters = InboxFilters.From(
+            showClosed: false, showIgnored: false,
+            enabledSources: new[] { "src-public", "src-ghe", "src-ado" }, // EMU off
+            excludedRepos: Array.Empty<string>(),
+            excludedAuthors: Array.Empty<string>(),
+            ignoredRepoRegexes: Array.Empty<Regex>());
+
+        filters.ShouldShow(MakePr(sourceId: "gh.com")).Should().BeTrue();
+    }
+
+    [Fact]
+    public void Bare_gh_com_source_hidden_when_public_chip_unchecked()
+    {
+        // Counterpart to the regression test above: when the user
+        // explicitly unchecks "public", the bare gh.com row IS hidden,
+        // because gh.com now maps to src-public.
+        var filters = InboxFilters.From(
+            showClosed: false, showIgnored: false,
+            enabledSources: new[] { "src-emu", "src-ghe", "src-ado" }, // public off
+            excludedRepos: Array.Empty<string>(),
+            excludedAuthors: Array.Empty<string>(),
+            ignoredRepoRegexes: Array.Empty<Regex>());
+
+        filters.ShouldShow(MakePr(sourceId: "gh.com")).Should().BeFalse();
     }
 
     // ---------- Per-repo denylist ----------

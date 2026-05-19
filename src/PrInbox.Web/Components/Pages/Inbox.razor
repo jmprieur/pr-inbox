@@ -709,7 +709,7 @@ else
             if (!_showClosed)
                 src = src.Where(r => r.Status == PullRequestStatus.Open);
             if (_enabledSources.Count < SourceChips.Length)
-                src = src.Where(r => _enabledSources.Contains(SourceClass(r)));
+                src = src.Where(r => ChipFilterPasses(r));
             if (!_showIgnored)
                 src = src.Where(r => !RowIsHidden(r));
 
@@ -871,7 +871,7 @@ else
             if (!_showClosed)
                 src = src.Where(r => r.Status == PullRequestStatus.Open);
             if (_enabledSources.Count < SourceChips.Length)
-                src = src.Where(r => _enabledSources.Contains(SourceClass(r)));
+                src = src.Where(r => ChipFilterPasses(r));
             if (_excludedRepos.Count > 0)
                 src = src.Where(r => !_excludedRepos.Contains(r.DisplayRepo));
             if (!_showIgnored)
@@ -1095,13 +1095,30 @@ else
     private static string SourceLabel(InboxRow row) => row.SourceId switch
     {
         "gh.com:emu"    => "EMU",
+        "gh.com"        => "public",
         "gh.com:public" => "public",
+        var id when id.StartsWith("gh.com:", StringComparison.Ordinal)  => "public",
         var id when id.StartsWith("ghe.", StringComparison.Ordinal)  => "proxima",
         var id when id.StartsWith("ado:", StringComparison.Ordinal)  => "ado",
         _ => row.SourceId,
     };
 
     private static string SourceClass(InboxRow row) => InboxFilters.SourceClassOf(row.SourceId);
+
+    // Chip filter for the dropdown population helpers (AllRepoFilterItems,
+    // AllAuthorFilterItems). Mirrors InboxFilters.ShouldShowCore: only
+    // hide rows whose class is one the UI actually surfaces as a chip.
+    // A row whose class is "src-other" can't be toggled (no chip exists
+    // for it), so it must remain visible regardless of which chips the
+    // user has unchecked. Without this, a user with a single gh.com
+    // source whose id maps to an unknown class would see the repo/author
+    // dropdowns go empty the moment they uncheck any chip.
+    private bool ChipFilterPasses(InboxRow row)
+    {
+        var cls = SourceClass(row);
+        if (!InboxFilters.KnownSourceClasses.Contains(cls)) return true;
+        return _enabledSources.Contains(cls);
+    }
 
     private static string StatusLabel(PullRequestStatus s) => s switch
     {
