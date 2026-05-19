@@ -1,5 +1,6 @@
 using System.Text.RegularExpressions;
 using FluentAssertions;
+using PrInbox.Core.Credentials;
 using PrInbox.Core.Models;
 using PrInbox.Core.Storage;
 using PrInbox.Web.Services;
@@ -184,6 +185,160 @@ public class InboxFiltersTests
             ignoredRepoRegexes: Array.Empty<Regex>());
 
         filters.ShouldShow(MakePr(sourceId: "gh.com")).Should().BeFalse();
+    }
+
+    // ---------- ClassifyConfig (host+identity-based classification) ----------
+
+    [Fact]
+    public void ClassifyConfig_ado_is_always_src_ado()
+        => InboxFilters.ClassifyConfig(new SourceConfig
+        {
+            Id = "ado:mseng/foo",
+            Kind = SourceConfigKind.AzureDevOps,
+            Host = null,
+            Identity = "default",
+        }).Should().Be("src-ado");
+
+    [Fact]
+    public void ClassifyConfig_ghe_is_always_src_ghe()
+        => InboxFilters.ClassifyConfig(new SourceConfig
+        {
+            Id = "ghe.microsoft",
+            Kind = SourceConfigKind.GitHubEnterprise,
+            Host = "microsoft.ghe.com",
+            Identity = "jmprieur_microsoft",
+        }).Should().Be("src-ghe");
+
+    [Fact]
+    public void ClassifyConfig_github_default_identity_is_public()
+        => InboxFilters.ClassifyConfig(new SourceConfig
+        {
+            Id = "gh.com",
+            Kind = SourceConfigKind.GitHub,
+            Host = "github.com",
+            Identity = "default",
+        }).Should().Be("src-public");
+
+    [Theory]
+    [InlineData("jmprieur")]                  // personal login, no underscore
+    [InlineData("octo")]                      // personal login, no underscore
+    [InlineData("")]                          // missing identity
+    [InlineData(null)]                        // null identity
+    public void ClassifyConfig_github_personal_identity_is_public(string? identity)
+        => InboxFilters.ClassifyConfig(new SourceConfig
+        {
+            Id = "gh.com",
+            Kind = SourceConfigKind.GitHub,
+            Host = "github.com",
+            Identity = identity ?? string.Empty,
+        }).Should().Be("src-public");
+
+    [Theory]
+    [InlineData("jmprieur_microsoft")]
+    [InlineData("rcastiglione_microsoft")]
+    [InlineData("anyone_someorg")]
+    public void ClassifyConfig_github_emu_identity_is_emu(string identity)
+        => InboxFilters.ClassifyConfig(new SourceConfig
+        {
+            Id = $"gh.com:{identity}",
+            Kind = SourceConfigKind.GitHub,
+            Host = "github.com",
+            Identity = identity,
+        }).Should().Be("src-emu");
+
+    [Fact]
+    public void Two_github_identities_classify_as_emu_and_public()
+    {
+        // Jenny's case: two github.com sources, one personal + one EMU.
+        // The config-derived classifier distinguishes them by identity
+        // even though both share the same Kind=GitHub and Host=github.com.
+        var personalSrc = new SourceConfig
+        {
+            Id = "gh.com",
+            Kind = SourceConfigKind.GitHub,
+            Host = "github.com",
+            Identity = "jenny",
+        };
+        var emuSrc = new SourceConfig
+        {
+            Id = "gh.com:jenny_microsoft",
+            Kind = SourceConfigKind.GitHub,
+            Host = "github.com",
+            Identity = "jenny_microsoft",
+        };
+
+        // public chip off, EMU chip on → only the EMU rows survive.
+        var filtersEmuOnly = InboxFilters.From(
+            showClosed: false, showIgnored: false,
+            enabledSources: new[] { "src-emu", "src-ghe", "src-ado" }, // public off
+            excludedRepos: Array.Empty<string>(),
+            excludedAuthors: Array.Empty<string>(),
+            ignoredRepoRegexes: Array.Empty<Regex>(),
+            sourceConfigs: new[] { personalSrc, emuSrc });
+
+        filtersEmuOnly.ShouldShow(MakePr(sourceId: "gh.com")).Should().BeFalse();
+        filtersEmuOnly.ShouldShow(MakePr(sourceId: "gh.com:jenny_microsoft")).Should().BeTrue();
+
+        // EMU chip off, public chip on → mirror image.
+        var filtersPublicOnly = InboxFilters.From(
+            showClosed: false, showIgnored: false,
+            enabledSources: new[] { "src-public", "src-ghe", "src-ado" }, // emu off
+            excludedRepos: Array.Empty<string>(),
+            excludedAuthors: Array.Empty<string>(),
+            ignoredRepoRegexes: Array.Empty<Regex>(),
+            sourceConfigs: new[] { personalSrc, emuSrc });
+
+        filtersPublicOnly.ShouldShow(MakePr(sourceId: "gh.com")).Should().BeTrue();
+        filtersPublicOnly.ShouldShow(MakePr(sourceId: "gh.com:jenny_microsoft")).Should().BeFalse();
+    }
+
+    [Fact]
+    public void Config_based_classifier_overrides_legacy_id_parser()
+    {
+        // Reverse case: an id whose string-shape would classify one way
+        // via the legacy SourceClassOf, but whose actual SourceConfig
+        // says something else. The config wins.
+        // Example: a SourceConfig with id "gh.com" but explicitly tagged
+        // as an EMU identity. The legacy parser maps "gh.com" → public,
+        // but the config says EMU — the config should win.
+        var emuSrcWithBareId = new SourceConfig
+        {
+            Id = "gh.com",
+            Kind = SourceConfigKind.GitHub,
+            Host = "github.com",
+            Identity = "jenny_microsoft",
+        };
+
+        var filters = InboxFilters.From(
+            showClosed: false, showIgnored: false,
+            enabledSources: new[] { "src-emu", "src-ghe", "src-ado" }, // public off
+            excludedRepos: Array.Empty<string>(),
+            excludedAuthors: Array.Empty<string>(),
+            ignoredRepoRegexes: Array.Empty<Regex>(),
+            sourceConfigs: new[] { emuSrcWithBareId });
+
+        // Public is OFF, EMU is ON. Config says this id is EMU →
+        // should still be visible.
+        filters.ShouldShow(MakePr(sourceId: "gh.com")).Should().BeTrue();
+    }
+
+    [Fact]
+    public void Row_with_no_matching_config_falls_back_to_legacy_parser()
+    {
+        // Rows surviving a source-config removal (or test fixtures that
+        // never had a config) should still classify via SourceClassOf.
+        var filters = InboxFilters.From(
+            showClosed: false, showIgnored: false,
+            enabledSources: new[] { "src-emu", "src-ghe", "src-ado" }, // public off
+            excludedRepos: Array.Empty<string>(),
+            excludedAuthors: Array.Empty<string>(),
+            ignoredRepoRegexes: Array.Empty<Regex>(),
+            sourceConfigs: Array.Empty<SourceConfig>()); // empty config
+
+        // Legacy classification: "gh.com" → src-public → public is off → hidden.
+        filters.ShouldShow(MakePr(sourceId: "gh.com")).Should().BeFalse();
+        // Legacy classification: "ado:foo" → src-ado → ado is on → visible.
+        filters.ShouldShow(MakePr(sourceId: "ado:foo")).Should().BeTrue();
     }
 
     // ---------- Per-repo denylist ----------

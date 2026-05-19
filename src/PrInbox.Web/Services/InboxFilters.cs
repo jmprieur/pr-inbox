@@ -1,6 +1,7 @@
 using System.Collections.Frozen;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using PrInbox.Core.Config;
 using PrInbox.Core.Credentials;
 using PrInbox.Core.Models;
 using PrInbox.Core.Storage;
@@ -33,7 +34,8 @@ public sealed record InboxFilters(
     FrozenSet<string> EnabledSources,
     FrozenSet<string> ExcludedRepos,
     FrozenSet<string> ExcludedAuthors,
-    IReadOnlyList<Regex> IgnoredRepoRegexes)
+    IReadOnlyList<Regex> IgnoredRepoRegexes,
+    FrozenDictionary<string, string> SourceClassByConfigId)
 {
     /// <summary>The four <c>src-*</c> classes the UI surfaces as chips.</summary>
     public static readonly FrozenSet<string> KnownSourceClasses =
@@ -80,7 +82,8 @@ public sealed record InboxFilters(
             enabledSources,
             excludedRepos,
             excludedAuthors,
-            regexes);
+            regexes,
+            BuildSourceClassMap(config.Sources));
     }
 
     /// <summary>
@@ -94,14 +97,16 @@ public sealed record InboxFilters(
         IEnumerable<string> enabledSources,
         IEnumerable<string> excludedRepos,
         IEnumerable<string> excludedAuthors,
-        IReadOnlyList<Regex> ignoredRepoRegexes)
+        IReadOnlyList<Regex> ignoredRepoRegexes,
+        IEnumerable<SourceConfig>? sourceConfigs = null)
         => new(
             showClosed,
             showIgnored,
             enabledSources.ToFrozenSet(StringComparer.OrdinalIgnoreCase),
             excludedRepos.ToFrozenSet(StringComparer.OrdinalIgnoreCase),
             excludedAuthors.ToFrozenSet(StringComparer.OrdinalIgnoreCase),
-            ignoredRepoRegexes);
+            ignoredRepoRegexes,
+            BuildSourceClassMap(sourceConfigs));
 
     /// <summary>Visible on the dashboard right now? (Sync-side overload.)</summary>
     public bool ShouldShow(PullRequestRow row) => ShouldShowCore(
@@ -117,6 +122,15 @@ public sealed record InboxFilters(
     /// Map a SourceId to the UI chip class. Exposed because the chip
     /// classes are also persisted (the <c>source_filter</c> pref stores
     /// chip-class strings, not raw SourceIds) — both halves need to agree.
+    /// <para>
+    /// Used as a FALLBACK only — production callers should prefer
+    /// <see cref="ClassifyConfig(SourceConfig)"/> via
+    /// <see cref="SourceClassByConfigId"/>, which classifies from the
+    /// authoritative (kind, host, identity) tuple. This method is the
+    /// last-resort path for rows whose SourceId is not present in the
+    /// current config (e.g. rows surviving a deleted source, or test
+    /// fixtures that bypass the config).
+    /// </para>
     /// <para>
     /// History note: older configs (and the existing test fixtures) used
     /// the two-part ids <c>gh.com:emu</c> / <c>gh.com:public</c>. The
@@ -135,6 +149,67 @@ public sealed record InboxFilters(
         var id when id.StartsWith("ado:", StringComparison.Ordinal) => "src-ado",
         _ => "src-other",
     };
+
+    /// <summary>
+    /// Authoritative chip classifier: derives the UI chip class from a
+    /// configured source's (Kind, Host, Identity) tuple.
+    /// <list type="bullet">
+    ///   <item><see cref="SourceConfigKind.AzureDevOps"/> → <c>src-ado</c></item>
+    ///   <item><see cref="SourceConfigKind.GitHubEnterprise"/> → <c>src-ghe</c></item>
+    ///   <item><see cref="SourceConfigKind.GitHub"/> + EMU-shaped identity → <c>src-emu</c></item>
+    ///   <item><see cref="SourceConfigKind.GitHub"/> + default/personal identity → <c>src-public</c></item>
+    /// </list>
+    /// EMU detection is based on the public GitHub EMU login convention
+    /// <c>&lt;personal&gt;_&lt;org&gt;</c>: an identity that contains an
+    /// underscore and is not the literal placeholder <c>default</c>. The
+    /// Settings UI is expected to fill <c>Identity</c> from the
+    /// authenticated <c>gh auth status</c> login when chunk 2 of the
+    /// multi-identity work lands; until then most GitHub sources will
+    /// still carry the literal <c>default</c> and therefore classify as
+    /// public — which matches today's reality.
+    /// </summary>
+    public static string ClassifyConfig(SourceConfig sc) => sc.Kind switch
+    {
+        SourceConfigKind.AzureDevOps      => "src-ado",
+        SourceConfigKind.GitHubEnterprise => "src-ghe",
+        SourceConfigKind.GitHub when IsEmuIdentity(sc.Identity) => "src-emu",
+        SourceConfigKind.GitHub           => "src-public",
+        _                                  => "src-other",
+    };
+
+    private static bool IsEmuIdentity(string? identity)
+    {
+        if (string.IsNullOrWhiteSpace(identity)) return false;
+        if (string.Equals(identity, "default", StringComparison.OrdinalIgnoreCase)) return false;
+        // EMU login convention: <personal>_<org>. The underscore is the
+        // signal. Personal logins without underscores → public; explicit
+        // identities like "jmprieur_microsoft" → EMU.
+        return identity.Contains('_');
+    }
+
+    private static FrozenDictionary<string, string> BuildSourceClassMap(
+        IEnumerable<SourceConfig>? sources)
+    {
+        if (sources is null) return FrozenDictionary<string, string>.Empty;
+        var pairs = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var sc in sources)
+        {
+            if (string.IsNullOrWhiteSpace(sc.Id)) continue;
+            pairs[sc.Id] = ClassifyConfig(sc);
+        }
+        return pairs.ToFrozenDictionary(StringComparer.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Classifier for a single row: prefers the config-derived class
+    /// (which knows about identity) and falls back to the legacy
+    /// id-string parser when the row references a source that's no
+    /// longer in the current config.
+    /// </summary>
+    public string SourceClassFor(string sourceId) =>
+        SourceClassByConfigId.TryGetValue(sourceId, out var cls)
+            ? cls
+            : SourceClassOf(sourceId);
 
     /// <summary>Author-filter key (null/empty → <see cref="UnknownAuthorKey"/>).</summary>
     public static string AuthorKeyOf(string? authorLogin) =>
@@ -163,7 +238,7 @@ public sealed record InboxFilters(
         //    know about.
         if (EnabledSources.Count < KnownSourceClasses.Count)
         {
-            var cls = SourceClassOf(sourceId);
+            var cls = SourceClassFor(sourceId);
             if (KnownSourceClasses.Contains(cls) && !EnabledSources.Contains(cls))
             {
                 return false;

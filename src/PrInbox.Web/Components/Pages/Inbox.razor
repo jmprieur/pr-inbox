@@ -526,7 +526,8 @@ else
         _enabledSources,
         _excludedRepos,
         _excludedAuthors,
-        _ignoredRepoRegexes);
+        _ignoredRepoRegexes,
+        Config.Sources);
 
     private IReadOnlyList<InboxRow> VisibleRows
     {
@@ -1103,7 +1104,22 @@ else
         _ => row.SourceId,
     };
 
-    private static string SourceClass(InboxRow row) => InboxFilters.SourceClassOf(row.SourceId);
+    // The chip class is derived from the configured SourceConfig when
+    // we can find one matching the row's id — this is the authoritative
+    // (kind, host, identity) path. Falls back to the legacy id-string
+    // parser for rows whose source has been removed from the config or
+    // when running against a test fixture that bypasses configuration.
+    private string SourceClass(InboxRow row)
+    {
+        foreach (var sc in Config.Sources)
+        {
+            if (string.Equals(sc.Id, row.SourceId, StringComparison.OrdinalIgnoreCase))
+            {
+                return InboxFilters.ClassifyConfig(sc);
+            }
+        }
+        return InboxFilters.SourceClassOf(row.SourceId);
+    }
 
     // Chip filter for the dropdown population helpers (AllRepoFilterItems,
     // AllAuthorFilterItems). Mirrors InboxFilters.ShouldShowCore: only
