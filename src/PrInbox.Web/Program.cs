@@ -7,6 +7,14 @@ using PrInbox.Web.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// Enable static web assets in all environments, not just Development.
+// Without this, running `dotnet run` against build output (not publish
+// output) in Production mode causes /_framework/blazor.web.js to throw
+// FileNotFoundException, killing Blazor Server interactivity. This is
+// the dev-time fallback path; published apps don't need it but it's a
+// no-op there.
+builder.WebHost.UseStaticWebAssets();
+
 // Blazor Server (interactive server) — SignalR is automatically wired.
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();

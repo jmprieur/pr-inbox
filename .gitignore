@@ -53,4 +53,7 @@ TestResults/
 
 ## Misc
 *.log
-launchSettings.json
+# launchSettings.json is intentionally TRACKED for pr-inbox so that
+# `dotnet run` on a fresh clone lands on the right port + Development
+# environment. Otherwise the app defaults to port 5000 / Production,
+# which silently breaks Blazor's _framework/blazor.web.js serving.
