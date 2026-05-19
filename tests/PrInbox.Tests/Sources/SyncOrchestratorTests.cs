@@ -344,6 +344,75 @@ public class SyncOrchestratorTests : IAsyncLifetime
         row!.LastUpstreamUpdatedAt.Should().Be(lastUpdated);
     }
 
+    // ----- Visible-first contract -----
+    //
+    // InboxSyncHostedService relies on RunEnrichAsync accepting a
+    // pre-computed candidate subset (so it can enrich VISIBLE rows
+    // before HIDDEN rows) and on the tier label flowing into the
+    // progress stream so the UI / logs can tell the two passes apart.
+    // These two tests lock that contract — if either signature drifts,
+    // visible-first prioritization quietly breaks.
+
+    [Fact]
+    public async Task RunEnrich_With_PrecomputedCandidates_Only_Enriches_That_Subset()
+    {
+        var source = BuildFakeSource("gh.com:emu", out var idAlpha);
+        var orch = new SyncOrchestrator(source, _prs, _snaps, _threads, _syncRuns);
+
+        // Fast pass to seed alpha + beta as basic rows.
+        await orch.RunFastAsync("jmprieur_microsoft", progress: null, CancellationToken.None);
+
+        // Caller hands us ONLY alpha — beta must stay Basic.
+        var alphaRow = await _prs.GetAsync(idAlpha.Url, CancellationToken.None);
+        alphaRow.Should().NotBeNull();
+
+        var result = await orch.RunEnrichAsync(
+            "jmprieur_microsoft",
+            progress: null,
+            CancellationToken.None,
+            precomputedCandidates: new[] { alphaRow! });
+
+        result.Status.Should().Be(SyncRunStatus.Ok);
+        result.PrsSeen.Should().Be(1);
+
+        var rows = await _prs.ListAllAsync(CancellationToken.None);
+        var enriched = rows.Where(r => r.EnrichState == EnrichState.Enriched).ToList();
+        var basic = rows.Where(r => r.EnrichState == EnrichState.Basic).ToList();
+
+        enriched.Should().ContainSingle(r => r.Identity.Url == idAlpha.Url);
+        basic.Should().ContainSingle(r => r.Identity.Url != idAlpha.Url);
+    }
+
+    [Fact]
+    public async Task RunEnrich_With_TierLabel_Annotates_Progress()
+    {
+        var source = BuildFakeSource("gh.com:emu", out var idAlpha);
+        var orch = new SyncOrchestrator(source, _prs, _snaps, _threads, _syncRuns);
+
+        await orch.RunFastAsync("jmprieur_microsoft", progress: null, CancellationToken.None);
+
+        var alphaRow = await _prs.GetAsync(idAlpha.Url, CancellationToken.None);
+        var reports = new List<SyncProgress>();
+        var progress = new Progress<SyncProgress>(p => reports.Add(p));
+
+        await orch.RunEnrichAsync(
+            "jmprieur_microsoft",
+            progress,
+            CancellationToken.None,
+            precomputedCandidates: new[] { alphaRow! },
+            tierLabel: "visible");
+
+        // Give the Progress<T> SynchronizationContext callbacks a beat to
+        // drain — Progress<T> posts asynchronously on the captured context.
+        for (var i = 0; i < 20 && !reports.Any(r => r.Message.Contains("visible")); i++)
+        {
+            await Task.Delay(25);
+        }
+
+        reports.Should().NotBeEmpty();
+        reports.Should().Contain(r => r.Message.Contains("Enriching (visible)"));
+    }
+
     private static FakePrReadSource BuildFakeSource(string sourceId, out PrIdentity idAlpha)
     {
         idAlpha = new PrIdentity("https://github.com/owner/repo/pull/1", "gh.com:100#1000");

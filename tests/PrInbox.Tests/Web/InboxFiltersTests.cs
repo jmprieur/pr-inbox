@@ -372,4 +372,63 @@ public class InboxFiltersTests
         filtersAuthorExcluded.ShouldShow(MakePr(displayRepo: "foo/bar", authorLogin: "alice"))
             .Should().BeFalse();
     }
+
+    // ---------- PartitionCandidates ----------
+    //
+    // The host (InboxSyncHostedService) uses this to split enrich
+    // candidates into "visible" (refresh first) and "hidden" (refresh
+    // second). The partition MUST agree with ShouldShow on every row or
+    // visible-first prioritization stops actually prioritizing what's on
+    // screen, defeating the whole feature.
+
+    [Fact]
+    public void PartitionCandidates_Splits_By_ShouldShow()
+    {
+        var visibleRow = MakePr(displayRepo: "owner/keep");
+        var excludedByRepo = MakePr(displayRepo: "owner/hide");
+        var excludedByAuthor = MakePr(displayRepo: "owner/keep", authorLogin: "bot");
+        var ignoredRow = MakePr(displayRepo: "owner/keep", isIgnored: true);
+
+        var filters = InboxFilters.From(
+            showClosed: false, showIgnored: false,
+            enabledSources: InboxFilters.KnownSourceClasses,
+            excludedRepos: new[] { "owner/hide" },
+            excludedAuthors: new[] { "bot" },
+            ignoredRepoRegexes: Array.Empty<Regex>());
+
+        var (visible, hidden) = PrInbox.Web.Services.InboxSyncHostedService.PartitionCandidates(
+            new[] { visibleRow, excludedByRepo, excludedByAuthor, ignoredRow },
+            filters);
+
+        visible.Should().ContainSingle().Which.Should().Be(visibleRow);
+        hidden.Should().BeEquivalentTo(new[] { excludedByRepo, excludedByAuthor, ignoredRow });
+    }
+
+    [Fact]
+    public void PartitionCandidates_Empty_Input_Returns_Empty_Both()
+    {
+        var (visible, hidden) = PrInbox.Web.Services.InboxSyncHostedService.PartitionCandidates(
+            Array.Empty<PullRequestRow>(),
+            DefaultFilters());
+
+        visible.Should().BeEmpty();
+        hidden.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void PartitionCandidates_All_Visible_When_No_Exclusions()
+    {
+        var rows = new[]
+        {
+            MakePr(displayRepo: "a/a"),
+            MakePr(displayRepo: "b/b"),
+            MakePr(displayRepo: "c/c"),
+        };
+
+        var (visible, hidden) = PrInbox.Web.Services.InboxSyncHostedService.PartitionCandidates(
+            rows, DefaultFilters());
+
+        visible.Should().BeEquivalentTo(rows);
+        hidden.Should().BeEmpty();
+    }
 }

@@ -109,11 +109,16 @@ public sealed class InboxSyncHostedService : BackgroundService
     {
         try
         {
-            await RunFastSyncAsync(ct);
+            var fastFailures = await RunFastSyncAsync(ct);
             await RefreshFromCacheAsync(ct);
-            await RunEnrichSyncAsync(ct);
+            var enrichFailures = await RunEnrichSyncAsync(ct);
             await RefreshFromCacheAsync(ct);
-            _state.NoteSync($"Synced at {DateTimeOffset.Now:HH:mm:ss}");
+
+            var totalFailures = fastFailures + enrichFailures;
+            var suffix = totalFailures > 0
+                ? $" ({totalFailures} source(s) failed; see logs)"
+                : "";
+            _state.NoteSync($"Synced at {DateTimeOffset.Now:HH:mm:ss}{suffix}");
         }
         catch (Exception ex)
         {
@@ -138,17 +143,26 @@ public sealed class InboxSyncHostedService : BackgroundService
         _state.ReplaceAll(rows);
     }
 
-    private async Task RunFastSyncAsync(CancellationToken ct)
+    /// <summary>
+    /// Runs the tier-2 fast pass + disappeared sweep across every runtime.
+    /// </summary>
+    /// <returns>
+    /// Count of sources whose fast pass or disappeared sweep failed. Used
+    /// by <see cref="RunSyncIterationAsync"/> to surface a per-cycle
+    /// failure count in the inbox banner.
+    /// </returns>
+    private async Task<int> RunFastSyncAsync(CancellationToken ct)
     {
         var config = await PrInboxConfig.LoadAsync(null);
-        if (config.Sources.Count == 0 && config.Ado.Projects.Count == 0) return;
+        if (config.Sources.Count == 0 && config.Ado.Projects.Count == 0) return 0;
 
         var (prRepo, threadRepo, snapRepo, syncRunRepo) = OpenFullRepos();
         var runtimes = new SourceFactory().Build(config);
 
+        var failures = 0;
         foreach (var rt in runtimes)
         {
-            if (ct.IsCancellationRequested) return;
+            if (ct.IsCancellationRequested) return failures;
             try
             {
                 var orchestrator = new SyncOrchestrator(rt.Source, prRepo, snapRepo, threadRepo, syncRunRepo);
@@ -166,24 +180,48 @@ public sealed class InboxSyncHostedService : BackgroundService
                     }
                     catch (Exception ex)
                     {
-                        _log.LogDebug(ex, "Disappeared sweep of {SourceId} failed", rt.Source.SourceId);
+                        // Bumped from LogDebug -> LogWarning so disappeared
+                        // sweep failures are visible in logs. They don't
+                        // count toward the source-failure tally because the
+                        // fast list itself succeeded — only the cleanup pass
+                        // didn't. Log loudly, keep going.
+                        _log.LogWarning(ex, "Disappeared sweep of {SourceId} failed", rt.Source.SourceId);
                     }
                 }
+
+                if (result.Status == SyncRunStatus.Failed) failures++;
             }
             catch (Exception ex)
             {
+                failures++;
                 _log.LogWarning(ex, "Fast sync of {SourceId} failed", rt.Source.SourceId);
             }
         }
+        return failures;
     }
 
-    private async Task RunEnrichSyncAsync(CancellationToken ct)
+    /// <summary>
+    /// Runs the tier-3 enrich pass across every runtime using a
+    /// visible-first partition: PRs that pass the user's current
+    /// <see cref="InboxFilters"/> are enriched before the hidden set, with
+    /// a mid-cycle UI refresh in between so the dashboard reflects fresh
+    /// visible data as quickly as possible.
+    /// </summary>
+    /// <returns>
+    /// Count of failures: partition errors, per-source enrich failures,
+    /// and the mid-cycle refresh (counted as +1 if it threw). Used by
+    /// <see cref="RunSyncIterationAsync"/> to build the end-of-cycle
+    /// banner.
+    /// </returns>
+    private async Task<int> RunEnrichSyncAsync(CancellationToken ct)
     {
         var config = await PrInboxConfig.LoadAsync(null);
-        if (config.Sources.Count == 0 && config.Ado.Projects.Count == 0) return;
+        if (config.Sources.Count == 0 && config.Ado.Projects.Count == 0) return 0;
 
         var (prRepo, threadRepo, snapRepo, syncRunRepo) = OpenFullRepos();
         var runtimes = new SourceFactory().Build(config);
+
+        var failures = 0;
 
         // Pin the filter snapshot to the START of the cycle. Filter changes
         // that happen mid-cycle apply on the *next* iteration — keeps both
@@ -215,7 +253,7 @@ public sealed class InboxSyncHostedService : BackgroundService
                                    List<PullRequestRow> Visible, List<PullRequestRow> Hidden)>();
         foreach (var rt in runtimes)
         {
-            if (ct.IsCancellationRequested) return;
+            if (ct.IsCancellationRequested) return failures;
             try
             {
                 var orchestrator = new SyncOrchestrator(rt.Source, prRepo, snapRepo, threadRepo, syncRunRepo);
@@ -223,17 +261,12 @@ public sealed class InboxSyncHostedService : BackgroundService
                     rt.Source.SourceId, rt.Identity,
                     minDossierVersion: PrInbox.Core.Reviewing.BriefService.CurrentDossierVersion,
                     ct);
-                var visible = new List<PullRequestRow>();
-                var hidden = new List<PullRequestRow>();
-                foreach (var row in candidates)
-                {
-                    if (filters.ShouldShow(row)) visible.Add(row);
-                    else hidden.Add(row);
-                }
+                var (visible, hidden) = PartitionCandidates(candidates, filters);
                 partitions.Add((rt, orchestrator, visible, hidden));
             }
             catch (Exception ex)
             {
+                failures++;
                 _log.LogWarning(ex, "Building enrich partition for {SourceId} failed", rt.Source.SourceId);
             }
         }
@@ -245,7 +278,7 @@ public sealed class InboxSyncHostedService : BackgroundService
         // user can see on the dashboard refresh as quickly as possible.
         foreach (var (rt, orch, visible, _) in partitions)
         {
-            if (ct.IsCancellationRequested) return;
+            if (ct.IsCancellationRequested) return failures;
             if (visible.Count == 0) continue;
             try
             {
@@ -257,6 +290,7 @@ public sealed class InboxSyncHostedService : BackgroundService
             }
             catch (Exception ex)
             {
+                failures++;
                 _log.LogWarning(ex, "Visible-pass enrich of {SourceId} failed", rt.Source.SourceId);
             }
         }
@@ -265,10 +299,27 @@ public sealed class InboxSyncHostedService : BackgroundService
         // data before the slower background pass starts. Without this, the
         // user wouldn't *see* the visible-first benefit — state is pushed
         // to the UI only after every enrich call has run.
+        var midCycleRefreshed = false;
         if (totalVisible > 0)
         {
-            try { await RefreshFromCacheAsync(ct); } catch (Exception ex) { _log.LogDebug(ex, "Mid-cycle refresh failed"); }
-            if (totalHidden > 0)
+            try
+            {
+                await RefreshFromCacheAsync(ct);
+                midCycleRefreshed = true;
+            }
+            catch (Exception ex)
+            {
+                failures++;
+                // Bumped from LogDebug -> LogWarning so this is visible in
+                // logs, and we now post an explicit banner. Previously the
+                // user would see the "background syncing..." success
+                // message even when the UI hadn't actually refreshed.
+                _log.LogWarning(ex, "Mid-cycle UI refresh failed after visible enrich pass");
+                _state.NoteSync(
+                    $"Visible synced at {DateTimeOffset.Now:HH:mm:ss} but UI refresh failed: {ex.Message}");
+            }
+
+            if (midCycleRefreshed && totalHidden > 0)
             {
                 _state.NoteSync($"Visible synced at {DateTimeOffset.Now:HH:mm:ss} · background syncing…");
             }
@@ -277,7 +328,7 @@ public sealed class InboxSyncHostedService : BackgroundService
         // Pass 2: hidden across every source.
         foreach (var (rt, orch, _, hidden) in partitions)
         {
-            if (ct.IsCancellationRequested) return;
+            if (ct.IsCancellationRequested) return failures;
             if (hidden.Count == 0) continue;
             try
             {
@@ -289,6 +340,7 @@ public sealed class InboxSyncHostedService : BackgroundService
             }
             catch (Exception ex)
             {
+                failures++;
                 _log.LogWarning(ex, "Background-pass enrich of {SourceId} failed", rt.Source.SourceId);
             }
         }
@@ -296,18 +348,43 @@ public sealed class InboxSyncHostedService : BackgroundService
         // TTL sweep per source. Lower priority than either enrich pass —
         // catches state drift on PRs that never leave the fast-sync result
         // set. Capped to N=10 per source so it doesn't dominate the cycle.
+        // Sweep failures are logged loudly but don't count toward the
+        // banner tally because the actual data pass already succeeded.
         foreach (var (rt, orch, _, _) in partitions)
         {
-            if (ct.IsCancellationRequested) return;
+            if (ct.IsCancellationRequested) return failures;
             try
             {
                 await orch.RunTtlSweepAsync(rt.Identity, n: 10, ct);
             }
             catch (Exception ex)
             {
-                _log.LogDebug(ex, "TTL sweep of {SourceId} failed", rt.Source.SourceId);
+                _log.LogWarning(ex, "TTL sweep of {SourceId} failed", rt.Source.SourceId);
             }
         }
+        return failures;
+    }
+
+    /// <summary>
+    /// Splits an enrich-candidate list into <em>visible</em> (rows that
+    /// pass the current <see cref="InboxFilters"/>) and <em>hidden</em>
+    /// (everything else). Pulled out for unit testing — the partition
+    /// must agree with the dashboard's "is this row currently shown?"
+    /// answer or visible-first prioritization stops actually prioritizing
+    /// what's on screen.
+    /// </summary>
+    internal static (List<PullRequestRow> Visible, List<PullRequestRow> Hidden) PartitionCandidates(
+        IReadOnlyList<PullRequestRow> candidates,
+        InboxFilters filters)
+    {
+        var visible = new List<PullRequestRow>();
+        var hidden = new List<PullRequestRow>();
+        foreach (var row in candidates)
+        {
+            if (filters.ShouldShow(row)) visible.Add(row);
+            else hidden.Add(row);
+        }
+        return (visible, hidden);
     }
 
     /// <summary>
