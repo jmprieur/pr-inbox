@@ -1,0 +1,30 @@
+@rendermode InteractiveServer
+@inject IJSRuntime JS
+@inject ILogger<ConnectionBadge> Log
+
+@code {
+    // Diagnostic-only component. It renders nothing visible itself --
+    // the visible badge is a <div> created by wwwroot/js/connection-badge.js.
+    // This component's job is to call markAlive() as soon as Blazor's
+    // interactive renderer attaches a circuit to it, so the JS badge can
+    // flip from "connecting" to "connected".
+    //
+    // If the circuit never attaches (e.g. corporate Edge blocks WebSockets
+    // to http://localhost), this method never runs. The JS times out
+    // after 10s and shows "disconnected — clicks will not respond" with
+    // a tooltip explaining likely causes. That's the whole point: turn
+    // a silent failure into a loud, diagnosable one.
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        try
+        {
+            await JS.InvokeVoidAsync("prInboxConnectionBadge.markAlive");
+        }
+        catch (Exception ex)
+        {
+            Log.LogDebug(ex, "ConnectionBadge.markAlive interop failed; badge will time out naturally.");
+        }
+    }
+}

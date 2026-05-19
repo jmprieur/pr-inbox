@@ -128,7 +128,7 @@ else
         <h2>Doctor</h2>
         <p class="muted">Check that <code>gh</code> / <code>az</code> auth is healthy and that each source can mint a token.</p>
         <div class="settings-actions">
-            <button @onclick="RunDoctorAsync" disabled="@_busy || _cfg.Sources.Count == 0">
+            <button @onclick="RunDoctorAsync" disabled="@(_busy || _cfg.Sources.Count == 0)">
                 @(_doctorBusy ? "Running…" : "Run checks")
             </button>
             @if (_doctorReport is not null)
