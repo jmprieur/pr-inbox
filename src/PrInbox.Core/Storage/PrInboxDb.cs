@@ -49,7 +49,16 @@ public sealed class PrInboxDb
     }
 
     /// <summary>
-    /// Opens a new connection with <c>foreign_keys=ON</c>.
+    /// Opens a new connection. Sets pragmas in this exact order:
+    /// <list type="number">
+    ///   <item><c>busy_timeout = 5000</c> — applies first so any subsequent
+    ///         pragma that needs a database-level lock (e.g. <c>journal_mode</c>
+    ///         negotiation) backs off politely instead of throwing
+    ///         <c>SQLITE_BUSY</c>.</item>
+    ///   <item><c>foreign_keys = ON</c> — referential integrity.</item>
+    /// </list>
+    /// Journal mode is set once at migration time
+    /// (<see cref="MigrationRunner.MigrateAsync"/>) for file-backed DBs.
     /// Caller disposes.
     /// </summary>
     public async Task<SqliteConnection> OpenAsync(CancellationToken ct = default)
@@ -58,7 +67,7 @@ public sealed class PrInboxDb
         await conn.OpenAsync(ct);
         await using (var cmd = conn.CreateCommand())
         {
-            cmd.CommandText = "PRAGMA foreign_keys = ON;";
+            cmd.CommandText = "PRAGMA busy_timeout = 5000; PRAGMA foreign_keys = ON;";
             await cmd.ExecuteNonQueryAsync(ct);
         }
         return conn;

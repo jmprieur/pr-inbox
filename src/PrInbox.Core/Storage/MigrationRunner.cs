@@ -44,6 +44,20 @@ public sealed class MigrationRunner
         var dbPath = ExtractDataSource(connectionString);
         await using var conn = new SqliteConnection(connectionString);
         await conn.OpenAsync(ct);
+
+        // Set busy_timeout first so the journal-mode negotiation that
+        // follows backs off politely if another process happens to be in
+        // the middle of a write. Then enable WAL on file-backed DBs so
+        // concurrent readers don't block the writer (and vice versa) —
+        // matters because the host now runs the fast pass in parallel
+        // across sources. In-memory test DBs ignore this; their cache is
+        // already a single in-process structure with its own locking.
+        await SetBusyTimeoutAsync(conn, milliseconds: 5000, ct);
+        if (IsFileBackedConnection(connectionString))
+        {
+            await TryEnableWalAsync(conn, ct);
+        }
+
         await EnsureSchemaVersionTableAsync(conn, ct);
 
         var applied = await GetAppliedVersionsAsync(conn, ct);
@@ -227,6 +241,49 @@ public sealed class MigrationRunner
     {
         var builder = new SqliteConnectionStringBuilder(connectionString);
         return builder.DataSource ?? string.Empty;
+    }
+
+    private static bool IsFileBackedConnection(string connectionString)
+    {
+        var builder = new SqliteConnectionStringBuilder(connectionString);
+        // Memory mode (Mode=Memory or :memory:) ignores WAL — WAL needs a
+        // backing file. Treat anything that looks file-backed as eligible.
+        if (builder.Mode == SqliteOpenMode.Memory) return false;
+        var ds = builder.DataSource ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(ds)) return false;
+        if (ds.Equals(":memory:", StringComparison.OrdinalIgnoreCase)) return false;
+        return true;
+    }
+
+    private static async Task SetBusyTimeoutAsync(SqliteConnection conn, int milliseconds, CancellationToken ct)
+    {
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = $"PRAGMA busy_timeout = {milliseconds};";
+        await cmd.ExecuteNonQueryAsync(ct);
+    }
+
+    private async Task TryEnableWalAsync(SqliteConnection conn, CancellationToken ct)
+    {
+        try
+        {
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText = "PRAGMA journal_mode = WAL;";
+            var result = (await cmd.ExecuteScalarAsync(ct))?.ToString() ?? "";
+            if (!string.Equals(result, "wal", StringComparison.OrdinalIgnoreCase))
+            {
+                _logger.LogWarning(
+                    "PRAGMA journal_mode=WAL returned '{Result}'. " +
+                    "Parallel sync writers may serialize under the default journal mode.",
+                    result);
+            }
+        }
+        catch (Exception ex)
+        {
+            // Don't fail migrations just because WAL didn't flip — the app
+            // still works in the default journal mode, just with more
+            // writer contention.
+            _logger.LogWarning(ex, "Failed to enable WAL mode; continuing in default journal mode.");
+        }
     }
 
     internal sealed record EmbeddedMigration(int Version, string Name, string Sql);

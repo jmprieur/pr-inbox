@@ -145,9 +145,15 @@ public sealed class InboxSyncHostedService : BackgroundService
 
     /// <summary>
     /// Runs the tier-2 fast pass + disappeared sweep across every runtime.
+    /// Sources run in parallel — each source spends most of its time on
+    /// paginated REST calls to its remote, and SQLite WAL (enabled by the
+    /// migration runner) plus per-connection <c>busy_timeout</c> let the
+    /// concurrent writes serialize politely at the DB layer.
     /// </summary>
     /// <returns>
-    /// Count of sources whose fast pass or disappeared sweep failed. Used
+    /// Count of sources whose fast pass failed. A disappeared-sweep
+    /// failure is logged at Warning but does NOT count toward this tally —
+    /// the data pass itself succeeded; only the cleanup step failed. Used
     /// by <see cref="RunSyncIterationAsync"/> to surface a per-cycle
     /// failure count in the inbox banner.
     /// </returns>
@@ -159,45 +165,99 @@ public sealed class InboxSyncHostedService : BackgroundService
         var (prRepo, threadRepo, snapRepo, syncRunRepo) = OpenFullRepos();
         var runtimes = new SourceFactory().Build(config);
 
-        var failures = 0;
-        foreach (var rt in runtimes)
+        return await RunFastSyncAsync(runtimes, prRepo, snapRepo, threadRepo, syncRunRepo, ct);
+    }
+
+    /// <summary>
+    /// Testable overload: takes the runtime list directly so tests can
+    /// inject fake sources (including barrier-coordinated fakes that
+    /// prove parallel execution).
+    /// </summary>
+    internal async Task<int> RunFastSyncAsync(
+        IReadOnlyList<RuntimeSource> runtimes,
+        PullRequestRepository prRepo,
+        PrSnapshotRepository snapRepo,
+        ObservedThreadRepository threadRepo,
+        SyncRunRepository syncRunRepo,
+        CancellationToken ct)
+    {
+        if (runtimes.Count == 0) return 0;
+
+        // Fan out: one task per runtime. Each task is fully independent —
+        // it builds its own orchestrator, owns its own progress channel,
+        // and either returns 0 (ok) or 1 (fast pass failed). The
+        // disappeared sweep that follows the fast pass within the same
+        // task is best-effort: a sweep failure logs Warning but does NOT
+        // increment the tally because the actual data pass succeeded.
+        //
+        // Cancellation: OperationCanceledException is allowed to bubble
+        // out of Task.WhenAll. We let the outer RunSyncIterationAsync
+        // handle shutdown — we don't count a shutdown cancel as a source
+        // failure.
+        var tasks = runtimes.Select(rt =>
+            RunOneFastAsync(rt, prRepo, snapRepo, threadRepo, syncRunRepo, _log, ct));
+        var results = await Task.WhenAll(tasks);
+        return results.Sum();
+    }
+
+    /// <summary>
+    /// Runs the fast pass + disappeared sweep for a single runtime.
+    /// </summary>
+    /// <returns>
+    /// <c>1</c> if the fast pass failed or threw a non-cancellation
+    /// exception; <c>0</c> otherwise. A disappeared-sweep failure logs at
+    /// Warning but still returns <c>0</c> because the data pass succeeded.
+    /// </returns>
+    internal static async Task<int> RunOneFastAsync(
+        RuntimeSource rt,
+        PullRequestRepository prRepo,
+        PrSnapshotRepository snapRepo,
+        ObservedThreadRepository threadRepo,
+        SyncRunRepository syncRunRepo,
+        ILogger log,
+        CancellationToken ct)
+    {
+        try
         {
-            if (ct.IsCancellationRequested) return failures;
-            try
-            {
-                var orchestrator = new SyncOrchestrator(rt.Source, prRepo, snapRepo, threadRepo, syncRunRepo);
-                var progress = new Progress<SyncProgress>();
-                var result = await orchestrator.RunFastAsync(rt.Identity, progress, ct);
+            var orchestrator = new SyncOrchestrator(rt.Source, prRepo, snapRepo, threadRepo, syncRunRepo);
+            var progress = new Progress<SyncProgress>();
+            var result = await orchestrator.RunFastAsync(rt.Identity, progress, ct);
 
-                // Sweep A: anything we still think is open but the source
-                // didn't return this pass. Cap protects rate limits.
-                if (result.SeenUrls is not null && result.Status != SyncRunStatus.Failed)
+            // Sweep A: anything we still think is open but the source
+            // didn't return this pass. Cap protects rate limits. Sweep
+            // failure does NOT count toward the source-failure tally —
+            // the fast list itself succeeded; only the cleanup failed.
+            if (result.SeenUrls is not null && result.Status != SyncRunStatus.Failed)
+            {
+                try
                 {
-                    try
-                    {
-                        await orchestrator.RunDisappearedSweepAsync(
-                            rt.Identity, result.SeenUrls, cap: 20, ct);
-                    }
-                    catch (Exception ex)
-                    {
-                        // Bumped from LogDebug -> LogWarning so disappeared
-                        // sweep failures are visible in logs. They don't
-                        // count toward the source-failure tally because the
-                        // fast list itself succeeded — only the cleanup pass
-                        // didn't. Log loudly, keep going.
-                        _log.LogWarning(ex, "Disappeared sweep of {SourceId} failed", rt.Source.SourceId);
-                    }
+                    await orchestrator.RunDisappearedSweepAsync(
+                        rt.Identity, result.SeenUrls, cap: 20, ct);
                 }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    log.LogWarning(ex, "Disappeared sweep of {SourceId} failed", rt.Source.SourceId);
+                }
+            }
 
-                if (result.Status == SyncRunStatus.Failed) failures++;
-            }
-            catch (Exception ex)
-            {
-                failures++;
-                _log.LogWarning(ex, "Fast sync of {SourceId} failed", rt.Source.SourceId);
-            }
+            return result.Status == SyncRunStatus.Failed ? 1 : 0;
         }
-        return failures;
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // Shutdown / user-initiated cancel — don't count as a source
+            // failure. Let it propagate so Task.WhenAll faults
+            // deterministically and the outer iteration short-circuits.
+            throw;
+        }
+        catch (Exception ex)
+        {
+            log.LogWarning(ex, "Fast sync of {SourceId} failed", rt.Source.SourceId);
+            return 1;
+        }
     }
 
     /// <summary>
