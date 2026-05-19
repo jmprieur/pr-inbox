@@ -355,7 +355,12 @@ public sealed class SyncOrchestrator
             EnrichState: enrichState,
             LastBriefedHeadSha: existing?.LastBriefedHeadSha,
             LastReviewRunHeadSha: existing?.LastReviewRunHeadSha,
-            LastPostedReviewHeadSha: existing?.LastPostedReviewHeadSha);
+            LastPostedReviewHeadSha: existing?.LastPostedReviewHeadSha,
+            // Note: ADO's PR list endpoint doesn't expose lastUpdatedDate at
+            // the PR level, so pr.LastUpdated is CreationDate for ADO sources
+            // and pr.UpdatedAt for GitHub. The UI's "Recent" sort treats this
+            // as best-available activity signal and ranks NULL last.
+            LastUpstreamUpdatedAt: pr.LastUpdated);
 
         await _pullRequests.UpsertAsync(row, ct);
     }

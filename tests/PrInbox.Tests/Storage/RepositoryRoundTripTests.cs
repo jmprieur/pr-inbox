@@ -914,5 +914,55 @@ public class RepositoryRoundTripTests : IAsyncLifetime
             CancellationToken.None);
         affected.Should().Be(0);
     }
+
+    [Fact]
+    public async Task PullRequest_Upsert_Persists_LastUpstreamUpdatedAt()
+    {
+        var repo = new PullRequestRepository(_db);
+        var upstream = DateTimeOffset.Parse("2026-05-18T15:30:00Z");
+        var row = SampleRow() with { LastUpstreamUpdatedAt = upstream };
+
+        await repo.UpsertAsync(row, CancellationToken.None);
+        var fetched = await repo.GetAsync(row.Identity.Url, CancellationToken.None);
+
+        fetched.Should().NotBeNull();
+        fetched!.LastUpstreamUpdatedAt.Should().Be(upstream);
+    }
+
+    [Fact]
+    public async Task PullRequest_Upsert_With_Null_LastUpstreamUpdatedAt_Persists_Null()
+    {
+        // Default is null; backfill window before the next fast-sync touches
+        // pre-existing rows must round-trip through SQLite cleanly.
+        var repo = new PullRequestRepository(_db);
+        var row = SampleRow(); // LastUpstreamUpdatedAt defaults to null
+
+        await repo.UpsertAsync(row, CancellationToken.None);
+        var fetched = await repo.GetAsync(row.Identity.Url, CancellationToken.None);
+
+        fetched.Should().NotBeNull();
+        fetched!.LastUpstreamUpdatedAt.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task PullRequest_Upsert_Overwrites_LastUpstreamUpdatedAt_On_Conflict()
+    {
+        // Each fast-sync brings a fresh upstream timestamp; ON CONFLICT must
+        // overwrite with the new value, not coalesce to the old one.
+        var repo = new PullRequestRepository(_db);
+        var first = SampleRow() with
+        {
+            LastUpstreamUpdatedAt = DateTimeOffset.Parse("2026-05-18T10:00:00Z"),
+        };
+        var newer = DateTimeOffset.Parse("2026-05-18T16:45:00Z");
+        var second = first with { LastUpstreamUpdatedAt = newer };
+
+        await repo.UpsertAsync(first, CancellationToken.None);
+        await repo.UpsertAsync(second, CancellationToken.None);
+        var fetched = await repo.GetAsync(first.Identity.Url, CancellationToken.None);
+
+        fetched.Should().NotBeNull();
+        fetched!.LastUpstreamUpdatedAt.Should().Be(newer);
+    }
 }
 

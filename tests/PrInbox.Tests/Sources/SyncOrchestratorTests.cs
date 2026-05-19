@@ -322,6 +322,28 @@ public class SyncOrchestratorTests : IAsyncLifetime
         beta!.LastSweptAt.Should().NotBeNull();
     }
 
+    [Fact]
+    public async Task RunFast_Persists_LastUpstreamUpdatedAt_From_Source()
+    {
+        // Asserts the bridge from RemotePullRequest.LastUpdated → DB
+        // pull_requests.last_upstream_updated_at via SyncOrchestrator's
+        // UpsertFastAsync path. This is the source-of-truth for the
+        // "Recent" sort in the inbox popovers.
+        var idAlpha = new PrIdentity("https://github.com/owner/repo/pull/1", "gh.com:100#1000");
+        var lastUpdated = DateTimeOffset.Parse("2026-05-18T15:30:00Z");
+
+        var source = new FakePrReadSourceBuilder("gh.com:emu", SourceKind.GitHub)
+            .WithPullRequest(BuildBasicPr(idAlpha, lastUpdated), BuildDetail(idAlpha))
+            .Build();
+        var orch = new SyncOrchestrator(source, _prs, _snaps, _threads, _syncRuns);
+
+        await orch.RunFastAsync("jmprieur_microsoft", progress: null, CancellationToken.None);
+
+        var row = await _prs.GetAsync(idAlpha.Url, CancellationToken.None);
+        row.Should().NotBeNull();
+        row!.LastUpstreamUpdatedAt.Should().Be(lastUpdated);
+    }
+
     private static FakePrReadSource BuildFakeSource(string sourceId, out PrIdentity idAlpha)
     {
         idAlpha = new PrIdentity("https://github.com/owner/repo/pull/1", "gh.com:100#1000");

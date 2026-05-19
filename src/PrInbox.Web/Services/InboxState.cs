@@ -28,7 +28,8 @@ public sealed record InboxRow(
     string? CurrentHeadSha,
     bool IsIgnored = false,
     DateTimeOffset? DisappearedAt = null,
-    int LikelyDoneCount = 0)
+    int LikelyDoneCount = 0,
+    DateTimeOffset? LastUpstreamUpdatedAt = null)
 {
     public static InboxRow FromRow(
         PullRequestRow row,
@@ -58,7 +59,8 @@ public sealed record InboxRow(
             drift.CurrentHeadSha,
             row.IsIgnored,
             row.DisappearedAt,
-            likelyDone);
+            likelyDone,
+            row.LastUpstreamUpdatedAt);
     }
 }
 

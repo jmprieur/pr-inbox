@@ -27,7 +27,8 @@ public sealed record PullRequestRow(
     DateTimeOffset? DisappearedAt = null,
     DateTimeOffset? LastSweptAt = null,
     string? Body = null,
-    int DossierVersion = 0);
+    int DossierVersion = 0,
+    DateTimeOffset? LastUpstreamUpdatedAt = null);
 
 /// <summary>
 /// Row from <c>pr_snapshots</c>. Append-only.

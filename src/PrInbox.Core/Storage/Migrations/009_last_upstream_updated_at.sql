@@ -1,0 +1,25 @@
+-- Migration 009 — Persist upstream PR updated-at for "recently active" sort.
+--
+-- Why: the inbox UI's author/repo filter popovers want a "Recent" sort
+-- option that surfaces actors with the freshest PR activity. The
+-- adapters already expose RemotePullRequest.LastUpdated, but the
+-- orchestrator only used it to decide enrich_state (line 334 of
+-- SyncOrchestrator). Persist it so the UI can group by max() per
+-- author / repo without joining pr_snapshots.
+--
+-- Semantics:
+--   * NULL  → never observed (pre-migration row, or fast-sync hasn't
+--             run since the migration). Sorted last in "Recent" mode.
+--   * value → adapter-reported value at the last fast-sync touching
+--             this row. GitHub: pr.updated_at (real updated time).
+--             ADO: pr.creationDate (the PR list endpoint does NOT
+--             return a top-level lastUpdatedDate; thread-level
+--             timestamps exist but are tier-3 and not used here).
+--             A future enhancement could update this column at tier-3
+--             enrich-time with max(thread.lastUpdatedDate, commit
+--             dates) to give ADO a real activity signal too.
+--
+-- Backfill: existing rows get NULL on migration. The next fast-sync
+-- cycle (which happens at startup) populates every still-listed PR.
+
+ALTER TABLE pull_requests ADD COLUMN last_upstream_updated_at TEXT;

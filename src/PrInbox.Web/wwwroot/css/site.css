@@ -644,6 +644,36 @@ button.link-like.done-bulk {
     align-items: center;
     justify-content: space-between;
     font-size: 0.85rem;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+}
+.repo-popover-actions .muted { margin-left: auto; }
+
+/* Sort toggle row under the actions bar. Segmented control: clicking
+   one of "PRs" / "Recent" highlights it and persists the choice. */
+.repo-popover-sort {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.15rem 0 0.25rem 0;
+    font-size: 0.82rem;
+    border-bottom: 1px dashed var(--line);
+}
+.repo-popover-sort .sort-btn {
+    background: transparent;
+    color: var(--muted);
+    border: 1px solid var(--line);
+    border-radius: 3px;
+    padding: 0.1rem 0.5rem;
+    font-size: 0.78rem;
+    cursor: pointer;
+    line-height: 1.2;
+}
+.repo-popover-sort .sort-btn:hover { color: var(--fg); border-color: var(--accent); }
+.repo-popover-sort .sort-btn.active {
+    color: var(--fg);
+    border-color: var(--accent);
+    background: rgba(93, 164, 255, 0.08);
 }
 .repo-list {
     list-style: none;

@@ -32,14 +32,14 @@ public sealed class PullRequestRepository
               status, tracking_reason, identity_used,
               first_seen_at, last_synced_at, enrich_state,
               last_briefed_head_sha, last_review_run_head_sha, last_posted_review_head_sha,
-              body
+              body, last_upstream_updated_at
             ) VALUES (
               $prId, $stableId, $sourceId, $sourceKind,
               $displayRepo, $number, $title, $author, $url,
               $status, $tracking, $identityUsed,
               $firstSeen, $lastSynced, $enrichState,
               $lastBriefed, $lastReviewRun, $lastPosted,
-              $body
+              $body, $lastUpstreamUpdated
             )
             ON CONFLICT(stable_identity) DO UPDATE SET
               pr_identity   = excluded.pr_identity,
@@ -56,7 +56,11 @@ public sealed class PullRequestRepository
               enrich_state  = excluded.enrich_state,
               -- Preserve a previously enriched body across subsequent
               -- fast-pass upserts (which carry body=null).
-              body          = COALESCE(excluded.body, pull_requests.body);
+              body          = COALESCE(excluded.body, pull_requests.body),
+              -- Always overwrite the upstream updated-at: fast-sync has
+              -- the freshest value (or NULL on adapters that don't
+              -- supply one — we still want to clear stale values).
+              last_upstream_updated_at = excluded.last_upstream_updated_at;
 
             -- Record this (source, identity) binding for the PR. Idempotent:
             -- the first sync that discovered the PR seeded one row in
@@ -87,6 +91,11 @@ public sealed class PullRequestRepository
         cmd.Parameters.AddWithValue("$lastReviewRun", (object?)row.LastReviewRunHeadSha ?? DBNull.Value);
         cmd.Parameters.AddWithValue("$lastPosted", (object?)row.LastPostedReviewHeadSha ?? DBNull.Value);
         cmd.Parameters.AddWithValue("$body", (object?)row.Body ?? DBNull.Value);
+        cmd.Parameters.AddWithValue(
+            "$lastUpstreamUpdated",
+            row.LastUpstreamUpdatedAt is null
+                ? DBNull.Value
+                : (object)FormatTimestamp(row.LastUpstreamUpdatedAt.Value));
 
         await cmd.ExecuteNonQueryAsync(ct);
     }
@@ -452,7 +461,8 @@ public sealed class PullRequestRepository
                 : null,
             DossierVersion: HasColumn(reader, "dossier_version")
                 ? (int)reader.GetInt64(reader.GetOrdinal("dossier_version"))
-                : 0);
+                : 0,
+            LastUpstreamUpdatedAt: ParseOptionalTimestamp(reader, "last_upstream_updated_at"));
     }
 
     private static bool HasColumn(SqliteDataReader reader, string name)

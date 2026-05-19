@@ -57,15 +57,35 @@
                        placeholder="Filter repos…"
                        @bind="_repoFilterSearch"
                        @bind:event="oninput" />
+                @{
+                    var repoItems = FilteredRepoListItems;
+                    var canHideVisibleRepos = repoItems.Any(i => i.Count > 0 && !i.Excluded);
+                }
                 <div class="repo-popover-actions">
                     <button type="button"
                             class="link-like"
                             disabled="@(_excludedRepos.Count == 0)"
                             @onclick="OnShowAllReposAsync">Show all</button>
+                    <button type="button"
+                            class="link-like"
+                            disabled="@(!canHideVisibleRepos)"
+                            title="Hide every repo currently shown in this list."
+                            @onclick="OnHideVisibleReposAsync">Hide visible</button>
                     <span class="muted">@RepoFilterStatusLine</span>
                 </div>
+                <div class="repo-popover-sort">
+                    <span class="muted">Sort:</span>
+                    <button type="button"
+                            class="sort-btn @(_repoSortMode == InboxFilterSortMode.Count ? "active" : "")"
+                            title="Sort by PR count, highest first."
+                            @onclick="@(() => OnRepoSortChangeAsync(InboxFilterSortMode.Count))">PRs</button>
+                    <button type="button"
+                            class="sort-btn @(_repoSortMode == InboxFilterSortMode.Recent ? "active" : "")"
+                            title="Sort by most recent upstream PR update."
+                            @onclick="@(() => OnRepoSortChangeAsync(InboxFilterSortMode.Recent))">Recent</button>
+                </div>
                 <ul class="repo-list">
-                    @foreach (var item in FilteredRepoListItems)
+                    @foreach (var item in repoItems)
                     {
                         var isChecked = !item.Excluded;
                         <li>
@@ -78,7 +98,7 @@
                             </label>
                         </li>
                     }
-                    @if (FilteredRepoListItems.Count == 0)
+                    @if (repoItems.Count == 0)
                     {
                         <li class="empty muted">No repos match.</li>
                     }
@@ -104,15 +124,35 @@
                        placeholder="Filter authors…"
                        @bind="_authorFilterSearch"
                        @bind:event="oninput" />
+                @{
+                    var authorItems = FilteredAuthorListItems;
+                    var canHideVisibleAuthors = authorItems.Any(i => i.Count > 0 && !i.Excluded);
+                }
                 <div class="repo-popover-actions">
                     <button type="button"
                             class="link-like"
                             disabled="@(_excludedAuthors.Count == 0)"
                             @onclick="OnShowAllAuthorsAsync">Show all</button>
+                    <button type="button"
+                            class="link-like"
+                            disabled="@(!canHideVisibleAuthors)"
+                            title="Hide every author currently shown in this list."
+                            @onclick="OnHideVisibleAuthorsAsync">Hide visible</button>
                     <span class="muted">@AuthorFilterStatusLine</span>
                 </div>
+                <div class="repo-popover-sort">
+                    <span class="muted">Sort:</span>
+                    <button type="button"
+                            class="sort-btn @(_authorSortMode == InboxFilterSortMode.Count ? "active" : "")"
+                            title="Sort by PR count, highest first."
+                            @onclick="@(() => OnAuthorSortChangeAsync(InboxFilterSortMode.Count))">PRs</button>
+                    <button type="button"
+                            class="sort-btn @(_authorSortMode == InboxFilterSortMode.Recent ? "active" : "")"
+                            title="Sort by most recent upstream PR update."
+                            @onclick="@(() => OnAuthorSortChangeAsync(InboxFilterSortMode.Recent))">Recent</button>
+                </div>
                 <ul class="repo-list">
-                    @foreach (var item in FilteredAuthorListItems)
+                    @foreach (var item in authorItems)
                     {
                         var isChecked = !item.Excluded;
                         <li>
@@ -125,7 +165,7 @@
                             </label>
                         </li>
                     }
-                    @if (FilteredAuthorListItems.Count == 0)
+                    @if (authorItems.Count == 0)
                     {
                         <li class="empty muted">No authors match.</li>
                     }
@@ -386,6 +426,8 @@ else
     private const string PrefSourceFilter = "inbox.source_filter";
     private const string PrefExcludedRepos = "inbox.excluded_repos";
     private const string PrefExcludedAuthors = "inbox.excluded_authors";
+    private const string PrefAuthorSortMode = "inbox.author_sort_mode";
+    private const string PrefRepoSortMode   = "inbox.repo_sort_mode";
 
     private IReadOnlyList<InboxRow> _rows = Array.Empty<InboxRow>();
     private IReadOnlyDictionary<string, ReviewRun> _runMap = new Dictionary<string, ReviewRun>();
@@ -419,6 +461,11 @@ else
     // Author-filter popover UI state — not persisted.
     private bool _authorFilterOpen;
     private string _authorFilterSearch = string.Empty;
+
+    // Sort modes for the popovers. Persisted so the choice survives a
+    // page reload. Defaults to Count to match the previous behavior.
+    private InboxFilterSortMode _authorSortMode = InboxFilterSortMode.Count;
+    private InboxFilterSortMode _repoSortMode = InboxFilterSortMode.Count;
 
     private const string UnknownAuthorKey = InboxFilters.UnknownAuthorKey;
 
@@ -566,11 +613,22 @@ else
                     Log.LogDebug(ex, "Could not parse {Key}; falling back to empty set.", PrefExcludedAuthors);
                 }
             }
+
+            _authorSortMode = ParseSortMode(await Prefs.GetAsync(PrefAuthorSortMode), InboxFilterSortMode.Count);
+            _repoSortMode   = ParseSortMode(await Prefs.GetAsync(PrefRepoSortMode),   InboxFilterSortMode.Count);
         }
         catch (Exception ex)
         {
             Log.LogWarning(ex, "Loading UI prefs failed; using defaults.");
         }
+    }
+
+    private static InboxFilterSortMode ParseSortMode(string? raw, InboxFilterSortMode fallback)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) return fallback;
+        return Enum.TryParse<InboxFilterSortMode>(raw, ignoreCase: true, out var parsed)
+            ? parsed
+            : fallback;
     }
 
     private void CompileIgnoredRepoRegexes()
@@ -612,7 +670,28 @@ else
 
     // ----- Per-repo filter helpers -------------------------------------
 
-    private sealed record RepoFilterItem(string Name, int Count, bool Excluded);
+    /// <summary>
+    /// Highest <see cref="InboxRow.LastUpstreamUpdatedAt"/> seen in
+    /// <paramref name="rows"/>, or <c>null</c> if every row's value is
+    /// missing. Used by the "Recent" sort mode on both filter popovers
+    /// to demote groups with no observed upstream activity.
+    /// </summary>
+    private static DateTimeOffset? MaxRecentOrNull(IEnumerable<InboxRow> rows)
+    {
+        DateTimeOffset? best = null;
+        foreach (var r in rows)
+        {
+            if (r.LastUpstreamUpdatedAt is null) continue;
+            if (best is null || r.LastUpstreamUpdatedAt > best) best = r.LastUpstreamUpdatedAt;
+        }
+        return best;
+    }
+
+    private sealed record RepoFilterItem(
+        string Name,
+        int Count,
+        bool Excluded,
+        DateTimeOffset? MaxRecent) : IInboxFilterItem;
 
     /// <summary>
     /// Repos that <em>could</em> show up given the current source-chip /
@@ -636,20 +715,23 @@ else
 
             var byName = src
                 .GroupBy(r => r.DisplayRepo, StringComparer.OrdinalIgnoreCase)
-                .ToDictionary(g => g.Key, g => g.Count(), StringComparer.OrdinalIgnoreCase);
+                .ToDictionary(
+                    g => g.Key,
+                    g => (Count: g.Count(), MaxRecent: MaxRecentOrNull(g)),
+                    StringComparer.OrdinalIgnoreCase);
 
             // Surface any excluded repo that no longer has matching rows so
             // the user can still un-exclude it from the popover.
             foreach (var name in _excludedRepos)
             {
-                if (!byName.ContainsKey(name)) byName[name] = 0;
+                if (!byName.ContainsKey(name)) byName[name] = (Count: 0, MaxRecent: null);
             }
 
-            return byName
-                .Select(kv => new RepoFilterItem(kv.Key, kv.Value, _excludedRepos.Contains(kv.Key)))
-                .OrderByDescending(i => i.Count)
-                .ThenBy(i => i.Name, StringComparer.OrdinalIgnoreCase)
-                .ToList();
+            var items = byName
+                .Select(kv => new RepoFilterItem(
+                    kv.Key, kv.Value.Count, _excludedRepos.Contains(kv.Key), kv.Value.MaxRecent));
+
+            return InboxFilterHelpers.Sort(items, _repoSortMode).ToList();
         }
     }
 
@@ -666,10 +748,17 @@ else
         }
     }
 
-    private string RepoFilterPillLabel =>
-        _excludedRepos.Count == 0
-            ? "Repos"
-            : $"Repos: {_excludedRepos.Count} hidden";
+    private string RepoFilterPillLabel
+    {
+        get
+        {
+            var items = AllRepoFilterItems;
+            var (visible, hidden) = InboxFilterHelpers.CountsForPill(items);
+            return hidden == 0
+                ? $"Repos • {visible}"
+                : $"Repos • {visible} / {hidden} hidden";
+        }
+    }
 
     private string RepoFilterTooltip
     {
@@ -686,10 +775,12 @@ else
     {
         get
         {
-            var total = AllRepoFilterItems.Count;
-            return _excludedRepos.Count == 0
+            var items = AllRepoFilterItems;
+            var (visible, hidden) = InboxFilterHelpers.CountsForPill(items);
+            var total = visible + hidden;
+            return hidden == 0
                 ? $"{total} repo(s)"
-                : $"{_excludedRepos.Count} of {total} hidden";
+                : $"{hidden} of {total} hidden";
         }
     }
 
@@ -720,6 +811,25 @@ else
         await PersistExcludedReposAsync();
     }
 
+    private async Task OnHideVisibleReposAsync()
+    {
+        var changed = false;
+        foreach (var item in FilteredRepoListItems)
+        {
+            if (item.Count > 0 && !item.Excluded && _excludedRepos.Add(item.Name))
+                changed = true;
+        }
+        if (changed) await PersistExcludedReposAsync();
+    }
+
+    private async Task OnRepoSortChangeAsync(InboxFilterSortMode mode)
+    {
+        if (_repoSortMode == mode) return;
+        _repoSortMode = mode;
+        try { await Prefs.SetAsync(PrefRepoSortMode, mode.ToString()); }
+        catch (Exception ex) { Log.LogDebug(ex, "Persist {Key} failed.", PrefRepoSortMode); }
+    }
+
     private async Task PersistExcludedReposAsync()
     {
         try
@@ -732,7 +842,12 @@ else
 
     // ----- Per-author filter helpers -----------------------------------
 
-    private sealed record AuthorFilterItem(string Name, string DisplayLabel, int Count, bool Excluded);
+    private sealed record AuthorFilterItem(
+        string Name,
+        string DisplayLabel,
+        int Count,
+        bool Excluded,
+        DateTimeOffset? MaxRecent) : IInboxFilterItem;
 
     private static string AuthorKeyOf(InboxRow row) =>
         string.IsNullOrWhiteSpace(row.AuthorLogin) ? UnknownAuthorKey : row.AuthorLogin!;
@@ -764,19 +879,22 @@ else
 
             var byKey = src
                 .GroupBy(r => AuthorKeyOf(r), StringComparer.OrdinalIgnoreCase)
-                .ToDictionary(g => g.Key, g => g.Count(), StringComparer.OrdinalIgnoreCase);
+                .ToDictionary(
+                    g => g.Key,
+                    g => (Count: g.Count(), MaxRecent: MaxRecentOrNull(g)),
+                    StringComparer.OrdinalIgnoreCase);
 
             foreach (var name in _excludedAuthors)
             {
-                if (!byKey.ContainsKey(name)) byKey[name] = 0;
+                if (!byKey.ContainsKey(name)) byKey[name] = (Count: 0, MaxRecent: null);
             }
 
-            return byKey
+            var items = byKey
                 .Select(kv => new AuthorFilterItem(
-                    kv.Key, AuthorDisplayLabel(kv.Key), kv.Value, _excludedAuthors.Contains(kv.Key)))
-                .OrderByDescending(i => i.Count)
-                .ThenBy(i => i.Name, StringComparer.OrdinalIgnoreCase)
-                .ToList();
+                    kv.Key, AuthorDisplayLabel(kv.Key), kv.Value.Count,
+                    _excludedAuthors.Contains(kv.Key), kv.Value.MaxRecent));
+
+            return InboxFilterHelpers.Sort(items, _authorSortMode).ToList();
         }
     }
 
@@ -794,10 +912,17 @@ else
         }
     }
 
-    private string AuthorFilterPillLabel =>
-        _excludedAuthors.Count == 0
-            ? "Authors"
-            : $"Authors: {_excludedAuthors.Count} hidden";
+    private string AuthorFilterPillLabel
+    {
+        get
+        {
+            var items = AllAuthorFilterItems;
+            var (visible, hidden) = InboxFilterHelpers.CountsForPill(items);
+            return hidden == 0
+                ? $"Authors • {visible}"
+                : $"Authors • {visible} / {hidden} hidden";
+        }
+    }
 
     private string AuthorFilterTooltip
     {
@@ -817,10 +942,12 @@ else
     {
         get
         {
-            var total = AllAuthorFilterItems.Count;
-            return _excludedAuthors.Count == 0
+            var items = AllAuthorFilterItems;
+            var (visible, hidden) = InboxFilterHelpers.CountsForPill(items);
+            var total = visible + hidden;
+            return hidden == 0
                 ? $"{total} author(s)"
-                : $"{_excludedAuthors.Count} of {total} hidden";
+                : $"{hidden} of {total} hidden";
         }
     }
 
@@ -849,6 +976,25 @@ else
         if (_excludedAuthors.Count == 0) return;
         _excludedAuthors.Clear();
         await PersistExcludedAuthorsAsync();
+    }
+
+    private async Task OnHideVisibleAuthorsAsync()
+    {
+        var changed = false;
+        foreach (var item in FilteredAuthorListItems)
+        {
+            if (item.Count > 0 && !item.Excluded && _excludedAuthors.Add(item.Name))
+                changed = true;
+        }
+        if (changed) await PersistExcludedAuthorsAsync();
+    }
+
+    private async Task OnAuthorSortChangeAsync(InboxFilterSortMode mode)
+    {
+        if (_authorSortMode == mode) return;
+        _authorSortMode = mode;
+        try { await Prefs.SetAsync(PrefAuthorSortMode, mode.ToString()); }
+        catch (Exception ex) { Log.LogDebug(ex, "Persist {Key} failed.", PrefAuthorSortMode); }
     }
 
     private async Task PersistExcludedAuthorsAsync()
