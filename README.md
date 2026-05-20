@@ -149,7 +149,7 @@ pr-inbox review gh.com:agency-microsoft/playground#4248
 # Prints: brief path + recommended `copilot` invocation
 ```
 
-Both surfaces read/write the same `%APPDATA%\PrInbox\config.json`. Use whichever feels right; the Web UI's Settings page covers everything `pr-inbox config` does except identity multi-account (deferred).
+Both surfaces read/write the same `%APPDATA%\PrInbox\config.json`. Use whichever feels right; the Web UI's Settings page additionally supports **multi-identity GitHub.com** (one source per `gh` login, e.g. personal + EMU) via an inline picker on **+ Add GitHub.com** — the CLI's `config add-source` still defaults to a single default-identity source.
 
 ---
 
@@ -173,7 +173,7 @@ before launching the web UI to change what the Review tab spins up:
 |---|---|---|
 | `config doctor` red on GitHub | Not signed in to `gh` | `gh auth login --hostname github.com` |
 | `config doctor` red on Azure DevOps | `az login` expired, or you don't actually have an ADO source | `az login`, or skip the ADO step |
-| `sync` runs but inbox is empty | `gh` identity differs from the login the PRs are assigned to | `config doctor` prints the identity it's using; compare with PR assignee |
+| `sync` runs but inbox is empty | `gh` identity differs from the login the PRs are assigned to | `config doctor` prints the identity it's using; compare with PR assignee. If you have multiple `gh` logins, add each as its own source via Settings → **+ Add GitHub.com** |
 | Review tab opens then exits immediately with "agency: command not found" | `agency` CLI not on `PATH` | Install agency, or set `PRINBOX_REVIEW_AGENT` / `PRINBOX_REVIEW_PLUGIN` to point at a tool you do have |
 | Review tab opens but plugin fetch fails | No access to `1ES-microsoft/ai-plugins` | Point `PRINBOX_REVIEW_PLUGIN` at a local clone or a plugin you can reach |
 | Review tab opens but model call fails | `agency` not authenticated to the chosen model | Authenticate `agency` to your providers, or change `PRINBOX_REVIEW_MODEL` |
@@ -281,6 +281,7 @@ Example:
   "schemaVersion": 1,
   "sources": [
     { "id": "gh.com", "kind": "github", "host": "github.com", "identity": "default" },
+    { "id": "gh.com:jenny_microsoft", "kind": "github", "host": "github.com", "identity": "jenny_microsoft" },
     { "id": "ghe.contoso", "kind": "github-enterprise", "host": "github.contoso.com", "identity": "default" }
   ],
   "ado": {
@@ -293,6 +294,14 @@ Example:
   }
 }
 ```
+
+`identity` of `"default"` means "use whichever `gh` account is active
+for the host at sync time." Any other value pins the source to a
+specific `gh` login — the token provider passes
+`gh auth token --user <identity>`. Add identity-bound sources via the
+Web UI's Settings → **+ Add GitHub.com** picker. Two sources for the
+same host with different identities sync independently and surface
+under distinct chips in the Inbox.
 
 ---
 

@@ -72,12 +72,24 @@ Open <http://localhost:7341>.
 On first run you're redirected to **Settings**. The banner says
 "First run." Click:
 
-- **+ Add GitHub.com** — one click, default identity.
+- **+ Add GitHub.com** — if `gh` is installed and you have one or
+  more logged-in accounts, an inline picker lists each (badged
+  `EMU` or `public`, with the active one marked). Click a login
+  to bind a source to that exact account. Have two GitHub
+  identities (e.g. a personal `jenny` + an enterprise
+  `jenny_microsoft`)? Add each as its own source — they sync
+  independently and the **EMU** / **public** chips filter them
+  apart in the Inbox. A **+ Add with default identity** fallback
+  is always offered for users without `gh`, or who want the
+  source to track whichever `gh` account is currently active.
 - **+ Add GitHub Enterprise…** — enter your GHE host (e.g. `github.contoso.com`).
 - **+ Add Azure DevOps project…** — `org` + `project`, one row per project.
 
 Then click **Run Doctor**. Green checks mean you're authenticated; red
-means you need to `gh auth login` / `az login` and re-run.
+means you need to `gh auth login` / `az login` and re-run. If you have
+multiple `gh` logins, run `gh auth login --hostname github.com` once
+per identity before opening Settings — the picker reads from `gh auth
+status`.
 
 ### 4. First sync
 
@@ -414,9 +426,21 @@ Six sections, top to bottom.
 ### Sources
 
 Add/remove sources here. One row per source, showing kind, host,
-identity, and an "enabled" flag (toggled via the CLI today — UI is
-add/remove only). **+ Add GitHub.com** is a one-click action; GHE
-needs a host and an optional custom id.
+identity (the `gh` login or `"default"` for active-account
+semantics), and an "enabled" flag (toggled via the CLI today — UI
+is add/remove only). **+ Add GitHub.com** opens an inline picker
+that probes `gh auth status --hostname github.com` and offers one
+button per logged-in account (badged `EMU` or `public`, with the
+active one marked). Pick the one you want and a source bound to
+that identity is added. A **+ Add with default identity** fallback
+covers the no-`gh` and "use whichever account is active" cases.
+GHE still uses a simple host + optional custom id form.
+
+A heads-up banner appears in the picker if you already have a
+default-identity `github.com` source AND the active `gh` login is
+shown unbound — adding it explicitly would duplicate sync rows;
+remove the default-identity source first if you want a clean
+per-identity setup.
 
 ### Azure DevOps projects
 
