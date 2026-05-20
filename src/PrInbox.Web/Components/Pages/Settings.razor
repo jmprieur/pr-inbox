@@ -222,6 +222,19 @@ else
                     <strong>@advisory.Title</strong>
                     <p>@advisory.Detail</p>
                     <p class="settings-advisory-suggestion">@advisory.Suggestion</p>
+                    @if (advisory.Actions is { Count: > 0 } actions)
+                    {
+                        <div class="settings-advisory-actions">
+                            @foreach (var action in actions)
+                            {
+                                <button class="settings-advisory-fix"
+                                        disabled="@_busy"
+                                        @onclick="() => RunAdvisoryActionAsync(action)">
+                                    @(_bindingSourceId == action.SourceId ? "Working…" : ("Fix: " + action.Label))
+                                </button>
+                            }
+                        </div>
+                    }
                 </div>
             }
 
@@ -378,6 +391,9 @@ else
     private bool _isFirstRun;
     private string? _lastMessage;
     private bool _lastWasError;
+    // Source id currently being migrated via a Doctor advisory action.
+    // Used to spin a per-button label while the bind round-trips.
+    private string? _bindingSourceId;
 
     // GitHub.com add-flow state.
     // _ghComPicker: show the inline identity picker (true between
@@ -667,6 +683,48 @@ else
             var removed = await ConfigSvc.RemoveSourceAsync(id);
             SetMessage(removed ? $"Removed source {id}." : $"No source with id {id}.", isError: !removed);
         });
+    }
+
+    private async Task RunAdvisoryActionAsync(DoctorAdvisoryAction action)
+    {
+        if (_busy) return;
+        switch (action.Kind)
+        {
+            case DoctorAdvisoryActionKind.BindToIdentity:
+                _bindingSourceId = action.SourceId;
+                try
+                {
+                    await WrapAsync(async () =>
+                    {
+                        var result = await ConfigSvc.BindGitHubSourceToIdentityAsync(
+                            action.SourceId, action.TargetIdentity);
+                        var msg = result switch
+                        {
+                            BindIdentityResult.Migrated =>
+                                $"Bound `{action.SourceId}` to `{action.TargetIdentity}`.",
+                            BindIdentityResult.RemovedDuplicate =>
+                                $"Removed `{action.SourceId}` (explicit source for `{action.TargetIdentity}` already exists).",
+                            BindIdentityResult.NotFound =>
+                                $"Source `{action.SourceId}` no longer exists — refresh and try again.",
+                            BindIdentityResult.NotEligible =>
+                                $"Source `{action.SourceId}` is not a default-identity GitHub source; cannot bind.",
+                            _ => $"Unexpected bind result: {result}",
+                        };
+                        var isError = result is BindIdentityResult.NotFound or BindIdentityResult.NotEligible;
+                        SetMessage(msg, isError);
+                    });
+                    // Re-run Doctor so the now-stale advisory disappears.
+                    if (!_lastWasError)
+                    {
+                        await RunDoctorAsync();
+                    }
+                }
+                finally
+                {
+                    _bindingSourceId = null;
+                }
+                break;
+        }
     }
 
     private async Task RemoveAdoAsync(string org, string project)

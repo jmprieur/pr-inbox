@@ -201,6 +201,73 @@ public sealed class ConfigService : IConfigService
     }
 
     /// <inheritdoc />
+    public async Task<BindIdentityResult> BindGitHubSourceToIdentityAsync(
+        string sourceId,
+        string identity,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(sourceId)) return BindIdentityResult.NotFound;
+        if (string.IsNullOrWhiteSpace(identity))
+        {
+            throw new ArgumentException("Identity is required.", nameof(identity));
+        }
+        if (string.Equals(identity, "default", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new ArgumentException("Identity 'default' is reserved; bind requires an explicit gh login.", nameof(identity));
+        }
+
+        var normalizedIdentity = identity.Trim();
+        var cfg = await PrInboxConfig.LoadAsync(_configPath, ct);
+
+        var existing = cfg.Sources.FirstOrDefault(s =>
+            string.Equals(s.Id, sourceId, StringComparison.OrdinalIgnoreCase));
+        if (existing is null) return BindIdentityResult.NotFound;
+
+        var isDefaultGh = (existing.Kind == SourceConfigKind.GitHub
+                           || existing.Kind == SourceConfigKind.GitHubEnterprise)
+                          && string.Equals(existing.Identity, "default", StringComparison.OrdinalIgnoreCase)
+                          && !string.IsNullOrWhiteSpace(existing.Host);
+        if (!isDefaultGh) return BindIdentityResult.NotEligible;
+
+        var existingHost = existing.Host!;
+
+        // Remove the default-identity source.
+        cfg.Sources.RemoveAll(s =>
+            string.Equals(s.Id, sourceId, StringComparison.OrdinalIgnoreCase));
+
+        // Decide whether to add an explicit source. If one already exists
+        // for (host, identity), the explicit one already does the work
+        // and we just removed the duplicate default.
+        var newId = DefaultIdForWithIdentity(existing.Kind, existingHost, normalizedIdentity);
+        var explicitExists = cfg.Sources.Any(s =>
+            string.Equals(s.Id, newId, StringComparison.OrdinalIgnoreCase)
+            || ((s.Kind == SourceConfigKind.GitHub || s.Kind == SourceConfigKind.GitHubEnterprise)
+                && string.Equals(s.Host, existingHost, StringComparison.OrdinalIgnoreCase)
+                && string.Equals(s.Identity, normalizedIdentity, StringComparison.OrdinalIgnoreCase)));
+
+        BindIdentityResult result;
+        if (explicitExists)
+        {
+            result = BindIdentityResult.RemovedDuplicate;
+        }
+        else
+        {
+            cfg.Sources.Add(new SourceConfig
+            {
+                Id = newId,
+                Kind = existing.Kind,
+                Host = existingHost,
+                Identity = normalizedIdentity,
+                Enabled = true,
+            });
+            result = BindIdentityResult.Migrated;
+        }
+
+        await SaveAndRefreshAsync(cfg, ct);
+        return result;
+    }
+
+    /// <inheritdoc />
     public async Task<DoctorReport> RunDoctorAsync(CancellationToken ct = default)
     {
         var cfg = await PrInboxConfig.LoadAsync(_configPath, ct);

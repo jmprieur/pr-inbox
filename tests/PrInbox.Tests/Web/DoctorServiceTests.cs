@@ -75,6 +75,16 @@ public class DoctorServiceTests : IAsyncLifetime
         report.Advisories[0].Title.Should().Contain("Double-fetch");
         report.Advisories[0].Detail.Should().Contain("jmprieur");
         report.Advisories[0].Suggestion.Should().Contain("gh.com");
+
+        // One-click fix: each default source becomes a BindToIdentity action
+        // targeting the active gh login (the one the explicit source already
+        // covers, so the bind will collapse to RemovedDuplicate).
+        report.Advisories[0].Actions.Should().NotBeNull();
+        report.Advisories[0].Actions!.Should().ContainSingle();
+        var action = report.Advisories[0].Actions![0];
+        action.Kind.Should().Be(DoctorAdvisoryActionKind.BindToIdentity);
+        action.SourceId.Should().Be("gh.com");
+        action.TargetIdentity.Should().Be("jmprieur");
     }
 
     [Fact]
@@ -216,6 +226,7 @@ public class DoctorServiceTests : IAsyncLifetime
         public Task<bool> RemoveAdoProjectAsync(string org, string project, CancellationToken ct = default) => throw new NotImplementedException();
         public Task SetIgnoredReposAsync(IReadOnlyList<string> patterns, CancellationToken ct = default) => throw new NotImplementedException();
         public Task SetReviewLauncherFlagsAsync(bool autoSend, bool yolo, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task<BindIdentityResult> BindGitHubSourceToIdentityAsync(string sourceId, string identity, CancellationToken ct = default) => throw new NotImplementedException();
     }
 
     private sealed class StubGhDiscovery : IGitHubAuthDiscovery

@@ -370,4 +370,92 @@ public sealed class ConfigServiceTests : IDisposable
         cfg.Sources[0].Identity.Should().Be("jmprieur");
         cfg.Sources[0].Id.Should().Be("gh.com:jmprieur");
     }
+
+    // --- BindGitHubSourceToIdentityAsync -----------------------------
+
+    [Fact]
+    public async Task BindGitHubSourceToIdentityAsync_Migrates_Default_To_Explicit()
+    {
+        var svc = new ConfigService(_path);
+        await svc.AddGitHubSourceAsync(SourceConfigKind.GitHub, "github.com", id: "gh.com");
+
+        var result = await svc.BindGitHubSourceToIdentityAsync("gh.com", "jmprieur_microsoft");
+
+        result.Should().Be(BindIdentityResult.Migrated);
+        var cfg = await svc.GetAsync();
+        cfg.Sources.Should().ContainSingle();
+        cfg.Sources[0].Id.Should().Be("gh.com:jmprieur_microsoft");
+        cfg.Sources[0].Identity.Should().Be("jmprieur_microsoft");
+        cfg.Sources[0].Host.Should().Be("github.com");
+        cfg.Sources[0].Kind.Should().Be(SourceConfigKind.GitHub);
+        cfg.Sources[0].Enabled.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task BindGitHubSourceToIdentityAsync_When_Explicit_Already_Exists_Removes_Duplicate()
+    {
+        var svc = new ConfigService(_path);
+        await svc.AddGitHubSourceAsync(SourceConfigKind.GitHub, "github.com", id: "gh.com");
+        await svc.AddGitHubSourceWithIdentityAsync(SourceConfigKind.GitHub, "github.com", "jmprieur_microsoft");
+
+        var result = await svc.BindGitHubSourceToIdentityAsync("gh.com", "jmprieur_microsoft");
+
+        result.Should().Be(BindIdentityResult.RemovedDuplicate);
+        var cfg = await svc.GetAsync();
+        cfg.Sources.Should().ContainSingle();
+        cfg.Sources[0].Id.Should().Be("gh.com:jmprieur_microsoft");
+    }
+
+    [Fact]
+    public async Task BindGitHubSourceToIdentityAsync_Unknown_Id_Returns_NotFound()
+    {
+        var svc = new ConfigService(_path);
+        await svc.AddGitHubSourceAsync(SourceConfigKind.GitHub, "github.com", id: "gh.com");
+
+        var result = await svc.BindGitHubSourceToIdentityAsync("does-not-exist", "jmprieur");
+
+        result.Should().Be(BindIdentityResult.NotFound);
+        var cfg = await svc.GetAsync();
+        cfg.Sources.Should().ContainSingle().Which.Id.Should().Be("gh.com");
+    }
+
+    [Fact]
+    public async Task BindGitHubSourceToIdentityAsync_Not_Default_Identity_Returns_NotEligible()
+    {
+        var svc = new ConfigService(_path);
+        await svc.AddGitHubSourceWithIdentityAsync(SourceConfigKind.GitHub, "github.com", "jmprieur", id: "gh.com:jmprieur");
+
+        var result = await svc.BindGitHubSourceToIdentityAsync("gh.com:jmprieur", "jmprieur_microsoft");
+
+        result.Should().Be(BindIdentityResult.NotEligible);
+        var cfg = await svc.GetAsync();
+        cfg.Sources.Should().ContainSingle().Which.Identity.Should().Be("jmprieur");
+    }
+
+    [Fact]
+    public async Task BindGitHubSourceToIdentityAsync_Rejects_Default_Target()
+    {
+        var svc = new ConfigService(_path);
+        await svc.AddGitHubSourceAsync(SourceConfigKind.GitHub, "github.com", id: "gh.com");
+
+        var act = async () => await svc.BindGitHubSourceToIdentityAsync("gh.com", "default");
+
+        await act.Should().ThrowAsync<ArgumentException>();
+    }
+
+    [Fact]
+    public async Task BindGitHubSourceToIdentityAsync_Works_For_Ghe()
+    {
+        var svc = new ConfigService(_path);
+        await svc.AddGitHubSourceAsync(SourceConfigKind.GitHubEnterprise, "microsoft.ghe.com", id: "ghe.microsoft.ghe.com");
+
+        var result = await svc.BindGitHubSourceToIdentityAsync("ghe.microsoft.ghe.com", "jean-marc");
+
+        result.Should().Be(BindIdentityResult.Migrated);
+        var cfg = await svc.GetAsync();
+        cfg.Sources.Should().ContainSingle();
+        cfg.Sources[0].Kind.Should().Be(SourceConfigKind.GitHubEnterprise);
+        cfg.Sources[0].Host.Should().Be("microsoft.ghe.com");
+        cfg.Sources[0].Identity.Should().Be("jean-marc");
+    }
 }

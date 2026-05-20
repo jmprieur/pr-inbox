@@ -101,8 +101,9 @@ Settings — the picker reads from `gh auth status`.
 
 > 💡 If you have both a default-identity source **and** an explicit
 > source for your currently-active `gh` login, Doctor flags this as
-> "Double-fetch" in an amber advisory — both sources fetch the same
-> PRs every cycle. Remove the default-identity one.
+> "Double-fetch" in an amber advisory **and offers a green one-click
+> "Fix: Bind to `<login>`" button** that resolves it for you — both
+> sources would otherwise fetch the same PRs every cycle.
 
 ### 4. First sync
 
@@ -472,7 +473,11 @@ configured; otherwise click **Run Doctor**. The report has two parts:
    one shipped pattern is **Double-fetch**: amber warning when a
    default-identity gh.com source coexists with an explicit-identity
    source bound to the currently-active `gh` login. Both fetch the
-   same PRs; remove the default one.
+   same PRs; click the green **Fix: Bind `<id>` to `<login>`**
+   button on the advisory to migrate the default source in one click
+   — it removes the redundant default and (since the explicit one
+   already covers that login) leaves you with a clean per-identity
+   setup.
 2. **Per-source table** — ID, Kind, Identity (with `EMU` / `public` /
    `active` chips), Auth status (token length / az identity), **Last
    sync** (relative time), and **Open PRs** count. The runtime columns

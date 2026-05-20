@@ -96,4 +96,40 @@ public interface IConfigService
     /// the Azure CLI happen inside; expect a few hundred ms per source.
     /// </summary>
     Task<DoctorReport> RunDoctorAsync(CancellationToken ct = default);
+
+    /// <summary>
+    /// Migrates a default-identity GitHub source to an explicit identity
+    /// in a single load → mutate → save cycle. Removes the source
+    /// identified by <paramref name="sourceId"/> and adds a new
+    /// explicit-identity source bound to <paramref name="identity"/>
+    /// (using the same kind/host). If an explicit source for that
+    /// (host, identity) pair already exists, the default source is just
+    /// removed (the explicit one already does the work).
+    /// </summary>
+    /// <remarks>
+    /// Atomic at the file level — either both mutations land or neither
+    /// does. The new explicit source uses the same default id-derivation
+    /// as <see cref="AddGitHubSourceWithIdentityAsync"/> (e.g.
+    /// <c>gh.com:jenny_microsoft</c>), so subsequent sync runs are
+    /// indistinguishable from having added it manually.
+    /// </remarks>
+    Task<BindIdentityResult> BindGitHubSourceToIdentityAsync(
+        string sourceId,
+        string identity,
+        CancellationToken ct = default);
+}
+
+/// <summary>
+/// Outcome of <see cref="IConfigService.BindGitHubSourceToIdentityAsync"/>.
+/// </summary>
+public enum BindIdentityResult
+{
+    /// <summary>Default source was removed and a new explicit-identity source was added.</summary>
+    Migrated,
+    /// <summary>Default source was removed; an explicit source for the target identity already existed and was left in place.</summary>
+    RemovedDuplicate,
+    /// <summary>No source with the given id exists.</summary>
+    NotFound,
+    /// <summary>Source exists but is not a default-identity GitHub source (wrong kind or already has an explicit identity).</summary>
+    NotEligible,
 }

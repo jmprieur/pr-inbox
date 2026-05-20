@@ -1059,3 +1059,20 @@ tr.row-disappeared { opacity: 0.78; }
 .settings-advisory strong { display: block; margin-bottom: 0.2rem; }
 .settings-advisory p { margin: 0.2rem 0; }
 .settings-advisory-suggestion { color: #b0b2b8; font-style: italic; }
+.settings-advisory-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 8px;
+}
+.settings-advisory-fix {
+    background: #238636;
+    color: #fff;
+    border: 1px solid #2ea043;
+    border-radius: 4px;
+    padding: 4px 10px;
+    font-size: 0.85em;
+    cursor: pointer;
+}
+.settings-advisory-fix:hover:not(:disabled) { background: #2ea043; }
+.settings-advisory-fix:disabled { opacity: 0.5; cursor: not-allowed; }

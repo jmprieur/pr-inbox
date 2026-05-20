@@ -151,6 +151,16 @@ public sealed class DoctorService
             if (defaultGhSources.Count > 0 && explicitMatch is not null)
             {
                 var defaultIds = string.Join(", ", defaultGhSources.Select(s => $"`{s.Id}`"));
+                // One bind action per default source — clicking removes
+                // the default and (since the explicit one for activeLogin
+                // already exists) collapses to a clean per-identity setup.
+                var actions = defaultGhSources
+                    .Select(s => new DoctorAdvisoryAction(
+                        Kind: DoctorAdvisoryActionKind.BindToIdentity,
+                        SourceId: s.Id,
+                        TargetIdentity: activeLogin,
+                        Label: $"Bind `{s.Id}` to `{activeLogin}`"))
+                    .ToList();
                 advisories.Add(new DoctorAdvisory(
                     Severity: DoctorAdvisorySeverity.Warning,
                     Title: "Double-fetch: default-identity source overlaps with active gh login",
@@ -158,7 +168,8 @@ public sealed class DoctorService
                             $"explicitly bound to `{activeLogin}`, which is the currently active gh account. " +
                             $"Both fetch the same PRs every sync cycle.",
                     Suggestion: $"Remove {defaultIds} from Sources — the explicit `{explicitMatch.Id}` " +
-                                $"covers the same identity and won't break if you `gh auth switch` later."));
+                                $"covers the same identity and won't break if you `gh auth switch` later.",
+                    Actions: actions));
             }
         }
 
@@ -207,4 +218,22 @@ public sealed record DoctorAdvisory(
     DoctorAdvisorySeverity Severity,
     string Title,
     string Detail,
-    string Suggestion);
+    string Suggestion,
+    IReadOnlyList<DoctorAdvisoryAction>? Actions = null);
+
+/// <summary>
+/// Optional one-click remediation tied to an advisory. Each action is a
+/// declarative "what to do" — the UI layer translates Kind into a
+/// concrete <see cref="IConfigService"/> call.
+/// </summary>
+public sealed record DoctorAdvisoryAction(
+    DoctorAdvisoryActionKind Kind,
+    string SourceId,
+    string TargetIdentity,
+    string Label);
+
+public enum DoctorAdvisoryActionKind
+{
+    /// <summary>Bind a default-identity GitHub source to a specific gh login (or remove it if a duplicate explicit already exists).</summary>
+    BindToIdentity,
+}
