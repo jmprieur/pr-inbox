@@ -334,15 +334,33 @@ else
         await ReloadAsync();
 
         // First-run cooperation: pre-open the github.com identity picker
-        // so the user sees the list of logged-in gh accounts immediately,
-        // with one click per identity (or "Add all"). Synchronous probe —
-        // gh auth status has an 8s timeout and swallows all failures, so
-        // worst case we delay first paint by 8s. If that turns out to be
-        // a bad UX we can move it behind OnAfterRenderAsync.
+        // in 'Discovering…' state so the first paint already shows the
+        // spinner. The actual `gh auth status` shell-out (up to 8s)
+        // runs in OnAfterRenderAsync below so we don't block first
+        // paint — without this, the page would appear frozen for
+        // several seconds on every fresh start, making users wonder if
+        // the app is hung.
         if (_isFirstRun)
         {
-            await StartAddGitHubComAsync();
+            _ghComPicker = true;
+            _ghComDiscovering = true;
+            _ghComUnbound = Array.Empty<GitHubAuthIdentity>();
+            _ghComAlreadyBound = Array.Empty<GitHubAuthIdentity>();
         }
+    }
+
+    private bool _firstRunProbeStarted;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        if (!_isFirstRun || _firstRunProbeStarted) return;
+        _firstRunProbeStarted = true;
+        // Same code path as the user clicking "+ Add GitHub.com" by
+        // hand; it'll flip _ghComDiscovering off and populate
+        // _ghComUnbound, then StateHasChanged repaints with the
+        // identity list.
+        await StartAddGitHubComAsync();
     }
 
     private async Task ReloadAsync()
