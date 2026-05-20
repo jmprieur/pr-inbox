@@ -936,18 +936,21 @@ tr.row-disappeared { opacity: 0.78; }
    on first run — a stronger color than the muted per-identity
    buttons signals "click me first" without needing an arrow or
    prose. The nested .muted child gets explicit alpha-white so it
-   stays legible on the green background. */
-.settings-identity-add-all {
+   stays legible on the green background. Selector uses the parent
+   .settings-inline-form to outweigh the generic
+   `.settings-inline-form button` rule above (specificity 0,2,1
+   beats 0,1,1). */
+.settings-inline-form button.settings-identity-add-all {
     background: #238636;
     color: #ffffff;
     border-color: #2ea043;
 }
-.settings-identity-add-all:hover:not(:disabled) {
+.settings-inline-form button.settings-identity-add-all:hover:not(:disabled) {
     background: #2ea043;
     border-color: #3fb950;
 }
-.settings-identity-add-all strong { color: #ffffff; }
-.settings-identity-add-all .muted { color: rgba(255, 255, 255, 0.78); }
+.settings-inline-form button.settings-identity-add-all strong { color: #ffffff; }
+.settings-inline-form button.settings-identity-add-all .muted { color: rgba(255, 255, 255, 0.78); }
 .settings-warning {
     margin-top: 0.5rem;
     padding: 0.4rem 0.6rem;
