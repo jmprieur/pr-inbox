@@ -50,36 +50,29 @@ telemetry dashboards (data is captured, queries land in v0.3).
 
 ## How it works
 
-```
-┌────────────────────┐
-│ Source adapters    │
-│  • GitHub (.com)   │
-│  • GitHub (GHE)    │  ──┐
-│  • Azure DevOps    │    │  IPrReadSource
-└────────────────────┘    │
-                          ▼
-┌─────────────────────────────────────────┐
-│ SQLite registry                         │
-│ %APPDATA%\PrInbox\pr-inbox.db           │
-│                                         │
-│ • pull_requests (current row)           │
-│ • pr_source_bindings (per-identity)     │
-│ • pr_snapshots (append-only)            │
-│ • observed_threads (append-only)        │
-│ • review_runs (immutable)               │
-│ • posted_reviews (v0.2+)                │
-│ • sync_runs (per-attempt status)        │
-│ • ui_preferences (Inbox toggles)        │
-└─────────────────────────────────────────┘
-                          │
-                          ▼
-┌─────────────────────────────────────────┐
-│ Verbs                                   │
-│  sync ─── refresh registry              │
-│  list ─── triage table                  │
-│  review ─ immutable run dir + brief.md  │
-│  config ─ identities / projects / doctor│
-└─────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    subgraph adapters ["Source adapters · IPrReadSource"]
+        direction LR
+        GH["GitHub.com"]
+        GHE["GitHub Enterprise"]
+        ADO["Azure DevOps"]
+    end
+
+    subgraph registry ["SQLite registry · %APPDATA%\PrInbox\pr-inbox.db"]
+        Tables["pull_requests · pr_source_bindings · pr_snapshots<br/>observed_threads · review_runs · posted_reviews<br/>sync_runs · ui_preferences"]
+    end
+
+    subgraph verbs ["Verbs"]
+        direction LR
+        Sync["sync<br/>refresh registry"]
+        List["list<br/>triage table"]
+        Review["review<br/>brief.md + immutable run dir"]
+        Config["config<br/>identities · projects · doctor"]
+    end
+
+    adapters --> registry
+    registry --> verbs
 ```
 
 ### Credentials — delegate, never store
