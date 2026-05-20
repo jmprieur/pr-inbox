@@ -4,6 +4,7 @@
 @using PrInbox.Core.Credentials
 @inject IConfigService ConfigSvc
 @inject IGitHubAuthDiscovery GhAuthDiscovery
+@inject DoctorService Doctor
 @inject InboxSyncHostedService Sync
 @inject ILogger<Settings> Log
 
@@ -197,45 +198,109 @@ else
 
     <section class="settings-section">
         <h2>Doctor</h2>
-        <p class="muted">Check that <code>gh</code> / <code>az</code> auth is healthy and that each source can mint a token.</p>
+        <p class="muted">
+            Per-source health: can we mint a token? Has the background sync actually run?
+            Are we wasting work fetching the same PRs twice?
+        </p>
         <div class="settings-actions">
             <button @onclick="RunDoctorAsync" disabled="@(_busy || _cfg.Sources.Count == 0)">
-                @(_doctorBusy ? "Running…" : "Run checks")
+                @(_doctorBusy ? "Running…" : (_doctorReport is null ? "Run checks" : "Refresh"))
             </button>
             @if (_doctorReport is not null)
             {
                 <span class="muted">
-                    @(_doctorReport.AllOk ? "All sources healthy." : "One or more sources failed.")
+                    @(_doctorReport.Base.AllOk ? "All sources healthy." : "One or more sources failed.")
                 </span>
             }
         </div>
+
         @if (_doctorReport is not null)
         {
+            @foreach (var advisory in _doctorReport.Advisories)
+            {
+                <div class="settings-advisory @(advisory.Severity == DoctorAdvisorySeverity.Warning ? "warning" : "info")">
+                    <strong>@advisory.Title</strong>
+                    <p>@advisory.Detail</p>
+                    <p class="settings-advisory-suggestion">@advisory.Suggestion</p>
+                </div>
+            }
+
             <table class="settings-table doctor-table">
                 <thead>
-                    <tr><th>ID</th><th>Kind</th><th>Status</th><th>Identity / Error</th></tr>
+                    <tr>
+                        <th>ID</th>
+                        <th>Kind</th>
+                        <th>Identity</th>
+                        <th>Auth</th>
+                        <th>Last sync</th>
+                        <th>Open PRs</th>
+                    </tr>
                 </thead>
                 <tbody>
                     @foreach (var r in _doctorReport.Sources)
                     {
-                        <tr class="@(r.Ok ? "ok" : "fail")">
-                            <td><code>@r.Id</code></td>
-                            <td>@KindLabel(r.Kind)</td>
+                        var b = r.Base;
+                        <tr class="@(b.Ok ? "ok" : "fail")">
+                            <td><code>@b.Id</code></td>
+                            <td>@KindLabel(b.Kind)</td>
                             <td>
-                                @if (!r.Enabled) { <span class="muted">disabled</span> }
-                                else if (r.Ok)   { <span class="status-ok">● ok</span> }
-                                else             { <span class="status-fail">● failed</span> }
+                                @if (b.Ok && b.Identity is not null)
+                                {
+                                    if (string.Equals(b.Identity, "default", StringComparison.OrdinalIgnoreCase))
+                                    {
+                                        <span class="muted">default</span>
+                                    }
+                                    else
+                                    {
+                                        <span>@b.Identity</span>
+                                        @if (r.IsEmu == true) { <span class="identity-chip emu">EMU</span> }
+                                        else if (r.IsEmu == false) { <span class="identity-chip public">public</span> }
+                                        @if (r.IsActiveGhLogin) { <span class="identity-chip active">active</span> }
+                                    }
+                                }
+                                else if (!b.Enabled)
+                                {
+                                    <span class="muted">disabled</span>
+                                }
+                                else
+                                {
+                                    <span class="muted">—</span>
+                                }
                             </td>
                             <td>
-                                @if (r.Ok && r.Identity is not null)
+                                @if (!b.Enabled) { <span class="muted">—</span> }
+                                else if (b.Ok)   { <span class="status-ok">● ok</span> }
+                                else
                                 {
-                                    <span>@r.Identity <span class="muted">(token len @r.TokenLength)</span></span>
-                                }
-                                else if (r.Error is not null)
-                                {
-                                    <span class="muted">@r.Error</span>
+                                    <span class="status-fail">● failed</span>
+                                    @if (b.Error is not null) { <div class="muted doctor-error">@b.Error</div> }
                                 }
                             </td>
+                            <td>
+                                @if (r.LastSyncAt is null)
+                                {
+                                    <span class="muted">never</span>
+                                }
+                                else
+                                {
+                                    var statusClass = r.LastSyncStatus switch
+                                    {
+                                        SyncRunStatus.Ok => "status-ok",
+                                        SyncRunStatus.Partial => "status-partial",
+                                        SyncRunStatus.RateLimited => "status-partial",
+                                        SyncRunStatus.Failed => "status-fail",
+                                        _ => "muted",
+                                    };
+                                    <span class="@statusClass" title="@r.LastSyncAt.Value.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss")">
+                                        @RelativeTime(r.LastSyncAt.Value)
+                                    </span>
+                                    @if (r.LastSyncStatus == SyncRunStatus.Failed && r.LastSyncError is not null)
+                                    {
+                                        <div class="muted doctor-error">@r.LastSyncError</div>
+                                    }
+                                }
+                            </td>
+                            <td>@r.OpenPrCount</td>
                         </tr>
                     }
                 </tbody>
@@ -295,7 +360,7 @@ else
 
 @code {
     private PrInboxConfig? _cfg;
-    private DoctorReport? _doctorReport;
+    private EnrichedDoctorReport? _doctorReport;
     private string _ignoredReposText = string.Empty;
     private bool _autoSend = true;
     private bool _yolo;
@@ -350,21 +415,51 @@ else
     }
 
     private bool _firstRunProbeStarted;
+    private bool _doctorAutoRunStarted;
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (!firstRender) return;
-        if (!_isFirstRun || _firstRunProbeStarted) return;
-        _firstRunProbeStarted = true;
-        // Same code path as the user clicking "+ Add GitHub.com" by
-        // hand; it'll flip _ghComDiscovering off and populate
-        // _ghComUnbound. Explicit StateHasChanged at the end is
-        // required because Blazor does NOT auto-render after
-        // OnAfterRenderAsync completes (unlike event handlers).
-        // Without it the state mutates but the UI stays on the
-        // 'Discovering...' spinner forever.
-        await StartAddGitHubComAsync();
-        StateHasChanged();
+
+        // Phase 1: first-run gh identity probe (only when no config yet).
+        if (_isFirstRun && !_firstRunProbeStarted)
+        {
+            _firstRunProbeStarted = true;
+            await StartAddGitHubComAsync();
+            StateHasChanged();
+        }
+
+        // Phase 2: auto-run Doctor when the user has at least one source
+        // configured. Skipped on first run (no sources to check, and we
+        // don't want to compete with the gh probe for CPU). Same
+        // motivation as the gh probe: render placeholder synchronously,
+        // shell out asynchronously, then repaint. _doctorAutoRunStarted
+        // gates against SignalR-reconnect double-fires.
+        if (!_isFirstRun && !_doctorAutoRunStarted && _cfg is not null && _cfg.Sources.Count > 0)
+        {
+            _doctorAutoRunStarted = true;
+            await RunDoctorAsync();
+            StateHasChanged();
+        }
+    }
+
+    /// <summary>
+    /// Render a DateTimeOffset as a short relative string ("3m ago",
+    /// "2h ago", "yesterday", "5d ago"). Anything older than a week
+    /// falls back to absolute date. Used in the Doctor "Last sync"
+    /// column so the user can scan freshness at a glance without
+    /// computing UTC offsets in their head.
+    /// </summary>
+    private static string RelativeTime(DateTimeOffset when)
+    {
+        var delta = DateTimeOffset.UtcNow - when;
+        if (delta < TimeSpan.Zero) return "just now";
+        if (delta.TotalSeconds < 60) return "just now";
+        if (delta.TotalMinutes < 60) return $"{(int)delta.TotalMinutes}m ago";
+        if (delta.TotalHours < 24) return $"{(int)delta.TotalHours}h ago";
+        if (delta.TotalDays < 2) return "yesterday";
+        if (delta.TotalDays < 7) return $"{(int)delta.TotalDays}d ago";
+        return when.ToLocalTime().ToString("yyyy-MM-dd");
     }
 
     private async Task ReloadAsync()
@@ -629,9 +724,9 @@ else
         _busy = true;
         try
         {
-            _doctorReport = await ConfigSvc.RunDoctorAsync();
-            SetMessage(_doctorReport.AllOk ? "Doctor: all sources healthy." : "Doctor: one or more sources failed.",
-                       isError: !_doctorReport.AllOk);
+            _doctorReport = await Doctor.RunAsync();
+            SetMessage(_doctorReport.Base.AllOk ? "Doctor: all sources healthy." : "Doctor: one or more sources failed.",
+                       isError: !_doctorReport.Base.AllOk);
         }
         catch (Exception ex)
         {

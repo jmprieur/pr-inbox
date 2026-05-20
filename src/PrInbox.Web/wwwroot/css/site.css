@@ -1005,5 +1005,57 @@ tr.row-disappeared { opacity: 0.78; }
 
 .doctor-table tr.ok      td { background: rgba(80,160,80,0.04); }
 .doctor-table tr.fail    td { background: rgba(180,80,80,0.06); }
-.status-ok   { color: #6fbf72; }
-.status-fail { color: #e88a8a; }
+.status-ok      { color: #6fbf72; }
+.status-fail    { color: #e88a8a; }
+.status-partial { color: #e8a838; }
+
+/* Doctor-row error detail: small wrapped paragraph under the status
+   or last-sync cell. Lets the user see the failure reason without
+   opening a console. */
+.doctor-error {
+    margin-top: 0.2rem;
+    font-size: 0.75rem;
+    word-break: break-word;
+    max-width: 32ch;
+}
+
+/* Identity chips: small inline pills next to the resolved login in
+   the Doctor table. EMU = blue (matches the Inbox EMU filter chip),
+   public = grey, active = green (this is the gh login that token
+   commands resolve to right now). Visual parity with the Inbox row
+   identity chips keeps the mental model consistent. */
+.identity-chip {
+    display: inline-block;
+    margin-left: 0.35rem;
+    padding: 0.02rem 0.4rem;
+    border-radius: 3px;
+    font-size: 0.7rem;
+    font-weight: 600;
+    line-height: 1.4;
+    vertical-align: middle;
+}
+.identity-chip.emu    { background: rgba(93,164,255,0.16); color: #5da4ff; border: 1px solid rgba(93,164,255,0.3); }
+.identity-chip.public { background: rgba(139,141,147,0.16); color: #b0b2b8; border: 1px solid rgba(139,141,147,0.3); }
+.identity-chip.active { background: rgba(35,134,54,0.2);   color: #6fbf72; border: 1px solid rgba(46,160,67,0.4); }
+
+/* Doctor advisory: structured warning / info banner above the per-source
+   table. Used today for the double-fetch detection; the schema is
+   open to future advisories (token-expiring-soon, rate-limit-close-to-
+   exhausted, etc). Warning uses the established amber palette so it
+   reads as 'attention, do this', matching the first-run banner color
+   contract. */
+.settings-advisory {
+    margin: 0.6rem 0;
+    padding: 0.6rem 0.8rem;
+    border-radius: 3px;
+    border-left: 3px solid var(--accent);
+    background: rgba(93,164,255,0.06);
+    font-size: 0.85rem;
+}
+.settings-advisory.warning {
+    border-left-color: #e8a838;
+    background: rgba(232,168,56,0.08);
+}
+.settings-advisory strong { display: block; margin-bottom: 0.2rem; }
+.settings-advisory p { margin: 0.2rem 0; }
+.settings-advisory-suggestion { color: #b0b2b8; font-style: italic; }

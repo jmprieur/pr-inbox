@@ -74,32 +74,42 @@ Open <http://localhost:7341>.
 
 ### 3. First-run: add sources
 
-On first run you're redirected to **Settings**. The banner says
-"First run." Click:
+On first run you're redirected to **Settings**. An amber banner says
+"First run." and the GitHub.com identity picker is **pre-opened
+automatically**. If you have one or more `gh` logins, you'll see them
+listed within a few seconds:
 
-- **+ Add GitHub.com** — if `gh` is installed and you have one or
-  more logged-in accounts, an inline picker lists each (badged
-  `EMU` or `public`, with the active one marked). Click a login
-  to bind a source to that exact account. Have two GitHub
-  identities (e.g. a personal `jenny` + an enterprise
-  `jenny_microsoft`)? Add each as its own source — they sync
-  independently and the **EMU** / **public** chips filter them
-  apart in the Inbox. A **+ Add with default identity** fallback
-  is always offered for users without `gh`, or who want the
-  source to track whichever `gh` account is currently active.
-- **+ Add GitHub Enterprise…** — enter your GHE host (e.g. `github.contoso.com`).
-- **+ Add Azure DevOps project…** — `org` + `project`, one row per project.
+- **+ Add all N GitHub identities** (green button, shown when ≥2 logins
+  are detected) — the recommended one-click path. Adds every detected
+  identity as its own source so personal + EMU sync independently from
+  the start. You can remove any after the fact in the sources table.
+- Click any individual login (badged `EMU` or `public`, with the
+  currently-active one marked) to bind a source to just that account.
+- **+ Add with default identity** — fallback for users without `gh` or
+  who want a single source that tracks whichever `gh` account is
+  currently active.
 
-Then click **Run Doctor**. Green checks mean you're authenticated; red
-means you need to `gh auth login` / `az login` and re-run. If you have
-multiple `gh` logins, run `gh auth login --hostname github.com` once
-per identity before opening Settings — the picker reads from `gh auth
-status`.
+For GHE and ADO sources, use the **+ Add GitHub Enterprise…** and
+**+ Add Azure DevOps project…** buttons below.
+
+When you arrive on the page with no sources yet (truly fresh clone),
+**Doctor runs automatically** as soon as you add the first source —
+look at the per-source table for `Last sync`, `Open PRs`, and
+`Identity` chips. If you have multiple `gh` logins, run
+`gh auth login --hostname github.com` once per identity before opening
+Settings — the picker reads from `gh auth status`.
+
+> 💡 If you have both a default-identity source **and** an explicit
+> source for your currently-active `gh` login, Doctor flags this as
+> "Double-fetch" in an amber advisory — both sources fetch the same
+> PRs every cycle. Remove the default-identity one.
 
 ### 4. First sync
 
-Go back to **Inbox**. The first background sync runs immediately and
-takes 10–60s depending on how many sources/PRs. The bottom-right
+Switch back to **Inbox**. If you just added sources, the inbox kicks
+an out-of-band sync the moment you arrive (no waiting for the next
+background tick). The first background sync takes 10–60s depending
+on how many sources/PRs. The bottom-right
 status line shows `Last sync: …`. PRs appear as they're discovered.
 
 ### 5. Click Review on something
@@ -455,9 +465,23 @@ is resolved at sync time via `Azure.Identity.AzureCliCredential`.
 
 ### Doctor
 
-Click **Run Doctor** to verify auth across every configured source.
-Reports the identity it sees for each — useful when the inbox seems
-empty (often: `gh` identity doesn't match the PR assignee).
+Auto-runs the first time you open Settings with at least one source
+configured; otherwise click **Run Doctor**. The report has two parts:
+
+1. **Advisories** — pattern-detection across your config. Today the
+   one shipped pattern is **Double-fetch**: amber warning when a
+   default-identity gh.com source coexists with an explicit-identity
+   source bound to the currently-active `gh` login. Both fetch the
+   same PRs; remove the default one.
+2. **Per-source table** — ID, Kind, Identity (with `EMU` / `public` /
+   `active` chips), Auth status (token length / az identity), **Last
+   sync** (relative time), and **Open PRs** count. The runtime columns
+   are the fastest way to spot a source that's silently failing — an
+   "Auth OK" row with `Last sync = never` after the app's been running
+   a few minutes is a sync-loop problem, not an auth problem.
+
+The runtime columns shell out to `gh auth status` and read SQLite for
+last-sync timestamps and open-PR counts; expect ~1-2s on a normal run.
 
 ### Ignored repos (regex list)
 
