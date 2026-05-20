@@ -150,7 +150,15 @@ pr-inbox config doctor   # checks gh + az auth, ADO project access
 
 ## Quick start
 
-### Option A — Web UI only (recommended for new users)
+### Option 0 — Fresh clone, one click (recommended for new users)
+
+Double-click [`Start.bat`](Start.bat) in the repo root. It builds
+`PrInbox.slnx`, starts the Web UI on `http://localhost:7341`, and
+opens your default browser to the Inbox. On first run the browser
+lands on `/settings`; add a source and you're going. Ctrl+C in the
+console window to stop.
+
+### Option A — Web UI, manually
 
 ```powershell
 # 1. Build
