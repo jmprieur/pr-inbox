@@ -244,33 +244,14 @@ EMU) fetch with the correct credentials independently.
 Display id is what humans/commands use. Stable id is the join key the registry
 trusts when repos/projects rename.
 
-### The `review` verb in detail
+### Review handoff
 
-`pr-inbox review <id>` is the verb that earns the tool's existence. It:
-
-1. Does a single-PR fast-path `sync` to refresh that one PR's snapshot.
-2. Computes what's new since `last_briefed_head_sha` (commits, force-push, base
-   change, new threads, new bot comments, newly-resolved threads).
-3. Creates an **immutable** run directory:
-   `%APPDATA%\PrInbox\reviews\<pr_dir>\<UTC-ts>_<head_sha[:12]>\`
-4. Writes `brief.md` containing:
-   - PR identity + URLs + author + title
-   - Head/base SHAs, last-briefed / last-reviewed / last-posted SHAs
-   - Diff summary since last brief (commits, force-push, base change)
-   - Embedded unified diff up to 50KB; beyond that, file list + diff URL
-   - My open threads with status
-   - Recent bot comments (Copilot review, Copilot coding agent) since last brief
-   - Standard dual-model-review invocation block (Opus 4.7 + GPT-5.5, asymmetry
-     instructions, `do NOT post`, `diff_anchorable` flag, 95%+ inline filter)
-   - Staleness clause ("verify PR HEAD is still `<sha>` before posting")
-5. Writes `metadata.json` (machine-readable mirror).
-6. Inserts `review_runs` row; updates `pull_requests.last_briefed_head_sha`.
-7. Prints the brief path and the recommended `copilot` command for you to run.
-
-Re-running `pr-inbox review <id>` **always** creates a new immutable run.
-The Blazor web UI's "Review" button does the same work, then spawns
-`wt.exe` running `agency copilot` against the brief — so the review session
-opens in its own Windows Terminal tab, titled `<repo> #<PR-number>`.
+`pr-inbox review <id>` and the Web UI's **Review** button do the same
+work: refresh that one PR's snapshot, compute what's new since the
+last brief, write an **immutable** run directory containing `brief.md`
++ `metadata.json`, then hand it to a Copilot session. Re-reviewing
+appends a new run dir — nothing is ever overwritten. Step-by-step
+walkthrough lives in [USER_GUIDE.md § What "Review" actually does](USER_GUIDE.md#what-review-actually-does).
 
 ---
 

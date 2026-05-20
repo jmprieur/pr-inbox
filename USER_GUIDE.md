@@ -5,7 +5,7 @@
 > and architecture. If you're new, start with [§ First ten minutes](#first-ten-minutes).
 
 [![.NET 10](https://img.shields.io/badge/.NET-10.0-512BD4)](https://dotnet.microsoft.com/)
-[![Tests: 360](https://img.shields.io/badge/tests-360_passing-brightgreen)](#)
+[![Tests: 425](https://img.shields.io/badge/tests-425_passing-brightgreen)](#)
 
 ---
 
@@ -21,6 +21,11 @@
 - [Settings tour](#settings-tour)
 - [The CLI, briefly](#the-cli-briefly)
 - [Under the hood](#under-the-hood)
+  - [Storage](#storage)
+  - [Tokens](#tokens)
+  - [What sync actually does](#what-sync-actually-does)
+  - [What "Review" actually does](#what-review-actually-does)
+  - [Reviews directory layout](#reviews-directory-layout)
 - [Troubleshooting](#troubleshooting)
 - [Glossary](#glossary)
 
@@ -525,6 +530,7 @@ about your PRs, you can poke at the local DB directly.
 | Table | Holds |
 |---|---|
 | `pull_requests` | Current row per PR (latest snapshot summary + cached counts) |
+| `pr_source_bindings` | `(stable_id, source_id, identity)` — which sources observed each PR; lets two same-host identities track the same PR independently |
 | `pr_snapshots` | Append-only per-sync snapshot of each PR's state |
 | `observed_threads` | Append-only per-comment row — replies share `platform_thread_node_id` |
 | `review_runs` | One row per Review click; immutable |
@@ -541,12 +547,16 @@ Never stored. Per source:
 
 | Source | How a token shows up |
 |---|---|
-| GitHub.com | `gh auth token --hostname github.com` (subprocess) |
-| GitHub Enterprise | `gh auth token --hostname <ghe-host>` |
+| GitHub.com (default identity) | `gh auth token --hostname github.com` (subprocess) |
+| GitHub.com (explicit identity) | `gh auth token --hostname github.com --user <login>` |
+| GitHub Enterprise | `gh auth token --hostname <ghe-host>` (with `--user <login>` for explicit identity) |
 | Azure DevOps | `Azure.Identity.AzureCliCredential` (resource `499b84ac-1321-427f-aa17-267ca6975798`) |
 
 So: log in / refresh those CLIs and `pr-inbox` follows along
-automatically.
+automatically. When a source is bound to an explicit identity, the
+token provider pins `gh` to that login — so two same-host sources
+(e.g. personal + EMU) fetch with the correct credentials
+independently.
 
 ### What sync actually does
 
@@ -564,6 +574,40 @@ Inbox sync (background)
 ```
 
 You can re-trigger immediately with **Refresh now** on the inbox.
+
+### What "Review" actually does
+
+Whether you click **Review** in the Web UI or run `pr-inbox review <id>`
+from the CLI, the same seven steps run:
+
+1. Single-PR fast-path `sync` — refreshes that one PR's snapshot before
+   anything else, so the brief reflects the current upstream state.
+2. Computes what's new since `last_briefed_head_sha` — commits,
+   force-push, base change, new threads, new bot comments,
+   newly-resolved threads.
+3. Creates an **immutable** run directory under
+   `%APPDATA%\PrInbox\reviews\<pr_dir>\<UTC-ts>_<head_sha[:12]>\`.
+4. Writes `brief.md` containing:
+   - PR identity + URLs + author + title
+   - Head/base SHAs, last-briefed / last-reviewed / last-posted SHAs
+   - Diff summary since last brief (commits, force-push, base change)
+   - Embedded unified diff up to 50 KB; beyond that, file list + diff URL
+   - Your open threads with status
+   - Recent bot comments (Copilot review, Copilot coding agent) since
+     the last brief
+   - Standard `dual-model-review` invocation block (Opus 4.7 + GPT-5.5,
+     asymmetry instructions, `do NOT post`, `diff_anchorable` flag,
+     95%+ inline filter)
+   - Staleness clause ("verify PR HEAD is still `<sha>` before posting")
+5. Writes `metadata.json` (machine-readable mirror of the brief).
+6. Inserts a `review_runs` row and updates
+   `pull_requests.last_briefed_head_sha`.
+7. Prints the brief path and the recommended `copilot` command (CLI) or
+   spawns `wt.exe` running `agency copilot` against the brief (Web UI),
+   in a tab titled `<repo> #<PR-number>`.
+
+Re-running on the same PR **always** creates a new immutable run —
+nothing is overwritten. The previous run dir stays exactly as it was.
 
 ### Reviews directory layout
 
