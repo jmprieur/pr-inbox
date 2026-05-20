@@ -177,6 +177,26 @@ public sealed record InboxFilters(
         _                                  => "src-other",
     };
 
+    /// <summary>
+    /// Human-readable badge text for the chip class returned by
+    /// <see cref="ClassifyConfig"/> / <see cref="SourceClassOf"/>. Kept
+    /// in lock-step with the classifier so the visible label can never
+    /// disagree with the chip filter (the bug Jean-Marc hit on the new
+    /// install: <c>gh.com:jmprieur_microsoft</c> was correctly filtered
+    /// by the EMU chip but visually badged "public" because the legacy
+    /// id-string label resolver only knew about <c>gh.com:emu</c>).
+    /// <paramref name="fallback"/> is the source id, used verbatim when
+    /// the class is unknown.
+    /// </summary>
+    public static string LabelForClass(string chipClass, string fallback) => chipClass switch
+    {
+        "src-emu"    => "EMU",
+        "src-public" => "public",
+        "src-ghe"    => "proxima",
+        "src-ado"    => "ado",
+        _ => fallback,
+    };
+
     private static bool IsEmuIdentity(string? identity)
     {
         if (string.IsNullOrWhiteSpace(identity)) return false;

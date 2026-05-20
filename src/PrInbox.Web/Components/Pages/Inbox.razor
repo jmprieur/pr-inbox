@@ -1093,7 +1093,27 @@ else
         }
     }
 
-    private static string SourceLabel(InboxRow row) => row.SourceId switch
+    // Derive the visible badge text the same way SourceClass derives the
+    // chip class: prefer the configured SourceConfig (host + identity)
+    // when we can find one for the row's id; fall back to id-string
+    // parsing for rows whose source has been removed from config.
+    // Keeping these two helpers in lock-step prevents the chip-vs-label
+    // mismatch that Jean-Marc hit on the new install where an explicit
+    // EMU identity source (e.g. gh.com:jmprieur_microsoft) was correctly
+    // filtered by the EMU chip but visually labelled "public".
+    private string SourceLabel(InboxRow row)
+    {
+        foreach (var sc in Config.Sources)
+        {
+            if (string.Equals(sc.Id, row.SourceId, StringComparison.OrdinalIgnoreCase))
+            {
+                return InboxFilters.LabelForClass(InboxFilters.ClassifyConfig(sc), sc.Id);
+            }
+        }
+        return SourceLabelFromId(row.SourceId);
+    }
+
+    private static string SourceLabelFromId(string sourceId) => sourceId switch
     {
         "gh.com:emu"    => "EMU",
         "gh.com"        => "public",
@@ -1101,7 +1121,7 @@ else
         var id when id.StartsWith("gh.com:", StringComparison.Ordinal)  => "public",
         var id when id.StartsWith("ghe.", StringComparison.Ordinal)  => "proxima",
         var id when id.StartsWith("ado:", StringComparison.Ordinal)  => "ado",
-        _ => row.SourceId,
+        _ => sourceId,
     };
 
     // The chip class is derived from the configured SourceConfig when

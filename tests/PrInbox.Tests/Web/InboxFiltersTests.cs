@@ -341,6 +341,54 @@ public class InboxFiltersTests
         filters.ShouldShow(MakePr(sourceId: "ado:foo")).Should().BeTrue();
     }
 
+    // ---------- LabelForClass (badge text — must agree with the chip class) ----------
+
+    [Theory]
+    [InlineData("src-emu",    "EMU")]
+    [InlineData("src-public", "public")]
+    [InlineData("src-ghe",    "proxima")]
+    [InlineData("src-ado",    "ado")]
+    public void LabelForClass_maps_known_classes_to_visible_text(string chipClass, string expected)
+        => InboxFilters.LabelForClass(chipClass, fallback: "unused").Should().Be(expected);
+
+    [Fact]
+    public void LabelForClass_unknown_class_returns_fallback()
+        => InboxFilters.LabelForClass("src-other", fallback: "weird.host").Should().Be("weird.host");
+
+    [Fact]
+    public void Emu_identity_source_with_arbitrary_id_labels_as_EMU_not_public()
+    {
+        // The bug Jean-Marc hit on the new install: gh.com:jmprieur_microsoft
+        // is classified as src-emu (correct, chip filter works) but the
+        // legacy id-string label parser saw "starts with gh.com:" and
+        // returned "public". Now the label is derived from the chip
+        // class, so they're guaranteed to agree.
+        var sc = new SourceConfig
+        {
+            Id = "gh.com:jmprieur_microsoft",
+            Kind = SourceConfigKind.GitHub,
+            Host = "github.com",
+            Identity = "jmprieur_microsoft",
+        };
+        var chipClass = InboxFilters.ClassifyConfig(sc);
+        chipClass.Should().Be("src-emu");
+        InboxFilters.LabelForClass(chipClass, sc.Id).Should().Be("EMU");
+    }
+
+    [Fact]
+    public void Personal_identity_source_labels_as_public_not_id()
+    {
+        var sc = new SourceConfig
+        {
+            Id = "gh.com:jmprieur",
+            Kind = SourceConfigKind.GitHub,
+            Host = "github.com",
+            Identity = "jmprieur",
+        };
+        InboxFilters.LabelForClass(InboxFilters.ClassifyConfig(sc), sc.Id)
+            .Should().Be("public");
+    }
+
     // ---------- Per-repo denylist ----------
 
     [Fact]
