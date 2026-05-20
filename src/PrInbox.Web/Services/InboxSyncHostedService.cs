@@ -19,6 +19,7 @@ public sealed class InboxSyncHostedService : BackgroundService
     private readonly ILogger<InboxSyncHostedService> _log;
     private readonly SemaphoreSlim _syncGate = new(1, 1);
     private volatile bool _syncing;
+    private int _configChangedFlag;
 
     public InboxSyncHostedService(InboxState state, IConfiguration config, ILogger<InboxSyncHostedService> log)
     {
@@ -29,6 +30,23 @@ public sealed class InboxSyncHostedService : BackgroundService
 
     /// <summary>True while a fast+enrich pass is running (either automatic or manual).</summary>
     public bool IsSyncing => _syncing;
+
+    /// <summary>
+    /// Marks that configuration changed (e.g. a source was added/removed
+    /// via the Settings page). Consumed by <see cref="ConsumeConfigChanged"/>
+    /// on the next Inbox arrival so the inbox can kick an out-of-band
+    /// sync rather than waiting up to one full interval for the
+    /// background loop. Atomic; safe to call from any thread.
+    /// </summary>
+    public void NoteConfigChanged() => Interlocked.Exchange(ref _configChangedFlag, 1);
+
+    /// <summary>
+    /// Returns and clears the config-changed flag in a single atomic
+    /// operation. Returns <c>true</c> exactly once per
+    /// <see cref="NoteConfigChanged"/> call, regardless of how many
+    /// readers call it.
+    /// </summary>
+    public bool ConsumeConfigChanged() => Interlocked.Exchange(ref _configChangedFlag, 0) == 1;
 
     /// <summary>
     /// Run an out-of-band sync immediately. Serialized with the

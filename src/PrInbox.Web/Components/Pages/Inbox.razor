@@ -557,6 +557,22 @@ else
         SnapshotAll();
     }
 
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        // If the user just changed config on /settings (added/removed a
+        // source), trigger an out-of-band fast+enrich pass so the inbox
+        // reflects the new world without waiting up to one full
+        // background interval. Fire-and-forget so the first render isn't
+        // blocked; the existing Changed events will repaint when rows
+        // land. ConsumeConfigChanged is single-shot per NoteConfigChanged.
+        if (Sync.ConsumeConfigChanged())
+        {
+            _ = Sync.TriggerNowAsync(CancellationToken.None);
+        }
+        await Task.CompletedTask;
+    }
+
     private async Task LoadPrefsAsync()
     {
         try

@@ -4,6 +4,7 @@
 @using PrInbox.Core.Credentials
 @inject IConfigService ConfigSvc
 @inject IGitHubAuthDiscovery GhAuthDiscovery
+@inject InboxSyncHostedService Sync
 @inject ILogger<Settings> Log
 
 <h1>Settings</h1>
@@ -90,6 +91,17 @@ else
                         Pick a GitHub login to bind to a new <code>github.com</code> source.
                         Each identity here will sync independently — useful when you have separate personal and enterprise accounts (e.g. <code>jmprieur</code> + <code>jmprieur_microsoft</code>).
                     </p>
+                    @if (_isFirstRun && _ghComUnbound.Count > 1)
+                    {
+                        <div class="settings-inline-form-actions">
+                            <button class="settings-identity-button settings-identity-add-all"
+                                    @onclick="AddAllGitHubIdentitiesAsync"
+                                    disabled="@_busy">
+                                <strong>+ Add all @_ghComUnbound.Count GitHub identities</strong>
+                                <span class="muted">recommended — you can remove any later</span>
+                            </button>
+                        </div>
+                    }
                     <div class="settings-identity-list">
                         @foreach (var identity in _ghComUnbound)
                         {
@@ -320,6 +332,17 @@ else
     {
         _isFirstRun = !ConfigSvc.ConfigFileExists();
         await ReloadAsync();
+
+        // First-run cooperation: pre-open the github.com identity picker
+        // so the user sees the list of logged-in gh accounts immediately,
+        // with one click per identity (or "Add all"). Synchronous probe —
+        // gh auth status has an 8s timeout and swallows all failures, so
+        // worst case we delay first paint by 8s. If that turns out to be
+        // a bad UX we can move it behind OnAfterRenderAsync.
+        if (_isFirstRun)
+        {
+            await StartAddGitHubComAsync();
+        }
     }
 
     private async Task ReloadAsync()
@@ -393,6 +416,34 @@ else
                     : $"A source for {identity.Login} already exists.",
                 isError: !added);
             if (added) CancelGhComPicker();
+        });
+    }
+
+    private async Task AddAllGitHubIdentitiesAsync()
+    {
+        // Bulk add path for the first-run cooperative case. Snapshots
+        // the unbound list before any mutation so reload-driven changes
+        // mid-loop don't skip an entry. Counts both successful adds and
+        // pre-existing collisions so the banner is accurate even if the
+        // user clicked "Add all" twice.
+        var snapshot = _ghComUnbound.ToList();
+        await WrapAsync(async () =>
+        {
+            var added = 0;
+            var skipped = 0;
+            foreach (var identity in snapshot)
+            {
+                var ok = await ConfigSvc.AddGitHubSourceWithIdentityAsync(
+                    SourceConfigKind.GitHub, "github.com", identity.Login);
+                if (ok) added++;
+                else skipped++;
+            }
+            var msg = added == 1
+                ? "Added 1 github.com source."
+                : $"Added {added} github.com sources.";
+            if (skipped > 0) msg += $" ({skipped} already existed.)";
+            SetMessage(msg, isError: added == 0);
+            if (added > 0) CancelGhComPicker();
         });
     }
 
@@ -581,6 +632,10 @@ else
             await action();
             await ReloadAsync();
             _isFirstRun = false;
+            // Source/config mutated — let the Inbox kick an out-of-band
+            // sync on next arrival instead of waiting up to one full
+            // background interval. Single-shot; consumed by Inbox.razor.
+            Sync.NoteConfigChanged();
         }
         catch (Exception ex)
         {
