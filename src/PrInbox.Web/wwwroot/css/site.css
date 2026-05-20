@@ -801,7 +801,17 @@ tr.row-disappeared { opacity: 0.78; }
     margin: 0.5rem 0 0.75rem 0;
     border: 1px solid var(--line);
 }
-.settings-banner.first-run { border-color: var(--accent); }
+.settings-banner.first-run {
+    /* First-run banner uses the same yellow/amber palette as the
+       sources-warning chip — it's the "you haven't done the thing
+       yet" tone, parallel to a Doctor warning. Saturated enough to
+       catch the eye on the dark Settings card without screaming
+       "error." */
+    background: rgba(232, 168, 56, 0.12);
+    border-color: #e8a838;
+    color: #f5d27f;
+}
+.settings-banner.first-run strong { color: #ffe19a; }
 .settings-banner.ok        { border-color: #2f6f3f; color: #b6e2b6; }
 .settings-banner.error     { border-color: #6f2f2f; color: #e6b6b6; }
 
