@@ -358,9 +358,13 @@ else
         _firstRunProbeStarted = true;
         // Same code path as the user clicking "+ Add GitHub.com" by
         // hand; it'll flip _ghComDiscovering off and populate
-        // _ghComUnbound, then StateHasChanged repaints with the
-        // identity list.
+        // _ghComUnbound. Explicit StateHasChanged at the end is
+        // required because Blazor does NOT auto-render after
+        // OnAfterRenderAsync completes (unlike event handlers).
+        // Without it the state mutates but the UI stays on the
+        // 'Discovering...' spinner forever.
         await StartAddGitHubComAsync();
+        StateHasChanged();
     }
 
     private async Task ReloadAsync()
