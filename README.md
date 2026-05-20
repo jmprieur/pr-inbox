@@ -6,7 +6,7 @@
 [![Status: v0.2](https://img.shields.io/badge/status-v0.2-brightgreen)](#status)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 [![.NET 10](https://img.shields.io/badge/.NET-10.0-512BD4)](https://dotnet.microsoft.com/)
-[![Tests: 360](https://img.shields.io/badge/tests-360_passing-brightgreen)](#development)
+[![Tests: 425](https://img.shields.io/badge/tests-425_passing-brightgreen)](#development)
 
 `pr-inbox` is the harness for review-at-scale. It does not review code itself —
 it tells you which PRs need attention, what changed since the last time you
@@ -196,11 +196,13 @@ before launching the web UI to change what the Review tab spins up:
 │ %APPDATA%\PrInbox\pr-inbox.db           │
 │                                         │
 │ • pull_requests (current row)           │
+│ • pr_source_bindings (per-identity)     │
 │ • pr_snapshots (append-only)            │
 │ • observed_threads (append-only)        │
 │ • review_runs (immutable)               │
 │ • posted_reviews (v0.2+)                │
 │ • sync_runs (per-attempt status)        │
+│ • ui_preferences (Inbox toggles)        │
 └─────────────────────────────────────────┘
                           │
                           ▼
@@ -220,12 +222,16 @@ authorities you already use:
 
 | Source | Token path |
 |---|---|
-| GitHub.com | `gh auth token --hostname github.com` |
-| GitHub Enterprise | `gh auth token --hostname <ghe-host>` |
+| GitHub.com (default identity) | `gh auth token --hostname github.com` |
+| GitHub.com (explicit identity) | `gh auth token --hostname github.com --user <login>` |
+| GitHub Enterprise | `gh auth token --hostname <ghe-host>` (with `--user <login>` for explicit identity) |
 | Azure DevOps | `Azure.Identity.AzureCliCredential` (uses `az` under the hood; resource `499b84ac-1321-427f-aa17-267ca6975798`) |
 
 Why: no PATs to manage, no secret storage to harden, no leakage risk. Tokens
-are minted on demand and never written to disk by this tool.
+are minted on demand and never written to disk by this tool. When a `gh.com`
+source is bound to an explicit identity, the token provider pins
+`gh auth token` to that login so two same-host sources (e.g. personal +
+EMU) fetch with the correct credentials independently.
 
 ### Per-PR identity
 
