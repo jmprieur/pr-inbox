@@ -918,6 +918,26 @@ tr.row-disappeared { opacity: 0.78; }
 .settings-identity-button:hover:not(:disabled) { border-color: var(--accent); }
 .settings-identity-button:disabled { opacity: 0.5; cursor: not-allowed; }
 .settings-identity-button strong { font-weight: 600; }
+
+/* First-run "Add all N identities" CTA. Inherits layout from
+   .settings-identity-button (so it sits visually adjacent to the
+   per-identity list below it) but swaps the palette to a saturated
+   GitHub-style primary-action green. This is the recommended path
+   on first run — a stronger color than the muted per-identity
+   buttons signals "click me first" without needing an arrow or
+   prose. The nested .muted child gets explicit alpha-white so it
+   stays legible on the green background. */
+.settings-identity-add-all {
+    background: #238636;
+    color: #ffffff;
+    border-color: #2ea043;
+}
+.settings-identity-add-all:hover:not(:disabled) {
+    background: #2ea043;
+    border-color: #3fb950;
+}
+.settings-identity-add-all strong { color: #ffffff; }
+.settings-identity-add-all .muted { color: rgba(255, 255, 255, 0.78); }
 .settings-warning {
     margin-top: 0.5rem;
     padding: 0.4rem 0.6rem;
