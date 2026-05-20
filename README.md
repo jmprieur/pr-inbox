@@ -37,38 +37,88 @@ The pain is:
 
 ## Status
 
-**v0.2 — working.** Daily-driver against ~60 real PRs across GitHub.com,
-GitHub Enterprise, and Azure DevOps.
+**v0.2 — working.** Daily-driver against ~60 real PRs/day across GitHub.com,
+GitHub Enterprise, and Azure DevOps. Multi-identity GitHub.com (e.g. a
+personal + an EMU account) is supported via the Web UI Settings picker.
+The surface-by-surface walkthrough — CLI verbs, Web UI pages, publisher —
+lives in [USER_GUIDE.md](USER_GUIDE.md).
 
-### CLI
+**Out of scope** (deferred): `followup` verb, convergence/asymmetry
+telemetry dashboards (data is captured, queries land in v0.3).
 
-| Verb | Purpose | Status |
+---
+
+## How it works
+
+```
+┌────────────────────┐
+│ Source adapters    │
+│  • GitHub (.com)   │
+│  • GitHub (GHE)    │  ──┐
+│  • Azure DevOps    │    │  IPrReadSource
+└────────────────────┘    │
+                          ▼
+┌─────────────────────────────────────────┐
+│ SQLite registry                         │
+│ %APPDATA%\PrInbox\pr-inbox.db           │
+│                                         │
+│ • pull_requests (current row)           │
+│ • pr_source_bindings (per-identity)     │
+│ • pr_snapshots (append-only)            │
+│ • observed_threads (append-only)        │
+│ • review_runs (immutable)               │
+│ • posted_reviews (v0.2+)                │
+│ • sync_runs (per-attempt status)        │
+│ • ui_preferences (Inbox toggles)        │
+└─────────────────────────────────────────┘
+                          │
+                          ▼
+┌─────────────────────────────────────────┐
+│ Verbs                                   │
+│  sync ─── refresh registry              │
+│  list ─── triage table                  │
+│  review ─ immutable run dir + brief.md  │
+│  config ─ identities / projects / doctor│
+└─────────────────────────────────────────┘
+```
+
+### Credentials — delegate, never store
+
+`pr-inbox` does **not** store tokens, ever. It delegates to the credential
+authorities you already use:
+
+| Source | Token path |
+|---|---|
+| GitHub.com (default identity) | `gh auth token --hostname github.com` |
+| GitHub.com (explicit identity) | `gh auth token --hostname github.com --user <login>` |
+| GitHub Enterprise | `gh auth token --hostname <ghe-host>` (with `--user <login>` for explicit identity) |
+| Azure DevOps | `Azure.Identity.AzureCliCredential` (uses `az` under the hood; resource `499b84ac-1321-427f-aa17-267ca6975798`) |
+
+Why: no PATs to manage, no secret storage to harden, no leakage risk. Tokens
+are minted on demand and never written to disk by this tool. When a `gh.com`
+source is bound to an explicit identity, the token provider pins
+`gh auth token` to that login so two same-host sources (e.g. personal +
+EMU) fetch with the correct credentials independently.
+
+### Per-PR identity
+
+| Platform | Display identity | Stable identity (durable key) |
 |---|---|---|
-| `pr-inbox config` | Manage sources, identities, ADO projects | ✅ Done |
-| `pr-inbox sync` | Pull PRs assigned to me across enabled sources; snapshot platform state | ✅ Done |
-| `pr-inbox list` | Triage table: age, churn, bot comments, open threads, tracking reason | ✅ Done |
-| `pr-inbox review <id>` | Generate immutable brief.md + spawn `copilot` review session | ✅ Done |
+| GitHub.com | `gh.com:owner/repo#N` | `gh.com:<repo_id>#<pr_id>` |
+| GitHub Enterprise | `ghe.<host>:owner/repo#N` | `ghe.<host>:<repo_id>#<pr_id>` |
+| Azure DevOps | `ado:<org>/<project>/<repo>#N` | `ado:<org>/<projectGuid>/<repoGuid>#N` |
 
-### Web UI (`pr-inbox-web`, Blazor Server)
+Display id is what humans/commands use. Stable id is the join key the registry
+trusts when repos/projects rename.
 
-| Surface | Purpose | Status |
-|---|---|---|
-| Inbox page | Live PR list across sources, source-class chips, per-repo + per-author denylists with count-hint pills (`Repos • 23 / 3 hidden`), search-aware **Hide visible** button, switchable **PRs** / **Recent** sort, per-PR Ignore button, `no longer assigned` chip for disappeared PRs, Show closed / ignored toggles | ✅ Done |
-| Inbox cues | Drift chips (`+N` / `⚠ force-push`), `✓ clean` pill, convergence badge (⇆ converged / ⚠ asymmetric), `✓ N ready` pill when threads have likely-done replies | ✅ Done |
-| Settings page | Add/remove sources & ADO projects, run Doctor, manage ignored-repo regexes, persisted Review-launcher toggles (AutoSend, Yolo); first-run redirects here | ✅ Done |
-| Review page | One-click "Review" launches a Windows Terminal tab running `agency copilot` with the brief pre-loaded; tab title = `<repo> #<N>`; inline convergence callout + HEAD-drift chip; per-finding edit + publish toggle | ✅ Done |
-| Threads page | Per-PR open-thread list with per-row + bulk resolve (dry-run by default); `✓ done` badge on threads whose latest reply matches the done/fixed heuristic; `✓ Done replies (N)` one-click bulk resolve | ✅ Done |
-| Background sync | Fast pass (every 30s) + enrich pass + Option-C dual sweep (disappeared-diff + TTL re-enrich) so merged/closed PRs drop out of the inbox automatically | ✅ Done |
-| UI preferences | Source chips, repo denylist, author denylist, closed/ignored toggles, AutoSend/Yolo all persist in SQLite (`ui_preferences` table) | ✅ Done |
+### Review handoff
 
-### Publisher
-
-| Capability | Purpose | Status |
-|---|---|---|
-| `findings.yaml` watcher | Parses curated findings written by the review session; posts to GitHub / GHE / ADO via per-platform publishers | ✅ Done (dry-run default; per-finding idempotency) |
-
-**Out of scope** (deferred): `followup` verb,
-convergence/asymmetry telemetry dashboards (data is captured, queries land in v0.3).
+`pr-inbox review <id>` and the Web UI's **Review** button do the same
+work: refresh that one PR's snapshot, compute what's new since the
+last brief, write an **immutable** run directory containing `brief.md`
++ `metadata.json`, then hand it to a Copilot session. Re-reviewing
+appends a new run dir — nothing is ever overwritten. Step-by-step
+walkthrough lives in [USER_GUIDE.md § What "Review" actually does](USER_GUIDE.md#what-review-actually-does).
 
 ---
 
@@ -178,80 +228,6 @@ before launching the web UI to change what the Review tab spins up:
 | Review tab opens but plugin fetch fails | No access to `1ES-microsoft/ai-plugins` | Point `PRINBOX_REVIEW_PLUGIN` at a local clone or a plugin you can reach |
 | Review tab opens but model call fails | `agency` not authenticated to the chosen model | Authenticate `agency` to your providers, or change `PRINBOX_REVIEW_MODEL` |
 | Web UI says port already in use | Another instance running, or stale Kestrel | `Get-NetTCPConnection -LocalPort 7341 \| Stop-Process -Force` |
-
----
-
-## How it works
-
-```
-┌────────────────────┐
-│ Source adapters    │
-│  • GitHub (.com)   │
-│  • GitHub (GHE)    │  ──┐
-│  • Azure DevOps    │    │  IPrReadSource
-└────────────────────┘    │
-                          ▼
-┌─────────────────────────────────────────┐
-│ SQLite registry                         │
-│ %APPDATA%\PrInbox\pr-inbox.db           │
-│                                         │
-│ • pull_requests (current row)           │
-│ • pr_source_bindings (per-identity)     │
-│ • pr_snapshots (append-only)            │
-│ • observed_threads (append-only)        │
-│ • review_runs (immutable)               │
-│ • posted_reviews (v0.2+)                │
-│ • sync_runs (per-attempt status)        │
-│ • ui_preferences (Inbox toggles)        │
-└─────────────────────────────────────────┘
-                          │
-                          ▼
-┌─────────────────────────────────────────┐
-│ Verbs                                   │
-│  sync ─── refresh registry              │
-│  list ─── triage table                  │
-│  review ─ immutable run dir + brief.md  │
-│  config ─ identities / projects / doctor│
-└─────────────────────────────────────────┘
-```
-
-### Credentials — delegate, never store
-
-`pr-inbox` does **not** store tokens, ever. It delegates to the credential
-authorities you already use:
-
-| Source | Token path |
-|---|---|
-| GitHub.com (default identity) | `gh auth token --hostname github.com` |
-| GitHub.com (explicit identity) | `gh auth token --hostname github.com --user <login>` |
-| GitHub Enterprise | `gh auth token --hostname <ghe-host>` (with `--user <login>` for explicit identity) |
-| Azure DevOps | `Azure.Identity.AzureCliCredential` (uses `az` under the hood; resource `499b84ac-1321-427f-aa17-267ca6975798`) |
-
-Why: no PATs to manage, no secret storage to harden, no leakage risk. Tokens
-are minted on demand and never written to disk by this tool. When a `gh.com`
-source is bound to an explicit identity, the token provider pins
-`gh auth token` to that login so two same-host sources (e.g. personal +
-EMU) fetch with the correct credentials independently.
-
-### Per-PR identity
-
-| Platform | Display identity | Stable identity (durable key) |
-|---|---|---|
-| GitHub.com | `gh.com:owner/repo#N` | `gh.com:<repo_id>#<pr_id>` |
-| GitHub Enterprise | `ghe.<host>:owner/repo#N` | `ghe.<host>:<repo_id>#<pr_id>` |
-| Azure DevOps | `ado:<org>/<project>/<repo>#N` | `ado:<org>/<projectGuid>/<repoGuid>#N` |
-
-Display id is what humans/commands use. Stable id is the join key the registry
-trusts when repos/projects rename.
-
-### Review handoff
-
-`pr-inbox review <id>` and the Web UI's **Review** button do the same
-work: refresh that one PR's snapshot, compute what's new since the
-last brief, write an **immutable** run directory containing `brief.md`
-+ `metadata.json`, then hand it to a Copilot session. Re-reviewing
-appends a new run dir — nothing is ever overwritten. Step-by-step
-walkthrough lives in [USER_GUIDE.md § What "Review" actually does](USER_GUIDE.md#what-review-actually-does).
 
 ---
 
