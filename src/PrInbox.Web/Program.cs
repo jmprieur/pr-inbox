@@ -52,6 +52,14 @@ builder.Services.AddSingleton(sp => new PrSnapshotRepository(sp.GetRequiredServi
 builder.Services.AddSingleton<IConfigService>(sp =>
     new ConfigService(sp.GetRequiredService<PrInboxConfig>()));
 
+// gh-CLI based identity discovery for the Settings UX. Used when the
+// user clicks "+ Add GitHub.com" so we can offer a picker of available
+// logins instead of hard-coding "default". Failures (gh missing, no
+// logins) collapse to an empty list, which the UI handles by falling
+// back to the legacy default-identity add.
+builder.Services.AddSingleton<IGhCliRunner, GhCliRunner>();
+builder.Services.AddSingleton<IGitHubAuthDiscovery, GhCliGitHubAuthDiscovery>();
+
 builder.Services.AddHttpClient("publisher", c => c.Timeout = TimeSpan.FromSeconds(30));
 builder.Services.AddSingleton<IPublisherSelector>(sp =>
 {

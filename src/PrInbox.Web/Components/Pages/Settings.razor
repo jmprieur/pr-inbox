@@ -3,6 +3,7 @@
 @using PrInbox.Core.Config
 @using PrInbox.Core.Credentials
 @inject IConfigService ConfigSvc
+@inject IGitHubAuthDiscovery GhAuthDiscovery
 @inject ILogger<Settings> Log
 
 <h1>Settings</h1>
@@ -59,9 +60,67 @@ else
         }
 
         <div class="settings-actions">
-            <button @onclick="AddGitHubComAsync" disabled="@_busy">+ Add GitHub.com</button>
+            <button @onclick="StartAddGitHubComAsync" disabled="@_busy">+ Add GitHub.com</button>
             <button @onclick="@(() => _showGheForm = !_showGheForm)" disabled="@_busy">+ Add GitHub Enterprise…</button>
         </div>
+
+        @if (_ghComDiscovering)
+        {
+            <div class="settings-inline-form">
+                <p class="muted">Discovering GitHub logins via <code>gh auth status</code>…</p>
+            </div>
+        }
+        else if (_ghComPicker)
+        {
+            <div class="settings-inline-form">
+                @if (_ghComUnbound.Count == 0)
+                {
+                    <p class="muted">
+                        No GitHub logins detected via <code>gh</code>
+                        @if (_ghComAlreadyBound.Count > 0)
+                        {
+                            <text>(<strong>@_ghComAlreadyBound.Count</strong> already bound below)</text>
+                        }
+                        . You can still add <code>github.com</code> with the default identity — it will use whichever <code>gh</code> account is active when the next sync runs, or fail at sync time if <code>gh</code> isn't installed.
+                    </p>
+                }
+                else
+                {
+                    <p class="muted">
+                        Pick a GitHub login to bind to a new <code>github.com</code> source.
+                        Each identity here will sync independently — useful when you have separate personal and enterprise accounts (e.g. <code>jmprieur</code> + <code>jmprieur_microsoft</code>).
+                    </p>
+                    <div class="settings-identity-list">
+                        @foreach (var identity in _ghComUnbound)
+                        {
+                            var localId = identity;
+                            <button class="settings-identity-button"
+                                    @onclick="@(() => AddGitHubComWithIdentityAsync(localId))"
+                                    disabled="@_busy">
+                                <strong>@localId.Login</strong>
+                                <span class="muted">
+                                    @if (localId.IsActive) { <text>active · </text> }
+                                    @(localId.IsEmu ? "EMU" : "public")
+                                </span>
+                            </button>
+                        }
+                    </div>
+                }
+                <div class="settings-inline-form-actions">
+                    <button @onclick="AddGitHubComDefaultAsync" disabled="@_busy">
+                        + Add with default identity
+                    </button>
+                    <button class="link-button" @onclick="CancelGhComPicker">Cancel</button>
+                </div>
+                @if (_ghComUnbound.Any(i => i.IsActive) && _cfg.Sources.Any(s => IsGitHubComDefaultSource(s)))
+                {
+                    <p class="settings-warning muted">
+                        Heads up: you already have a <code>github.com</code> source bound to the default identity, and the <strong>active</strong>
+                        <code>gh</code> account is shown above. If you add it explicitly here, both sources will fetch the same PRs from the same account. Consider removing the default-identity source after this.
+                    </p>
+                }
+            </div>
+        }
 
         @if (_showGheForm)
         {
@@ -243,6 +302,20 @@ else
     private string? _lastMessage;
     private bool _lastWasError;
 
+    // GitHub.com add-flow state.
+    // _ghComPicker: show the inline identity picker (true between
+    // discovery completing and the user committing / cancelling).
+    // _ghComDiscovering: spinner state while gh auth status runs.
+    // _ghComUnbound: identities surfaced by discovery that aren't
+    // already bound by any existing source. Empty list with the picker
+    // open = the "no identities" branch.
+    // _ghComAlreadyBound: identities found by discovery that ARE
+    // already bound — shown as an informational hint only.
+    private bool _ghComPicker;
+    private bool _ghComDiscovering;
+    private IReadOnlyList<GitHubAuthIdentity> _ghComUnbound = Array.Empty<GitHubAuthIdentity>();
+    private IReadOnlyList<GitHubAuthIdentity> _ghComAlreadyBound = Array.Empty<GitHubAuthIdentity>();
+
     protected override async Task OnInitializedAsync()
     {
         _isFirstRun = !ConfigSvc.ConfigFileExists();
@@ -265,14 +338,93 @@ else
         _ => kind.ToString(),
     };
 
-    private async Task AddGitHubComAsync()
+    private async Task StartAddGitHubComAsync()
+    {
+        // Reset picker state and kick off lazy discovery. The picker
+        // section is rendered based on _ghComDiscovering / _ghComPicker
+        // so the UI flips immediately to "Discovering…" before the
+        // shell-out finishes.
+        if (_busy) return;
+        _ghComPicker = true;
+        _ghComDiscovering = true;
+        _ghComUnbound = Array.Empty<GitHubAuthIdentity>();
+        _ghComAlreadyBound = Array.Empty<GitHubAuthIdentity>();
+        StateHasChanged();
+
+        try
+        {
+            var discovered = await GhAuthDiscovery.ListIdentitiesAsync("github.com");
+            var cfg = _cfg ?? await ConfigSvc.GetAsync();
+            // An identity is "already bound" if any github.com source's
+            // Identity field equals the login (case-insensitive). The
+            // default-identity source (Identity == "default") doesn't
+            // bind a login, so it doesn't subtract anything from the
+            // unbound list.
+            var bound = cfg.Sources
+                .Where(s => s.Kind == SourceConfigKind.GitHub
+                            && string.Equals(s.Host, "github.com", StringComparison.OrdinalIgnoreCase))
+                .Select(s => s.Identity)
+                .Where(id => !string.Equals(id, "default", StringComparison.OrdinalIgnoreCase))
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            _ghComUnbound = discovered.Where(i => !bound.Contains(i.Login)).ToList();
+            _ghComAlreadyBound = discovered.Where(i => bound.Contains(i.Login)).ToList();
+        }
+        catch (Exception ex)
+        {
+            Log.LogWarning(ex, "gh identity discovery failed for github.com; user can still add with default identity.");
+            _ghComUnbound = Array.Empty<GitHubAuthIdentity>();
+            _ghComAlreadyBound = Array.Empty<GitHubAuthIdentity>();
+        }
+        finally
+        {
+            _ghComDiscovering = false;
+        }
+    }
+
+    private async Task AddGitHubComWithIdentityAsync(GitHubAuthIdentity identity)
     {
         await WrapAsync(async () =>
         {
-            var added = await ConfigSvc.AddGitHubSourceAsync(SourceConfigKind.GitHub, "github.com");
-            SetMessage(added ? "Added github.com source." : "github.com source already exists.", isError: !added);
+            var added = await ConfigSvc.AddGitHubSourceWithIdentityAsync(
+                SourceConfigKind.GitHub, "github.com", identity.Login);
+            SetMessage(
+                added
+                    ? $"Added github.com source for {identity.Login}."
+                    : $"A source for {identity.Login} already exists.",
+                isError: !added);
+            if (added) CancelGhComPicker();
         });
     }
+
+    private async Task AddGitHubComDefaultAsync()
+    {
+        // Legacy escape hatch: add a default-identity source (uses
+        // whichever gh account is active at sync time). Kept so users
+        // without gh installed can still wire github.com.
+        await WrapAsync(async () =>
+        {
+            var added = await ConfigSvc.AddGitHubSourceAsync(SourceConfigKind.GitHub, "github.com");
+            SetMessage(
+                added
+                    ? "Added github.com (default identity)."
+                    : "A default-identity github.com source already exists.",
+                isError: !added);
+            if (added) CancelGhComPicker();
+        });
+    }
+
+    private void CancelGhComPicker()
+    {
+        _ghComPicker = false;
+        _ghComDiscovering = false;
+        _ghComUnbound = Array.Empty<GitHubAuthIdentity>();
+        _ghComAlreadyBound = Array.Empty<GitHubAuthIdentity>();
+    }
+
+    private static bool IsGitHubComDefaultSource(SourceConfig s)
+        => s.Kind == SourceConfigKind.GitHub
+           && string.Equals(s.Host, "github.com", StringComparison.OrdinalIgnoreCase)
+           && string.Equals(s.Identity, "default", StringComparison.OrdinalIgnoreCase);
 
     private async Task AddGheAsync()
     {

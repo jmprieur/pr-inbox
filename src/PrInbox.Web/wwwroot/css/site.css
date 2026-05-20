@@ -886,6 +886,47 @@ tr.row-disappeared { opacity: 0.78; }
 }
 .settings-inline-form button:hover:not(:disabled) { border-color: var(--accent); }
 
+/* Identity picker for the multi-identity GitHub.com add flow. The
+   parent .settings-inline-form is flex-row; we override to a
+   vertical column when it contains an identity list so the helper
+   text, button grid, action row, and warning all stack cleanly. */
+.settings-inline-form:has(.settings-identity-list),
+.settings-inline-form:has(.settings-warning) {
+    flex-direction: column;
+    align-items: stretch;
+}
+.settings-identity-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    margin: 0.3rem 0 0.5rem 0;
+}
+.settings-identity-button {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 1rem;
+    background: var(--card);
+    color: var(--fg);
+    border: 1px solid var(--line);
+    padding: 0.5rem 0.75rem;
+    border-radius: 3px;
+    cursor: pointer;
+    text-align: left;
+    font: inherit;
+}
+.settings-identity-button:hover:not(:disabled) { border-color: var(--accent); }
+.settings-identity-button:disabled { opacity: 0.5; cursor: not-allowed; }
+.settings-identity-button strong { font-weight: 600; }
+.settings-warning {
+    margin-top: 0.5rem;
+    padding: 0.4rem 0.6rem;
+    background: rgba(232, 168, 56, 0.08);
+    border-left: 3px solid #e8a838;
+    border-radius: 2px;
+    font-size: 0.85rem;
+}
+
 .link-button {
     background: transparent;
     color: var(--accent);

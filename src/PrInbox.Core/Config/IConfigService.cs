@@ -33,12 +33,30 @@ public interface IConfigService
     Task<PrInboxConfig> GetAsync(CancellationToken ct = default);
 
     /// <summary>
-    /// Adds a GitHub-flavored source. <paramref name="kind"/> must be
-    /// <see cref="SourceConfigKind.GitHub"/> or
-    /// <see cref="SourceConfigKind.GitHubEnterprise"/>. If a source with the
-    /// same id already exists, no-ops and returns false.
+    /// Adds a GitHub-flavored source bound to <c>"default"</c> identity
+    /// (uses whichever <c>gh</c> account is currently active for the
+    /// host). <paramref name="kind"/> must be <see cref="SourceConfigKind.GitHub"/>
+    /// or <see cref="SourceConfigKind.GitHubEnterprise"/>. If a source
+    /// with the same id already exists, no-ops and returns false.
     /// </summary>
     Task<bool> AddGitHubSourceAsync(SourceConfigKind kind, string host, string? id = null, CancellationToken ct = default);
+
+    /// <summary>
+    /// Adds a GitHub-flavored source explicitly bound to a specific
+    /// <c>gh</c> login. <paramref name="identity"/> is the GitHub login
+    /// (e.g. <c>jmprieur_microsoft</c>); the token provider will pass
+    /// <c>--user &lt;identity&gt;</c> to <c>gh auth token</c> so this
+    /// source always uses that account regardless of which one is
+    /// "active" in <c>gh</c>. Default id is <c>gh.&lt;host&gt;:&lt;login&gt;</c>
+    /// (or <c>gh.com:&lt;login&gt;</c> for github.com). If a source with
+    /// the same id already exists, no-ops and returns false.
+    /// </summary>
+    Task<bool> AddGitHubSourceWithIdentityAsync(
+        SourceConfigKind kind,
+        string host,
+        string identity,
+        string? id = null,
+        CancellationToken ct = default);
 
     /// <summary>
     /// Adds an Azure DevOps (org, project) entry under

@@ -83,6 +83,55 @@ public sealed class ConfigService : IConfigService
     }
 
     /// <inheritdoc />
+    public async Task<bool> AddGitHubSourceWithIdentityAsync(
+        SourceConfigKind kind,
+        string host,
+        string identity,
+        string? id = null,
+        CancellationToken ct = default)
+    {
+        if (kind != SourceConfigKind.GitHub && kind != SourceConfigKind.GitHubEnterprise)
+        {
+            throw new ArgumentException($"AddGitHubSourceWithIdentityAsync only accepts GitHub kinds; got {kind}.", nameof(kind));
+        }
+        if (string.IsNullOrWhiteSpace(host))
+        {
+            throw new ArgumentException("Host is required.", nameof(host));
+        }
+        if (string.IsNullOrWhiteSpace(identity))
+        {
+            throw new ArgumentException("Identity is required for AddGitHubSourceWithIdentityAsync; use AddGitHubSourceAsync for default identity.", nameof(identity));
+        }
+        if (string.Equals(identity, "default", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new ArgumentException("Identity 'default' is reserved; use AddGitHubSourceAsync for default-identity sources.", nameof(identity));
+        }
+
+        var normalizedHost = host.Trim();
+        var normalizedIdentity = identity.Trim();
+
+        var cfg = await PrInboxConfig.LoadAsync(_configPath, ct);
+        id ??= DefaultIdForWithIdentity(kind, normalizedHost, normalizedIdentity);
+
+        if (cfg.Sources.Any(s => string.Equals(s.Id, id, StringComparison.OrdinalIgnoreCase)))
+        {
+            return false;
+        }
+
+        cfg.Sources.Add(new SourceConfig
+        {
+            Id = id,
+            Kind = kind,
+            Host = normalizedHost,
+            Identity = normalizedIdentity,
+            Enabled = true,
+        });
+
+        await SaveAndRefreshAsync(cfg, ct);
+        return true;
+    }
+
+    /// <inheritdoc />
     public async Task<bool> AddAdoProjectAsync(string org, string project, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(org))     throw new ArgumentException("Org is required.", nameof(org));
@@ -239,4 +288,10 @@ public sealed class ConfigService : IConfigService
         SourceConfigKind.GitHubEnterprise => $"ghe.{host}",
         _ => host,
     };
+
+    private static string DefaultIdForWithIdentity(SourceConfigKind kind, string host, string identity)
+    {
+        var prefix = DefaultIdFor(kind, host);
+        return $"{prefix}:{identity}";
+    }
 }
