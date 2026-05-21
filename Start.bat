@@ -25,8 +25,8 @@ if errorlevel 1 (
 )
 
 echo.
-echo [2/3] Will open %PRINBOX_URL% in your default browser once Kestrel is up.
-start "" /B powershell -NoProfile -WindowStyle Hidden -Command "Start-Sleep -Seconds 4; Start-Process '%PRINBOX_URL%'"
+echo [2/3] Opening splash page (auto-redirects to %PRINBOX_URL% when ready)...
+start "" "%~dp0tools\splash.html"
 
 echo.
 echo [3/3] Starting PrInbox.Web on %PRINBOX_URL% -- press Ctrl+C to stop.

@@ -96,6 +96,14 @@ if (!app.Environment.IsDevelopment())
 app.UseStaticFiles();
 app.UseAntiforgery();
 
+// Lightweight liveness probe used by tools/splash.html to know when the
+// web app is up and ready to receive a real navigation. Returns 200 as
+// soon as Kestrel is listening and the DI graph is built (both true by
+// the time the request reaches this handler), so the splash can stop
+// polling. No CORS headers are set because the splash uses fetch with
+// mode: 'no-cors' — it only needs to know the connection succeeded.
+app.MapGet("/healthz", () => Results.Text("ok"));
+
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
 

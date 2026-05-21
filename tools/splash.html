@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>PR Inbox · starting…</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #fafafa;
+      --fg: #1f2937;
+      --muted: #6b7280;
+      --accent: #2563eb;
+      --card: #ffffff;
+      --border: #e5e7eb;
+      --ok: #10b981;
+      --warn: #b45309;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #0f172a;
+        --fg: #e5e7eb;
+        --muted: #9ca3af;
+        --accent: #60a5fa;
+        --card: #1e293b;
+        --border: #334155;
+        --ok: #34d399;
+        --warn: #fbbf24;
+      }
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0; padding: 0; height: 100%;
+      background: var(--bg); color: var(--fg);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    }
+    body { display: flex; align-items: center; justify-content: center; }
+    .card {
+      background: var(--card); border: 1px solid var(--border);
+      border-radius: 12px; padding: 32px 36px;
+      max-width: 460px; width: calc(100% - 32px);
+      box-shadow: 0 4px 20px rgba(0,0,0,0.06);
+    }
+    h1 {
+      margin: 0 0 8px; font-size: 20px; font-weight: 600;
+      display: flex; align-items: center; gap: 10px;
+    }
+    .dot {
+      width: 10px; height: 10px; border-radius: 50%;
+      background: var(--accent); display: inline-block;
+      animation: pulse 1.2s ease-in-out infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 0.35; transform: scale(0.85); }
+      50%      { opacity: 1;    transform: scale(1.15); }
+    }
+    .sub { color: var(--muted); font-size: 13px; margin: 0 0 20px; }
+    ul.steps { list-style: none; padding: 0; margin: 0 0 18px; }
+    ul.steps li {
+      display: flex; align-items: center; gap: 10px;
+      padding: 6px 0; font-size: 14px;
+    }
+    ul.steps .glyph {
+      width: 18px; text-align: center; font-size: 14px;
+    }
+    ul.steps li.done .glyph { color: var(--ok); }
+    ul.steps li.pending .glyph { color: var(--muted); }
+    .elapsed {
+      font-variant-numeric: tabular-nums; color: var(--muted);
+      font-size: 12px; margin-top: 4px;
+    }
+    .tip {
+      margin-top: 22px; padding: 12px 14px;
+      background: rgba(37,99,235,0.06); border-left: 3px solid var(--accent);
+      border-radius: 4px; font-size: 13px; color: var(--fg);
+    }
+    .tip strong { color: var(--accent); }
+    .stuck {
+      display: none; margin-top: 18px; padding: 12px 14px;
+      background: rgba(180,83,9,0.08); border-left: 3px solid var(--warn);
+      border-radius: 4px; font-size: 13px; color: var(--fg);
+    }
+    .stuck.show { display: block; }
+    .stuck strong { color: var(--warn); }
+    code { font-family: "Cascadia Code", "Consolas", monospace; font-size: 12px; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1><span class="dot"></span> PR Inbox is starting…</h1>
+    <p class="sub">Warming up the web server, database, and first sync.</p>
+
+    <ul class="steps" id="steps">
+      <li class="pending" id="step-web"><span class="glyph">⏳</span>Web server</li>
+      <li class="pending" id="step-db"><span class="glyph">⏳</span>Database</li>
+      <li class="pending" id="step-ready"><span class="glyph">⏳</span>Ready to open</li>
+    </ul>
+
+    <div class="elapsed" id="elapsed">elapsed 0s</div>
+
+    <div class="tip"><strong>Tip · </strong><span id="tip">Loading…</span></div>
+
+    <div class="stuck" id="stuck">
+      <strong>Taking longer than usual.</strong> If you see errors in the
+      terminal window, the app may have failed to start. Try closing this
+      tab, running <code>Start.bat</code> again, and checking
+      <code>USER_GUIDE.md</code> § Troubleshooting.
+    </div>
+  </div>
+
+  <script>
+    (function () {
+      var TARGET = "http://localhost:7341";
+      var HEALTH = TARGET + "/healthz";
+      var startedAt = Date.now();
+      var stuckAt = 30000; // 30s
+      var pollEveryMs = 500;
+
+      var tips = [
+        "Press <strong>d</strong> on a row to mark it Done (next push reactivates it).",
+        "Use <strong>Show ignored</strong> to bring back an ignored PR.",
+        "<strong>↻ updated since done</strong> means the author pushed after you reviewed.",
+        "Click the <strong>repo pill</strong> for per-repo filters, including search.",
+        "The <strong>Doctor</strong> page warns about identity / token / config issues.",
+        "<strong>Show closed</strong> shows merged / abandoned PRs you'd otherwise miss."
+      ];
+      var tipEl = document.getElementById("tip");
+      function rotateTip() {
+        tipEl.innerHTML = tips[Math.floor(Math.random() * tips.length)];
+      }
+      rotateTip();
+      setInterval(rotateTip, 5000);
+
+      var elapsedEl = document.getElementById("elapsed");
+      var stuckEl = document.getElementById("stuck");
+      setInterval(function () {
+        var s = Math.floor((Date.now() - startedAt) / 1000);
+        elapsedEl.textContent = "elapsed " + s + "s";
+        if (Date.now() - startedAt > stuckAt) stuckEl.classList.add("show");
+      }, 250);
+
+      function markDone(id) {
+        var el = document.getElementById(id);
+        if (!el) return;
+        el.classList.remove("pending");
+        el.classList.add("done");
+        el.querySelector(".glyph").textContent = "✓";
+      }
+
+      function poll() {
+        // file:// → http://localhost is cross-origin; no-cors gives us
+        // an opaque response when the server is up, and rejects when
+        // the connection is refused. Either way is enough signal.
+        fetch(HEALTH, { mode: "no-cors", cache: "no-store" })
+          .then(function () {
+            markDone("step-web");
+            markDone("step-db");
+            markDone("step-ready");
+            // Tiny pause so the user sees the checks tick.
+            setTimeout(function () { window.location.replace(TARGET + "/"); }, 350);
+          })
+          .catch(function () {
+            setTimeout(poll, pollEveryMs);
+          });
+      }
+      poll();
+    })();
+  </script>
+</body>
+</html>
