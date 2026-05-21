@@ -318,7 +318,7 @@ public sealed class InboxSyncHostedService : BackgroundService
             // so the legacy single-pass behavior still runs.
             _log.LogWarning(ex, "Could not load inbox filters; running enrich without priority partitioning.");
             filters = InboxFilters.From(
-                showClosed: true, showIgnored: true,
+                showClosed: true, showIgnored: true, showDone: true,
                 enabledSources: InboxFilters.KnownSourceClasses,
                 excludedRepos: Array.Empty<string>(),
                 excludedAuthors: Array.Empty<string>(),

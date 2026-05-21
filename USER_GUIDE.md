@@ -130,7 +130,7 @@ The Inbox page is your morning triage view. Pulled-down summary:
 Source chips: [✓ EMU] [✓ public] [✓ proxima] [✓ ADO]    ← click to filter
 Repos • 23 / 3 hidden ▾                                  ← click to filter
 Authors • 24 / 1 hidden ▾                                ← click to filter
-[  Show closed   ]   [  Show ignored  ]
+[  Show closed   ]   [  Show ignored  ]   [  Show done (N)  ]
 [ Refresh now ]   12 shown · 47 total      Last sync: 2026-05-18 13:42
 ```
 
@@ -151,7 +151,7 @@ just `Repos • 23` / `Authors • 24`.
 | **Drift** | `+N` commits since last review, or `⚠ force-push` | Anchored on `last_reviewed_head_sha` |
 | **Findings** | Per-severity pills `C:0 H:1 M:2 L:0`, plus `✓ clean` or convergence badge | Click any pill → opens Review page filtered to that severity |
 | **Threads** | `N open · M bot` and (when applicable) `✓ K ready` | "ready" = K threads have a likely-done reply (see flow 3) |
-| **Actions** | `Review`, `Ignore` / `Unignore` | |
+| **Actions** | `Review`, `Done` / `Undo done`, `Ignore` / `Unignore` | |
 
 Rows you used to track but are no longer assigned to appear muted with
 a small **`no longer assigned`** chip — see [§ Disappeared PRs](#disappeared-prs)
@@ -168,6 +168,7 @@ all PRs
   → drop repos in your repo denylist
   → drop authors in your author denylist
   → drop ignored / disappeared unless "Show ignored"
+  → drop marked-done (where the author hasn't pushed since) unless "Show done"
 ```
 
 All four filters persist per-user in SQLite (`ui_preferences` table).
@@ -204,6 +205,18 @@ that platform.
 focused on actionable PRs. Closed = PR is merged/closed upstream.
 Ignored = you (or an `IgnoredRepos` regex) said "hide this," or the PR
 was reported as disappeared by the sweep.
+
+**Show done**: per-PR snooze. Hit the **Done** button on a row after
+you've reviewed and published comments — the row hides until the
+author pushes a new commit, at which point it reappears automatically
+with an **`↻ updated since done`** amber chip so you know why it's
+back. The toolbar label shows `Show done (N)` so you always know how
+many PRs are currently snoozed. The "done" anchor is the current head
+SHA at the moment you clicked Done; force-push and merge-from-base
+both count as "author activity" and bring the row back. To bring a row
+back manually (e.g. you marked it done by mistake), expand **Show
+done** and click **Undo done**. Unlike Ignore — which is a permanent
+hide — Done is a soft snooze that resolves itself on the next push.
 
 ### Disappeared PRs
 

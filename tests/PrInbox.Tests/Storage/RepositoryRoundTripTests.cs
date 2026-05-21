@@ -964,5 +964,66 @@ public class RepositoryRoundTripTests : IAsyncLifetime
         fetched.Should().NotBeNull();
         fetched!.LastUpstreamUpdatedAt.Should().Be(newer);
     }
+
+    [Fact]
+    public async Task MarkDoneAsync_Persists_Sha_And_Timestamp()
+    {
+        var repo = new PullRequestRepository(_db);
+        var row = SampleRow();
+        await repo.UpsertAsync(row, CancellationToken.None);
+
+        var when = DateTimeOffset.Parse("2026-05-20T19:00:00Z");
+        await repo.MarkDoneAsync(row.Identity.Url, "abc123", when, CancellationToken.None);
+        var fetched = await repo.GetAsync(row.Identity.Url, CancellationToken.None);
+
+        fetched.Should().NotBeNull();
+        fetched!.MarkedDoneHeadSha.Should().Be("abc123");
+        fetched.MarkedDoneAt.Should().Be(when);
+    }
+
+    [Fact]
+    public async Task ClearDoneAsync_Removes_Sha_And_Timestamp()
+    {
+        var repo = new PullRequestRepository(_db);
+        var row = SampleRow();
+        await repo.UpsertAsync(row, CancellationToken.None);
+        await repo.MarkDoneAsync(row.Identity.Url, "abc123", DateTimeOffset.UtcNow, CancellationToken.None);
+
+        await repo.ClearDoneAsync(row.Identity.Url, CancellationToken.None);
+        var fetched = await repo.GetAsync(row.Identity.Url, CancellationToken.None);
+
+        fetched.Should().NotBeNull();
+        fetched!.MarkedDoneHeadSha.Should().BeNull();
+        fetched.MarkedDoneAt.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task Upsert_Preserves_MarkedDone_Across_Subsequent_Sync_Writes()
+    {
+        // The fast-sync UPSERT path writes everything the sync layer
+        // knows. It must NOT touch marked_done_* — only the dedicated
+        // MarkDoneAsync / ClearDoneAsync entrypoints do.
+        var repo = new PullRequestRepository(_db);
+        var row = SampleRow();
+        await repo.UpsertAsync(row, CancellationToken.None);
+
+        var when = DateTimeOffset.Parse("2026-05-20T19:00:00Z");
+        await repo.MarkDoneAsync(row.Identity.Url, "old-sha", when, CancellationToken.None);
+
+        // Simulate the next fast-sync touch — same row, mutable fields
+        // refreshed but no done-related data carried.
+        var refreshed = row with
+        {
+            LastSyncedAt = row.LastSyncedAt.AddMinutes(5),
+            Title = "Updated title",
+        };
+        await repo.UpsertAsync(refreshed, CancellationToken.None);
+
+        var fetched = await repo.GetAsync(row.Identity.Url, CancellationToken.None);
+        fetched.Should().NotBeNull();
+        fetched!.MarkedDoneHeadSha.Should().Be("old-sha");
+        fetched.MarkedDoneAt.Should().Be(when);
+        fetched.Title.Should().Be("Updated title");
+    }
 }
 

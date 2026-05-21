@@ -31,6 +31,7 @@ namespace PrInbox.Web.Services;
 public sealed record InboxFilters(
     bool ShowClosed,
     bool ShowIgnored,
+    bool ShowDone,
     FrozenSet<string> EnabledSources,
     FrozenSet<string> ExcludedRepos,
     FrozenSet<string> ExcludedAuthors,
@@ -47,6 +48,7 @@ public sealed record InboxFilters(
 
     private const string PrefShowClosed = "inbox.show_closed";
     private const string PrefShowIgnored = "inbox.show_ignored";
+    private const string PrefShowDone = "inbox.show_done";
     private const string PrefSourceFilter = "inbox.source_filter";
     private const string PrefExcludedRepos = "inbox.excluded_repos";
     private const string PrefExcludedAuthors = "inbox.excluded_authors";
@@ -66,6 +68,7 @@ public sealed record InboxFilters(
     {
         var showClosed = await prefs.GetBoolAsync(PrefShowClosed, defaultValue: false, ct);
         var showIgnored = await prefs.GetBoolAsync(PrefShowIgnored, defaultValue: false, ct);
+        var showDone = await prefs.GetBoolAsync(PrefShowDone, defaultValue: false, ct);
 
         var enabledSources = ParseJsonStringSet(await prefs.GetAsync(PrefSourceFilter, null, ct))
                              ?? KnownSourceClasses;
@@ -79,6 +82,7 @@ public sealed record InboxFilters(
         return new InboxFilters(
             showClosed,
             showIgnored,
+            showDone,
             enabledSources,
             excludedRepos,
             excludedAuthors,
@@ -94,6 +98,7 @@ public sealed record InboxFilters(
     public static InboxFilters From(
         bool showClosed,
         bool showIgnored,
+        bool showDone,
         IEnumerable<string> enabledSources,
         IEnumerable<string> excludedRepos,
         IEnumerable<string> excludedAuthors,
@@ -102,21 +107,49 @@ public sealed record InboxFilters(
         => new(
             showClosed,
             showIgnored,
+            showDone,
             enabledSources.ToFrozenSet(StringComparer.OrdinalIgnoreCase),
             excludedRepos.ToFrozenSet(StringComparer.OrdinalIgnoreCase),
             excludedAuthors.ToFrozenSet(StringComparer.OrdinalIgnoreCase),
             ignoredRepoRegexes,
             BuildSourceClassMap(sourceConfigs));
 
-    /// <summary>Visible on the dashboard right now? (Sync-side overload.)</summary>
-    public bool ShouldShow(PullRequestRow row) => ShouldShowCore(
+    /// <summary>
+    /// Back-compat overload for callers (and tests) written before the
+    /// "marked done" filter existed. Defaults <c>showDone</c> to true so
+    /// no test or sync-side caller silently loses rows that would have
+    /// been visible under the older contract.
+    /// </summary>
+    public static InboxFilters From(
+        bool showClosed,
+        bool showIgnored,
+        IEnumerable<string> enabledSources,
+        IEnumerable<string> excludedRepos,
+        IEnumerable<string> excludedAuthors,
+        IReadOnlyList<Regex> ignoredRepoRegexes,
+        IEnumerable<SourceConfig>? sourceConfigs = null)
+        => From(showClosed, showIgnored, showDone: true,
+                enabledSources, excludedRepos, excludedAuthors,
+                ignoredRepoRegexes, sourceConfigs);
+
+    /// <summary>Visible on the dashboard right now? (Sync-side overload.)
+    /// <para>
+    /// Sync-side callers don't have <see cref="InboxRow.IsMarkedDone"/>
+    /// (which requires the latest snapshot's HeadSha) — they pass
+    /// <paramref name="isMarkedDone"/> directly when they can, or rely on
+    /// the default <c>false</c> when they can't. The done filter exists to
+    /// keep the *UI* dashboard clean; sync-side prioritization is fine
+    /// counting done rows as visible.
+    /// </para>
+    /// </summary>
+    public bool ShouldShow(PullRequestRow row, bool isMarkedDone = false) => ShouldShowCore(
         row.Status, row.SourceId, row.DisplayRepo, row.AuthorLogin,
-        row.IsIgnored);
+        row.IsIgnored, isMarkedDone);
 
     /// <summary>Visible on the dashboard right now? (UI-side overload.)</summary>
     public bool ShouldShow(InboxRow row) => ShouldShowCore(
         row.Status, row.SourceId, row.DisplayRepo, row.AuthorLogin,
-        row.IsIgnored);
+        row.IsIgnored, row.IsMarkedDone);
 
     /// <summary>
     /// Map a SourceId to the UI chip class. Exposed because the chip
@@ -240,7 +273,8 @@ public sealed record InboxFilters(
         string sourceId,
         string displayRepo,
         string? authorLogin,
-        bool isIgnored)
+        bool isIgnored,
+        bool isMarkedDone = false)
     {
         // 1. Closed unless "Show closed".
         if (!ShowClosed && status != PullRequestStatus.Open) return false;
@@ -281,6 +315,12 @@ public sealed record InboxFilters(
             if (isIgnored) return false;
             if (MatchesIgnoredRepoRegex(displayRepo)) return false;
         }
+
+        // 6. Marked done (per-PR snooze). Same shape as Ignored: the
+        //    "Show done" toggle reveals them; otherwise they're hidden.
+        //    A row stops being "marked done" automatically once the
+        //    author pushes a new commit (see InboxRow.IsMarkedDone).
+        if (!ShowDone && isMarkedDone) return false;
 
         return true;
     }

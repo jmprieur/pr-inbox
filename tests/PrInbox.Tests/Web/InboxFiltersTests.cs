@@ -587,6 +587,118 @@ public class InboxFiltersTests
         => InboxFilters.CompileIgnoredRepoRegexes(new[] { "", "   ", null! })
             .Should().BeEmpty();
 
+    // ---------- ShowDone / IsMarkedDone semantics ----------
+
+    private static InboxRow MakeInboxRow(
+        string url = "https://github.com/o/r/pull/1",
+        string? markedDoneHeadSha = null,
+        string? currentHeadSha = null,
+        DateTimeOffset? markedDoneAt = null,
+        PullRequestStatus status = PullRequestStatus.Open,
+        bool isIgnored = false)
+        => new(
+            Url: url,
+            DisplayRepo: "o/r",
+            Number: 1,
+            Title: "T",
+            AuthorLogin: "octo",
+            SourceId: "gh.com",
+            SourceKind: SourceKind.GitHub,
+            IdentityUsed: "jmprieur",
+            Status: status,
+            EnrichState: EnrichState.Enriched,
+            LastSyncedAt: DateTimeOffset.UnixEpoch,
+            OpenThreadCount: 0,
+            UnresolvedBotCount: 0,
+            DriftKind: DriftKind.Unknown,
+            DriftCount: 0,
+            LastReviewedHeadSha: null,
+            CurrentHeadSha: currentHeadSha,
+            IsIgnored: isIgnored,
+            MarkedDoneHeadSha: markedDoneHeadSha,
+            MarkedDoneAt: markedDoneAt);
+
+    [Fact]
+    public void InboxRow_IsMarkedDone_True_When_Sha_Matches_Current()
+    {
+        var row = MakeInboxRow(markedDoneHeadSha: "abc", currentHeadSha: "abc");
+        row.IsMarkedDone.Should().BeTrue();
+        row.ReactivatedSinceMarkedDone.Should().BeFalse();
+    }
+
+    [Fact]
+    public void InboxRow_IsMarkedDone_False_When_Author_Pushed()
+    {
+        var row = MakeInboxRow(markedDoneHeadSha: "abc", currentHeadSha: "def");
+        row.IsMarkedDone.Should().BeFalse();
+        row.ReactivatedSinceMarkedDone.Should().BeTrue();
+    }
+
+    [Fact]
+    public void InboxRow_IsMarkedDone_True_When_Current_Sha_Unknown()
+    {
+        // Defensive: a row whose snapshot hasn't landed yet should not
+        // suddenly un-snooze just because CurrentHeadSha is null.
+        var row = MakeInboxRow(markedDoneHeadSha: "abc", currentHeadSha: null);
+        row.IsMarkedDone.Should().BeTrue();
+        row.ReactivatedSinceMarkedDone.Should().BeFalse();
+    }
+
+    [Fact]
+    public void InboxRow_IsMarkedDone_False_When_Never_Marked()
+    {
+        MakeInboxRow().IsMarkedDone.Should().BeFalse();
+    }
+
+    [Fact]
+    public void ShowDone_False_Hides_Done_Rows_Shows_Active()
+    {
+        var filters = InboxFilters.From(
+            showClosed: false, showIgnored: false, showDone: false,
+            enabledSources: InboxFilters.KnownSourceClasses,
+            excludedRepos: Array.Empty<string>(),
+            excludedAuthors: Array.Empty<string>(),
+            ignoredRepoRegexes: Array.Empty<Regex>());
+
+        var done   = MakeInboxRow(markedDoneHeadSha: "abc", currentHeadSha: "abc");
+        var active = MakeInboxRow();
+
+        filters.ShouldShow(done).Should().BeFalse();
+        filters.ShouldShow(active).Should().BeTrue();
+    }
+
+    [Fact]
+    public void ShowDone_True_Reveals_Done_Rows()
+    {
+        var filters = InboxFilters.From(
+            showClosed: false, showIgnored: false, showDone: true,
+            enabledSources: InboxFilters.KnownSourceClasses,
+            excludedRepos: Array.Empty<string>(),
+            excludedAuthors: Array.Empty<string>(),
+            ignoredRepoRegexes: Array.Empty<Regex>());
+
+        var done = MakeInboxRow(markedDoneHeadSha: "abc", currentHeadSha: "abc");
+
+        filters.ShouldShow(done).Should().BeTrue();
+    }
+
+    [Fact]
+    public void Done_Row_Reappears_When_Author_Pushes_New_Sha()
+    {
+        // The whole point of the feature: snooze auto-clears on push.
+        var filters = InboxFilters.From(
+            showClosed: false, showIgnored: false, showDone: false,
+            enabledSources: InboxFilters.KnownSourceClasses,
+            excludedRepos: Array.Empty<string>(),
+            excludedAuthors: Array.Empty<string>(),
+            ignoredRepoRegexes: Array.Empty<Regex>());
+
+        var reactivated = MakeInboxRow(markedDoneHeadSha: "abc", currentHeadSha: "def");
+
+        reactivated.IsMarkedDone.Should().BeFalse();
+        filters.ShouldShow(reactivated).Should().BeTrue();
+    }
+
     // ---------- Combinations (a small parity probe) ----------
 
     [Fact]

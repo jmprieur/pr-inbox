@@ -91,6 +91,19 @@ a.drift:hover { text-decoration: underline; }
     color: #991b1b;
     border-color: #fecaca;
 }
+/* Marked-done pill: subtle green, signals "snoozed by you". */
+.drift-done {
+    background: #ecfdf5;
+    color: #065f46;
+    border-color: #a7f3d0;
+}
+/* Re-activated since you marked done: same amber palette as "ahead",
+   different glyph so it reads as "came back" rather than "drifted". */
+.drift-reactivated {
+    background: #fef3c7;
+    color: #92400e;
+    border-color: #fde68a;
+}
 
 /* Banner on the Review page when HEAD has moved since the review ran.
    Same amber/red palette as the inbox chip for consistency. */
@@ -736,6 +749,20 @@ button.ignore {
 button.ignore:hover {
     color: var(--fg);
     border-color: var(--accent);
+}
+button.done {
+    background: transparent;
+    color: var(--muted);
+    border: 1px solid var(--line);
+    border-radius: 3px;
+    font-size: 0.8rem;
+    padding: 0.15rem 0.45rem;
+    cursor: pointer;
+}
+button.done:hover {
+    color: #065f46;
+    border-color: #34d399;
+    background: #ecfdf5;
 }
 
 tr.row-hidden { opacity: 0.55; }

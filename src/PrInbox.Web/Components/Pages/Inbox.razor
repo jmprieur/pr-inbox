@@ -184,6 +184,11 @@
                @onchange="@(e => OnShowIgnoredToggleAsync((bool)e.Value!))" />
         Show ignored
     </label>
+    <label class="show-done" title="Marked-done PRs are hidden until the author pushes a new commit.">
+        <input type="checkbox" checked="@_showDone"
+               @onchange="@(e => OnShowDoneToggleAsync((bool)e.Value!))" />
+        Show done@(HiddenDoneCount > 0 ? $" ({HiddenDoneCount})" : "")
+    </label>
     @if (!string.IsNullOrEmpty(_lastLaunchMessage))
     {
         <span class="muted">@_lastLaunchMessage</span>
@@ -394,9 +399,28 @@ else
                                 <span class="drift drift-forcepush" title="@title">⚠ force-push</span>
                             }
                         }
+                        @if (row.ReactivatedSinceMarkedDone)
+                        {
+                            var doneTip = row.MarkedDoneAt is { } when
+                                ? $"You marked done {when.LocalDateTime:yyyy-MM-dd HH:mm} at {ShortSha(row.MarkedDoneHeadSha)}; author has pushed since."
+                                : $"You marked done at {ShortSha(row.MarkedDoneHeadSha)}; author has pushed since.";
+                            <span class="drift drift-reactivated" title="@doneTip">↻ updated since done</span>
+                        }
+                        else if (row.IsMarkedDone)
+                        {
+                            var doneTip = row.MarkedDoneAt is { } when
+                                ? $"Marked done {when.LocalDateTime:yyyy-MM-dd HH:mm}. Click Undo done to bring it back."
+                                : "Marked done. Click Undo done to bring it back.";
+                            <span class="drift drift-done" title="@doneTip">✓ done</span>
+                        }
                     </td>
                     <td class="row-actions">
                         <button class="review" @onclick="() => OnReviewAsync(row)">Review</button>
+                        <button class="done"
+                                title="@(row.IsMarkedDone ? "Bring this PR back to the inbox" : "Mark this PR as done. It will hide until the author pushes a new commit.")"
+                                @onclick="() => OnToggleDoneAsync(row)">
+                            @(row.IsMarkedDone ? "Undo done" : "Done")
+                        </button>
                         <button class="ignore" title="@(row.IsIgnored ? "Unignore this PR" : "Ignore this PR")"
                                 @onclick="() => OnToggleIgnoreAsync(row)">
                             @(row.IsIgnored ? "Unignore" : "Ignore")
@@ -423,6 +447,7 @@ else
 
     private const string PrefShowClosed   = "inbox.show_closed";
     private const string PrefShowIgnored  = "inbox.show_ignored";
+    private const string PrefShowDone     = "inbox.show_done";
     private const string PrefSourceFilter = "inbox.source_filter";
     private const string PrefExcludedRepos = "inbox.excluded_repos";
     private const string PrefExcludedAuthors = "inbox.excluded_authors";
@@ -434,6 +459,7 @@ else
     private string? _lastLaunchMessage;
     private bool _showClosed;
     private bool _showIgnored;
+    private bool _showDone;
     private bool _refreshing;
 
     // Source classes that are currently enabled. Default = all known
@@ -523,6 +549,7 @@ else
     private InboxFilters CurrentFilters => InboxFilters.From(
         _showClosed,
         _showIgnored,
+        _showDone,
         _enabledSources,
         _excludedRepos,
         _excludedAuthors,
@@ -535,6 +562,31 @@ else
         {
             var filters = CurrentFilters;
             return _rows.Where(filters.ShouldShow).ToArray();
+        }
+    }
+
+    /// <summary>
+    /// Count of rows currently hidden ONLY because they're marked done
+    /// (i.e. would be visible if "Show done" were on). Drives the "Show
+    /// done (N)" toolbar label so the user can tell at a glance how many
+    /// rows are snoozed.
+    /// </summary>
+    private int HiddenDoneCount
+    {
+        get
+        {
+            if (_showDone) return 0;
+            // Reuse the current filter but flip ShowDone on, then count
+            // the rows that are marked-done within that pool. Anything
+            // hidden by the other filters (closed/ignored/source/repo/
+            // author) is already off the dashboard regardless.
+            var allowDone = CurrentFilters with { ShowDone = true };
+            var count = 0;
+            foreach (var r in _rows)
+            {
+                if (r.IsMarkedDone && allowDone.ShouldShow(r)) count++;
+            }
+            return count;
         }
     }
 
@@ -579,6 +631,7 @@ else
         {
             _showClosed  = await Prefs.GetBoolAsync(PrefShowClosed, defaultValue: false);
             _showIgnored = await Prefs.GetBoolAsync(PrefShowIgnored, defaultValue: false);
+            _showDone    = await Prefs.GetBoolAsync(PrefShowDone, defaultValue: false);
 
             var rawSources = await Prefs.GetAsync(PrefSourceFilter);
             if (!string.IsNullOrWhiteSpace(rawSources))
@@ -671,6 +724,44 @@ else
         _showIgnored = value;
         try { await Prefs.SetBoolAsync(PrefShowIgnored, value); }
         catch (Exception ex) { Log.LogDebug(ex, "Persist {Key} failed.", PrefShowIgnored); }
+    }
+
+    private async Task OnShowDoneToggleAsync(bool value)
+    {
+        _showDone = value;
+        try { await Prefs.SetBoolAsync(PrefShowDone, value); }
+        catch (Exception ex) { Log.LogDebug(ex, "Persist {Key} failed.", PrefShowDone); }
+    }
+
+    private async Task OnToggleDoneAsync(InboxRow row)
+    {
+        try
+        {
+            if (row.IsMarkedDone)
+            {
+                await PrRepo.ClearDoneAsync(row.Url, CancellationToken.None);
+                State.Upsert(row with { MarkedDoneHeadSha = null, MarkedDoneAt = null });
+            }
+            else
+            {
+                // Anchor "done" at the SHA we have in hand. If we have no
+                // snapshot yet (CurrentHeadSha unknown), fall back to the
+                // last-reviewed SHA, then to a sentinel. The IsMarkedDone
+                // computed prop handles the "current SHA unknown" case
+                // defensively — see InboxRow.IsMarkedDone.
+                var sha = row.CurrentHeadSha
+                          ?? row.LastReviewedHeadSha
+                          ?? "unknown";
+                var when = DateTimeOffset.UtcNow;
+                await PrRepo.MarkDoneAsync(row.Url, sha, when, CancellationToken.None);
+                State.Upsert(row with { MarkedDoneHeadSha = sha, MarkedDoneAt = when });
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.LogError(ex, "Toggle done for {Url} failed", row.Url);
+            _lastLaunchMessage = $"Could not update done state: {ex.Message}";
+        }
     }
 
     private async Task OnSourceChipToggleAsync(string sourceClass, bool enabled)

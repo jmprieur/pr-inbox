@@ -29,8 +29,31 @@ public sealed record InboxRow(
     bool IsIgnored = false,
     DateTimeOffset? DisappearedAt = null,
     int LikelyDoneCount = 0,
-    DateTimeOffset? LastUpstreamUpdatedAt = null)
+    DateTimeOffset? LastUpstreamUpdatedAt = null,
+    string? MarkedDoneHeadSha = null,
+    DateTimeOffset? MarkedDoneAt = null)
 {
+    /// <summary>
+    /// True when the user marked this PR done and the author has NOT
+    /// pushed since (or the current head SHA is unknown — defensive: we
+    /// don't yank a "done" badge just because a snapshot hasn't landed).
+    /// Hidden by default; revealed by the inbox "Show done" toggle.
+    /// </summary>
+    public bool IsMarkedDone =>
+        !string.IsNullOrEmpty(MarkedDoneHeadSha)
+        && (string.IsNullOrEmpty(CurrentHeadSha)
+            || string.Equals(MarkedDoneHeadSha, CurrentHeadSha, StringComparison.Ordinal));
+
+    /// <summary>
+    /// True when the user marked the PR done at an older SHA and the
+    /// author has since pushed. Drives the "Updated since you marked
+    /// done" chip so the user understands why the row reappeared.
+    /// </summary>
+    public bool ReactivatedSinceMarkedDone =>
+        !string.IsNullOrEmpty(MarkedDoneHeadSha)
+        && !string.IsNullOrEmpty(CurrentHeadSha)
+        && !string.Equals(MarkedDoneHeadSha, CurrentHeadSha, StringComparison.Ordinal);
+
     public static InboxRow FromRow(
         PullRequestRow row,
         int openThreads,
@@ -60,7 +83,9 @@ public sealed record InboxRow(
             row.IsIgnored,
             row.DisappearedAt,
             likelyDone,
-            row.LastUpstreamUpdatedAt);
+            row.LastUpstreamUpdatedAt,
+            row.MarkedDoneHeadSha,
+            row.MarkedDoneAt);
     }
 }
 

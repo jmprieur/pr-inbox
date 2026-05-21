@@ -317,6 +317,46 @@ public sealed class PullRequestRepository
     }
 
     /// <summary>
+    /// Mark a PR as "done" at the given head SHA. The inbox hides rows
+    /// where <c>marked_done_head_sha</c> equals the current head SHA from
+    /// the latest snapshot — i.e. the author hasn't pushed since the user
+    /// marked it done. Calling this for the same PR twice is idempotent;
+    /// calling it with a different SHA updates the marker.
+    /// </summary>
+    public async Task MarkDoneAsync(string url, string headSha, DateTimeOffset markedAt, CancellationToken ct)
+    {
+        await using var conn = await _db.OpenAsync(ct);
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            UPDATE pull_requests
+            SET marked_done_head_sha = $sha,
+                marked_done_at       = $at
+            WHERE pr_identity = $id;
+            """;
+        cmd.Parameters.AddWithValue("$sha", headSha);
+        cmd.Parameters.AddWithValue("$at", FormatTimestamp(markedAt));
+        cmd.Parameters.AddWithValue("$id", url);
+        await cmd.ExecuteNonQueryAsync(ct);
+    }
+
+    /// <summary>
+    /// Clear the "done" marker, returning the row to its un-snoozed state.
+    /// </summary>
+    public async Task ClearDoneAsync(string url, CancellationToken ct)
+    {
+        await using var conn = await _db.OpenAsync(ct);
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            UPDATE pull_requests
+            SET marked_done_head_sha = NULL,
+                marked_done_at       = NULL
+            WHERE pr_identity = $id;
+            """;
+        cmd.Parameters.AddWithValue("$id", url);
+        await cmd.ExecuteNonQueryAsync(ct);
+    }
+
+    /// <summary>
     /// Update <c>pull_requests.status</c>. Used by the enrich path so a PR
     /// that has been merged/closed since the last fast pass surfaces its
     /// new state in the UI instead of remaining stuck at <c>open</c>.
@@ -462,7 +502,11 @@ public sealed class PullRequestRepository
             DossierVersion: HasColumn(reader, "dossier_version")
                 ? (int)reader.GetInt64(reader.GetOrdinal("dossier_version"))
                 : 0,
-            LastUpstreamUpdatedAt: ParseOptionalTimestamp(reader, "last_upstream_updated_at"));
+            LastUpstreamUpdatedAt: ParseOptionalTimestamp(reader, "last_upstream_updated_at"),
+            MarkedDoneHeadSha: HasColumn(reader, "marked_done_head_sha")
+                ? GetStringOrNull(reader, "marked_done_head_sha")
+                : null,
+            MarkedDoneAt: ParseOptionalTimestamp(reader, "marked_done_at"));
     }
 
     private static bool HasColumn(SqliteDataReader reader, string name)
