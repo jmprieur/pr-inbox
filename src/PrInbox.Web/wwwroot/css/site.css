@@ -1141,3 +1141,156 @@ tr.row-disappeared { opacity: 0.78; }
 }
 .settings-advisory-fix:hover:not(:disabled) { background: #2ea043; }
 .settings-advisory-fix:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* === Tags & group-by ============================================ */
+
+/* Toolbar group-by selector. */
+.toolbar .group-by {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin-left: 12px;
+    font-size: 0.85em;
+    color: #444;
+}
+.toolbar .group-by select {
+    font-size: 0.9em;
+    padding: 1px 4px;
+}
+
+/* Group header rows in the inbox table. */
+tr.group-header > td {
+    background: #f3f4f6;
+    border-top: 1px solid #d1d5db;
+    border-bottom: 1px solid #d1d5db;
+    padding: 4px 8px;
+    font-weight: 600;
+    font-size: 0.9em;
+    color: #1f2937;
+    position: sticky;
+    top: 0;
+    z-index: 1;
+}
+tr.group-header .group-name {
+    margin-right: 6px;
+}
+tr.group-header .muted {
+    color: #6b7280;
+    font-weight: 400;
+}
+.group-marker {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border-radius: 2px;
+    margin-right: 6px;
+    vertical-align: -1px;
+    background: #cbd5e1;
+}
+
+/* Tag chip rendered inline next to repo/PR link and inside popovers. */
+.tag-chip {
+    display: inline-block;
+    color: #fff;
+    background: #64748b;
+    font-size: 0.72em;
+    line-height: 1;
+    padding: 2px 6px;
+    border-radius: 3px;
+    margin-left: 4px;
+    vertical-align: 1px;
+    text-shadow: 0 1px 0 rgba(0, 0, 0, 0.15);
+    white-space: nowrap;
+}
+.tag-chip.tag-overflow {
+    background: #94a3b8;
+    border: none;
+    cursor: pointer;
+    font-weight: 600;
+}
+
+/* "+" button to open the tag manager popover for a PR. */
+.tag-add {
+    display: inline-block;
+    margin-left: 4px;
+    padding: 0 5px;
+    font-size: 0.75em;
+    line-height: 1.4;
+    color: #6b7280;
+    background: transparent;
+    border: 1px dashed #cbd5e1;
+    border-radius: 3px;
+    cursor: pointer;
+    vertical-align: 1px;
+}
+.tag-add:hover {
+    color: #1f2937;
+    border-color: #6b7280;
+}
+
+/* Tag popover and click-outside backdrop. */
+.tag-popover-backdrop {
+    position: fixed;
+    inset: 0;
+    background: transparent;
+    z-index: 9000;
+}
+.tag-popover {
+    position: absolute;
+    background: #fff;
+    border: 1px solid #d1d5db;
+    border-radius: 6px;
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.18);
+    padding: 8px 10px;
+    z-index: 9001;
+    min-width: 240px;
+    margin-top: 4px;
+    font-size: 0.85em;
+}
+.tag-popover .small { font-size: 0.85em; }
+.tag-popover-list {
+    list-style: none;
+    padding: 0;
+    margin: 0 0 8px 0;
+    max-height: 180px;
+    overflow-y: auto;
+}
+.tag-popover-list li {
+    padding: 2px 0;
+}
+.tag-popover-list label {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+}
+.tag-popover-create {
+    border-top: 1px solid #e5e7eb;
+    padding-top: 6px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+.tag-popover-create input[type=text] {
+    padding: 3px 6px;
+    border: 1px solid #d1d5db;
+    border-radius: 3px;
+    font-size: 0.95em;
+}
+.tag-color-swatches {
+    display: flex;
+    gap: 4px;
+    flex-wrap: wrap;
+}
+.swatch {
+    width: 18px;
+    height: 18px;
+    border-radius: 3px;
+    border: 1px solid rgba(0, 0, 0, 0.15);
+    cursor: pointer;
+    padding: 0;
+}
+.swatch.is-on {
+    outline: 2px solid #1f2937;
+    outline-offset: 1px;
+}

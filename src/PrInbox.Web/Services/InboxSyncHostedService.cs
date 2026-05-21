@@ -147,8 +147,10 @@ public sealed class InboxSyncHostedService : BackgroundService
 
     private async Task RefreshFromCacheAsync(CancellationToken ct)
     {
-        var (prRepo, threadRepo, snapRepo, _) = OpenFullRepos();
+        var (prRepo, threadRepo, snapRepo, _, tagRepo) = OpenFullRepos();
         var prs = await prRepo.ListAllAsync(ct);
+        // One bulk fetch keyed by PR URL so per-row plumbing is O(1).
+        var tagsByUrl = await tagRepo.GetAllPrTagsAsync(ct);
 
         var rows = new List<InboxRow>(prs.Count);
         foreach (var pr in prs)
@@ -156,7 +158,8 @@ public sealed class InboxSyncHostedService : BackgroundService
             var (open, bot, likelyDone) = await CountThreadsAsync(threadRepo, pr.Identity, ct);
             var snap = await snapRepo.GetLatestAsync(pr.Identity, ct);
             var drift = DriftInfo.Compute(pr, snap);
-            rows.Add(InboxRow.FromRow(pr, open, bot, drift, likelyDone));
+            tagsByUrl.TryGetValue(pr.Url, out var tags);
+            rows.Add(InboxRow.FromRow(pr, open, bot, drift, likelyDone, tags));
         }
         _state.ReplaceAll(rows);
     }
@@ -180,7 +183,7 @@ public sealed class InboxSyncHostedService : BackgroundService
         var config = await PrInboxConfig.LoadAsync(null);
         if (config.Sources.Count == 0 && config.Ado.Projects.Count == 0) return 0;
 
-        var (prRepo, threadRepo, snapRepo, syncRunRepo) = OpenFullRepos();
+        var (prRepo, threadRepo, snapRepo, syncRunRepo, _) = OpenFullRepos();
         var runtimes = new SourceFactory().Build(config);
 
         return await RunFastSyncAsync(runtimes, prRepo, snapRepo, threadRepo, syncRunRepo, ct);
@@ -296,7 +299,7 @@ public sealed class InboxSyncHostedService : BackgroundService
         var config = await PrInboxConfig.LoadAsync(null);
         if (config.Sources.Count == 0 && config.Ado.Projects.Count == 0) return 0;
 
-        var (prRepo, threadRepo, snapRepo, syncRunRepo) = OpenFullRepos();
+        var (prRepo, threadRepo, snapRepo, syncRunRepo, _) = OpenFullRepos();
         var runtimes = new SourceFactory().Build(config);
 
         var failures = 0;
@@ -479,7 +482,7 @@ public sealed class InboxSyncHostedService : BackgroundService
         try
         {
             var config = await PrInboxConfig.LoadAsync(null);
-            var (prRepo, threadRepo, snapRepo, syncRunRepo) = OpenFullRepos();
+            var (prRepo, threadRepo, snapRepo, syncRunRepo, tagRepo) = OpenFullRepos();
             var runtimes = new SourceFactory().Build(config);
 
             // Match runtime by SourceId via the row's recorded binding so we
@@ -506,7 +509,8 @@ public sealed class InboxSyncHostedService : BackgroundService
                     var (open, bot, likelyDone) = await CountThreadsAsync(threadRepo, fresh.Identity, ct);
                     var snap = await snapRepo.GetLatestAsync(fresh.Identity, ct);
                     var drift = DriftInfo.Compute(fresh, snap);
-                    _state.Upsert(InboxRow.FromRow(fresh, open, bot, drift, likelyDone));
+                    var tags = await tagRepo.GetTagsForPrAsync(fresh.Url, ct);
+                    _state.Upsert(InboxRow.FromRow(fresh, open, bot, drift, likelyDone, tags));
                 }
             }
             catch (Exception ex)
@@ -556,13 +560,15 @@ public sealed class InboxSyncHostedService : BackgroundService
     }
 
     private static (PullRequestRepository prRepo, ObservedThreadRepository threadRepo,
-                    PrSnapshotRepository snapRepo, SyncRunRepository syncRunRepo) OpenFullRepos()
+                    PrSnapshotRepository snapRepo, SyncRunRepository syncRunRepo,
+                    TagRepository tagRepo) OpenFullRepos()
     {
         var db = new PrInboxDb(PrInboxDb.DefaultUserConnectionString());
         new MigrationRunner().MigrateAsync(db.ConnectionString).GetAwaiter().GetResult();
         return (new PullRequestRepository(db),
                 new ObservedThreadRepository(db),
                 new PrSnapshotRepository(db),
-                new SyncRunRepository(db));
+                new SyncRunRepository(db),
+                new TagRepository(db));
     }
 }

@@ -8,6 +8,7 @@
 @inject PullRequestRepository PrRepo
 @inject ObservedThreadRepository ThreadRepo
 @inject PrSnapshotRepository SnapRepo
+@inject TagRepository TagRepo
 @inject ThreadResolveOrchestrator Orchestrator
 @inject InboxState State
 @inject InboxSyncHostedService SyncSvc
@@ -403,8 +404,9 @@ else
                     g.OrderByDescending(r => r.FirstSeenAt).First().LastCommentBody));
             var snap = await SnapRepo.GetLatestAsync(pr.Identity, CancellationToken.None);
             var drift = DriftInfo.Compute(pr, snap);
+            var tags = await TagRepo.GetTagsForPrAsync(pr.Url, CancellationToken.None);
 
-            State.Upsert(InboxRow.FromRow(pr, openCount, unresolvedBot, drift, likelyDone));
+            State.Upsert(InboxRow.FromRow(pr, openCount, unresolvedBot, drift, likelyDone, tags));
         }
         catch (Exception ex)
         {

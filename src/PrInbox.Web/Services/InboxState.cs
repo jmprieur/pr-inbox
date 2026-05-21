@@ -32,7 +32,8 @@ public sealed record InboxRow(
     DateTimeOffset? LastUpstreamUpdatedAt = null,
     string? MarkedDoneHeadSha = null,
     DateTimeOffset? MarkedDoneAt = null,
-    DateTimeOffset? FlaggedAt = null)
+    DateTimeOffset? FlaggedAt = null,
+    IReadOnlyList<TagRow>? Tags = null)
 {
     /// <summary>
     /// True when the user has flagged this PR as "of interest." Flag is
@@ -41,6 +42,14 @@ public sealed record InboxRow(
     /// the dashboard to just these rows.
     /// </summary>
     public bool IsFlagged => FlaggedAt.HasValue;
+
+    /// <summary>
+    /// Tags attached to this PR. Never null at the call site — components
+    /// can iterate safely. Use <see cref="HasTags"/> to test for presence.
+    /// </summary>
+    public IReadOnlyList<TagRow> TagsSafe => Tags ?? Array.Empty<TagRow>();
+
+    public bool HasTags => Tags is not null && Tags.Count > 0;
 
     /// <summary>
     /// True when the user marked this PR done and the author has NOT
@@ -68,7 +77,8 @@ public sealed record InboxRow(
         int openThreads,
         int unresolvedBot,
         DriftInfo? drift = null,
-        int likelyDone = 0)
+        int likelyDone = 0,
+        IReadOnlyList<TagRow>? tags = null)
     {
         drift ??= DriftInfo.Unknown;
         return new(
@@ -95,7 +105,8 @@ public sealed record InboxRow(
             row.LastUpstreamUpdatedAt,
             row.MarkedDoneHeadSha,
             row.MarkedDoneAt,
-            row.FlaggedAt);
+            row.FlaggedAt,
+            tags);
     }
 }
 

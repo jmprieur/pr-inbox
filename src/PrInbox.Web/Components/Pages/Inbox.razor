@@ -12,6 +12,7 @@
 @inject IReviewLauncher Launcher
 @inject InboxSyncHostedService Sync
 @inject PullRequestRepository PrRepo
+@inject TagRepository TagRepo
 @inject UiPreferencesRepository Prefs
 @inject PrInboxConfig Config
 @inject IConfigService ConfigSvc
@@ -195,6 +196,13 @@
                @onchange="@(e => OnOnlyFlaggedToggleAsync((bool)e.Value!))" />
         Show only flagged@(FlaggedCount > 0 ? $" ({FlaggedCount})" : "")
     </label>
+    <label class="group-by" title="Cluster PRs into collapsible sections (tag-by-tag). PRs with multiple tags appear in each section.">
+        <span class="muted">Group by:</span>
+        <select @bind="_groupBy" @bind:after="PersistGroupByAsync">
+            <option value="@GroupByMode.None">None</option>
+            <option value="@GroupByMode.Tag">Tag</option>
+        </select>
+    </label>
     @if (!string.IsNullOrEmpty(_lastLaunchMessage))
     {
         <span class="muted">@_lastLaunchMessage</span>
@@ -263,8 +271,20 @@ else
             </tr>
         </thead>
         <tbody>
-            @foreach (var row in visible)
+            @foreach (var group in ComputeGroups(visible))
             {
+                @if (_groupBy != GroupByMode.None)
+                {
+                    <tr class="group-header">
+                        <td colspan="9">
+                            <span class="group-marker" style="@(group.color is null ? "" : $"background:{group.color};")"></span>
+                            <span class="group-name">@group.name</span>
+                            <span class="muted">(@group.rows.Count)</span>
+                        </td>
+                    </tr>
+                }
+                @foreach (var row in group.rows)
+                {
                 <tr class="@RowClasses(row)" data-pr-url="@row.Url">
                     <td><span class="badge @SourceClass(row)">@SourceLabel(row)</span></td>
                     <td>
@@ -279,6 +299,79 @@ else
                         <a href="@row.Url" target="_blank" rel="noopener">
                             @row.DisplayRepo #@row.Number
                         </a>
+                        @{
+                            var rowTags = row.TagsSafe;
+                            var inlineTagCount = Math.Min(rowTags.Count, 2);
+                        }
+                        @for (int i = 0; i < inlineTagCount; i++)
+                        {
+                            var t = rowTags[i];
+                            <span class="tag-chip"
+                                  style="@($"background:{t.Color};")"
+                                  title="@($"Tag: {t.Name}. Click + to manage.")">@t.Name</span>
+                        }
+                        @if (rowTags.Count > inlineTagCount)
+                        {
+                            <button type="button"
+                                    class="tag-chip tag-overflow"
+                                    title="Show all tags on this PR"
+                                    @onclick="() => OpenTagPopover(row.Url)">+@(rowTags.Count - inlineTagCount)</button>
+                        }
+                        <button type="button"
+                                class="tag-add"
+                                title="Add or remove tags"
+                                aria-label="Manage tags"
+                                @onclick="() => OpenTagPopover(row.Url)">+</button>
+                        @if (string.Equals(_openTagPopoverForUrl, row.Url, StringComparison.Ordinal))
+                        {
+                            <div class="tag-popover-backdrop" @onclick="CloseTagPopover"></div>
+                            <div class="tag-popover" role="dialog" aria-label="Manage tags">
+                                @if (_allTags.Count == 0)
+                                {
+                                    <div class="muted small">No tags yet. Create your first below.</div>
+                                }
+                                else
+                                {
+                                    <ul class="tag-popover-list">
+                                        @foreach (var tag in _allTags)
+                                        {
+                                            var checkedOn = rowTags.Any(t => string.Equals(t.Name, tag.Name, StringComparison.OrdinalIgnoreCase));
+                                            <li>
+                                                <label>
+                                                    <input type="checkbox"
+                                                           checked="@checkedOn"
+                                                           @onchange="@(e => OnTogglePrTagAsync(row, tag.Name, (bool)e.Value!))" />
+                                                    <span class="tag-chip" style="@($"background:{tag.Color};")">@tag.Name</span>
+                                                </label>
+                                            </li>
+                                        }
+                                    </ul>
+                                }
+                                <div class="tag-popover-create">
+                                    <input type="text"
+                                           placeholder="new tag…"
+                                           maxlength="32"
+                                           @bind="_newTagName"
+                                           @bind:event="oninput"
+                                           @onkeydown="@(e => OnNewTagKeyDown(e, row))" />
+                                    <div class="tag-color-swatches" role="group" aria-label="Tag color">
+                                        @foreach (var color in TagPalette)
+                                        {
+                                            <button type="button"
+                                                    class="swatch @(_newTagColor == color ? "is-on" : "")"
+                                                    style="@($"background:{color};")"
+                                                    title="@color"
+                                                    aria-label="@($"Color {color}")"
+                                                    @onclick="() => _newTagColor = color"></button>
+                                        }
+                                    </div>
+                                    <button type="button"
+                                            class="link-like"
+                                            disabled="@(string.IsNullOrWhiteSpace(_newTagName))"
+                                            @onclick="() => OnCreateTagAndAttachAsync(row)">Create &amp; attach</button>
+                                </div>
+                            </div>
+                        }
                     </td>
                     <td class="title">@(row.Title ?? "")</td>
                     <td>@(row.AuthorLogin ?? "")</td>
@@ -441,6 +534,7 @@ else
                         </button>
                     </td>
                 </tr>
+                }
             }
         </tbody>
     </table>
@@ -468,6 +562,25 @@ else
     private const string PrefExcludedAuthors = "inbox.excluded_authors";
     private const string PrefAuthorSortMode = "inbox.author_sort_mode";
     private const string PrefRepoSortMode   = "inbox.repo_sort_mode";
+    private const string PrefGroupBy        = "inbox.group_by";
+
+    public enum GroupByMode { None, Tag }
+
+    // Preset palette the popover offers for new tags. Pure cosmetic; the
+    // tags.color column accepts any string so power users can edit
+    // directly later. Matches the star color for amber so a tag named
+    // 'starred' would visually rhyme if someone created one.
+    private static readonly string[] TagPalette = new[]
+    {
+        "#f59e0b", // amber/gold
+        "#dc2626", // red
+        "#3b82f6", // blue
+        "#10b981", // green
+        "#8b5cf6", // purple
+        "#ec4899", // pink
+        "#64748b", // slate
+        "#0891b2", // cyan
+    };
 
     private IReadOnlyList<InboxRow> _rows = Array.Empty<InboxRow>();
     private IReadOnlyDictionary<string, ReviewRun> _runMap = new Dictionary<string, ReviewRun>();
@@ -477,6 +590,21 @@ else
     private bool _showDone;
     private bool _onlyFlagged;
     private bool _refreshing;
+
+    // Tags: dictionary of all known tags (for the popover's pick list)
+    // and which row's tag popover is currently open. Loaded once on
+    // initialize and re-fetched after any create/add/remove so the
+    // popover state stays consistent without a full sync round-trip.
+    private IReadOnlyList<TagRow> _allTags = Array.Empty<TagRow>();
+    private string? _openTagPopoverForUrl;
+    private string _newTagName = string.Empty;
+    private string _newTagColor = "#3b82f6";
+
+    // Group rows into collapsible sections. None = flat list (current
+    // behaviour). Tag = synthesize a section per known tag plus a
+    // "★ Starred" group (from flagged_at) and an "untagged" bucket.
+    // Persisted as a string in inbox.group_by ("none" / "tag").
+    private GroupByMode _groupBy = GroupByMode.None;
 
     // Source classes that are currently enabled. Default = all known
     // chips on; loaded from prefs in OnInitializedAsync.
@@ -631,6 +759,7 @@ else
         Runs.Changed += OnStateChanged;
         Consoles.Changed += OnStateChanged;
         await LoadPrefsAsync();
+        await ReloadTagsAsync();
         CompileIgnoredRepoRegexes();
         SnapshotAll();
     }
@@ -665,6 +794,10 @@ else
             _showIgnored = await Prefs.GetBoolAsync(PrefShowIgnored, defaultValue: false);
             _showDone    = await Prefs.GetBoolAsync(PrefShowDone, defaultValue: false);
             _onlyFlagged = await Prefs.GetBoolAsync(PrefOnlyFlagged, defaultValue: false);
+            var gbRaw = await Prefs.GetAsync(PrefGroupBy);
+            _groupBy = string.Equals(gbRaw, "tag", StringComparison.OrdinalIgnoreCase)
+                ? GroupByMode.Tag
+                : GroupByMode.None;
 
             var rawSources = await Prefs.GetAsync(PrefSourceFilter);
             if (!string.IsNullOrWhiteSpace(rawSources))
@@ -771,6 +904,174 @@ else
         _onlyFlagged = value;
         try { await Prefs.SetBoolAsync(PrefOnlyFlagged, value); }
         catch (Exception ex) { Log.LogDebug(ex, "Persist {Key} failed.", PrefOnlyFlagged); }
+    }
+
+    private async Task PersistGroupByAsync()
+    {
+        try { await Prefs.SetAsync(PrefGroupBy, _groupBy == GroupByMode.Tag ? "tag" : "none"); }
+        catch (Exception ex) { Log.LogDebug(ex, "Persist {Key} failed.", PrefGroupBy); }
+    }
+
+    // -- Tags ----------------------------------------------------------
+
+    private async Task ReloadTagsAsync()
+    {
+        try { _allTags = await TagRepo.ListTagsAsync(CancellationToken.None); }
+        catch (Exception ex) { Log.LogDebug(ex, "ListTagsAsync failed"); }
+    }
+
+    private void OpenTagPopover(string url)
+    {
+        // Toggle: clicking the same row closes the popover; clicking a
+        // different row's "+" moves the popover. Reset the create form so
+        // a half-typed tag from a previous row doesn't bleed across.
+        if (string.Equals(_openTagPopoverForUrl, url, StringComparison.Ordinal))
+        {
+            CloseTagPopover();
+            return;
+        }
+        _openTagPopoverForUrl = url;
+        _newTagName = string.Empty;
+        _newTagColor = TagPalette[0];
+    }
+
+    private void CloseTagPopover()
+    {
+        _openTagPopoverForUrl = null;
+        _newTagName = string.Empty;
+    }
+
+    /// <summary>
+    /// Refresh the live tags on a single PR after a mutation, then upsert
+    /// the row so the chip strip re-renders without waiting for the next
+    /// background sync.
+    /// </summary>
+    private async Task RefreshRowTagsAsync(InboxRow row)
+    {
+        try
+        {
+            var fresh = await TagRepo.GetTagsForPrAsync(row.Url, CancellationToken.None);
+            State.Upsert(row with { Tags = fresh });
+        }
+        catch (Exception ex)
+        {
+            Log.LogDebug(ex, "Refresh tags for {Url} failed", row.Url);
+        }
+    }
+
+    private async Task OnTogglePrTagAsync(InboxRow row, string tagName, bool isChecked)
+    {
+        try
+        {
+            if (isChecked)
+            {
+                await TagRepo.AddTagToPrAsync(row.Url, tagName, DateTimeOffset.UtcNow, CancellationToken.None);
+            }
+            else
+            {
+                await TagRepo.RemoveTagFromPrAsync(row.Url, tagName, CancellationToken.None);
+            }
+            await RefreshRowTagsAsync(row);
+        }
+        catch (Exception ex)
+        {
+            Log.LogError(ex, "Toggle tag {Tag} for {Url} failed", tagName, row.Url);
+            _lastLaunchMessage = $"Could not update tag: {ex.Message}";
+        }
+    }
+
+    private async Task OnCreateTagAndAttachAsync(InboxRow row)
+    {
+        var name = _newTagName.Trim();
+        if (string.IsNullOrEmpty(name)) return;
+        try
+        {
+            var now = DateTimeOffset.UtcNow;
+            await TagRepo.CreateTagAsync(name, _newTagColor, now, CancellationToken.None);
+            await TagRepo.AddTagToPrAsync(row.Url, name, now, CancellationToken.None);
+            _newTagName = string.Empty;
+            await ReloadTagsAsync();
+            await RefreshRowTagsAsync(row);
+        }
+        catch (Exception ex)
+        {
+            Log.LogError(ex, "Create+attach tag {Tag} for {Url} failed", name, row.Url);
+            _lastLaunchMessage = $"Could not create tag: {ex.Message}";
+        }
+    }
+
+    private async Task OnNewTagKeyDown(Microsoft.AspNetCore.Components.Web.KeyboardEventArgs e, InboxRow row)
+    {
+        if (e.Key == "Enter" && !string.IsNullOrWhiteSpace(_newTagName))
+        {
+            await OnCreateTagAndAttachAsync(row);
+        }
+        else if (e.Key == "Escape")
+        {
+            CloseTagPopover();
+        }
+    }
+
+    private record GroupRow(string name, string? color, IReadOnlyList<InboxRow> rows);
+
+    /// <summary>
+    /// Bucket the visible rows by the active <see cref="_groupBy"/> mode.
+    /// When mode is Tag a PR with multiple tags appears in EACH matching
+    /// group (Gmail-label semantics) — confirmed with the user. A
+    /// synthetic "★ Starred" group is materialized from flagged_at, and
+    /// rows with no tag and no star fall into "untagged" so nothing is
+    /// silently dropped.
+    /// </summary>
+    private List<GroupRow> ComputeGroups(IReadOnlyList<InboxRow> visible)
+    {
+        if (_groupBy == GroupByMode.None)
+        {
+            return new List<GroupRow> { new("", null, visible) };
+        }
+
+        // Preserve creation order of tags by walking _allTags first;
+        // unknown tags (shouldn't happen — but defensive) get appended.
+        var ordered = new List<string>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var t in _allTags) { ordered.Add(t.Name); seen.Add(t.Name); }
+        var groups = new Dictionary<string, GroupRow>(StringComparer.OrdinalIgnoreCase);
+
+        // Synthetic Starred group from flagged_at.
+        var starred = visible.Where(r => r.IsFlagged).ToList();
+        if (starred.Count > 0)
+        {
+            groups["★ Starred"] = new GroupRow("★ Starred", "#f59e0b", starred);
+            ordered.Insert(0, "★ Starred");
+            seen.Add("★ Starred");
+        }
+
+        foreach (var row in visible)
+        {
+            foreach (var tag in row.TagsSafe)
+            {
+                if (!groups.TryGetValue(tag.Name, out var g))
+                {
+                    g = new GroupRow(tag.Name, tag.Color, new List<InboxRow>());
+                    groups[tag.Name] = g;
+                    if (seen.Add(tag.Name)) ordered.Add(tag.Name);
+                }
+                ((List<InboxRow>)g.rows).Add(row);
+            }
+        }
+
+        var untagged = visible.Where(r => !r.HasTags && !r.IsFlagged).ToList();
+        if (untagged.Count > 0)
+        {
+            groups["untagged"] = new GroupRow("untagged", null, untagged);
+            ordered.Add("untagged");
+        }
+
+        var result = new List<GroupRow>(ordered.Count);
+        foreach (var name in ordered)
+        {
+            if (groups.TryGetValue(name, out var g) && g.rows.Count > 0) result.Add(g);
+        }
+        return result;
     }
 
     private async Task OnToggleFlagAsync(InboxRow row)
