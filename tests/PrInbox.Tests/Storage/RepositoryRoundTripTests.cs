@@ -1069,5 +1069,138 @@ public class RepositoryRoundTripTests : IAsyncLifetime
         fetched!.FlaggedAt.Should().Be(when);
         fetched.Title.Should().Be("Updated title");
     }
+
+    // -- Tags ----------------------------------------------------------
+
+    [Fact]
+    public async Task Tags_CreateAndList_RoundTrips_Name_And_Color()
+    {
+        var repo = new TagRepository(_db);
+        var t0 = DateTimeOffset.Parse("2026-05-21T13:00:00Z");
+        await repo.CreateTagAsync("security", "#f59e0b", t0, CancellationToken.None);
+        await repo.CreateTagAsync("my-team", "#3b82f6", t0.AddSeconds(1), CancellationToken.None);
+
+        var tags = await repo.ListTagsAsync(CancellationToken.None);
+        tags.Should().HaveCount(2);
+        tags[0].Name.Should().Be("security");
+        tags[0].Color.Should().Be("#f59e0b");
+        tags[1].Name.Should().Be("my-team");
+    }
+
+    [Fact]
+    public async Task Tags_Create_Is_Idempotent_And_CaseInsensitive()
+    {
+        var repo = new TagRepository(_db);
+        var t0 = DateTimeOffset.Parse("2026-05-21T13:00:00Z");
+        await repo.CreateTagAsync("Security", "#f59e0b", t0, CancellationToken.None);
+        // Second call with different casing must not create a duplicate
+        // nor change the stored color (idempotent ON CONFLICT DO NOTHING).
+        await repo.CreateTagAsync("security", "#ff0000", t0.AddMinutes(1), CancellationToken.None);
+
+        var tags = await repo.ListTagsAsync(CancellationToken.None);
+        tags.Should().HaveCount(1);
+        tags[0].Color.Should().Be("#f59e0b");
+    }
+
+    [Fact]
+    public async Task PrTag_AddAndGet_RoundTrips_For_Single_Pr()
+    {
+        var prRepo = new PullRequestRepository(_db);
+        var tagRepo = new TagRepository(_db);
+        var row = SampleRow();
+        await prRepo.UpsertAsync(row, CancellationToken.None);
+
+        var t0 = DateTimeOffset.Parse("2026-05-21T13:00:00Z");
+        await tagRepo.CreateTagAsync("security", "#f59e0b", t0, CancellationToken.None);
+        await tagRepo.CreateTagAsync("my-team", "#3b82f6", t0.AddSeconds(1), CancellationToken.None);
+        await tagRepo.AddTagToPrAsync(row.Identity.Url, "security", t0.AddMinutes(1), CancellationToken.None);
+        await tagRepo.AddTagToPrAsync(row.Identity.Url, "my-team", t0.AddMinutes(2), CancellationToken.None);
+
+        var tags = await tagRepo.GetTagsForPrAsync(row.Identity.Url, CancellationToken.None);
+        tags.Should().HaveCount(2);
+        tags.Select(t => t.Name).Should().BeEquivalentTo(new[] { "security", "my-team" });
+    }
+
+    [Fact]
+    public async Task PrTag_Remove_Detaches_Without_Deleting_Tag()
+    {
+        var prRepo = new PullRequestRepository(_db);
+        var tagRepo = new TagRepository(_db);
+        var row = SampleRow();
+        await prRepo.UpsertAsync(row, CancellationToken.None);
+
+        var t0 = DateTimeOffset.Parse("2026-05-21T13:00:00Z");
+        await tagRepo.CreateTagAsync("security", "#f59e0b", t0, CancellationToken.None);
+        await tagRepo.AddTagToPrAsync(row.Identity.Url, "security", t0, CancellationToken.None);
+        await tagRepo.RemoveTagFromPrAsync(row.Identity.Url, "security", CancellationToken.None);
+
+        var tagsOnPr = await tagRepo.GetTagsForPrAsync(row.Identity.Url, CancellationToken.None);
+        tagsOnPr.Should().BeEmpty();
+        var dictionary = await tagRepo.ListTagsAsync(CancellationToken.None);
+        dictionary.Should().HaveCount(1, "removing the link must not delete the tag itself");
+    }
+
+    [Fact]
+    public async Task Tag_Delete_Cascades_To_PrTag_Rows()
+    {
+        var prRepo = new PullRequestRepository(_db);
+        var tagRepo = new TagRepository(_db);
+        var row = SampleRow();
+        await prRepo.UpsertAsync(row, CancellationToken.None);
+
+        var t0 = DateTimeOffset.Parse("2026-05-21T13:00:00Z");
+        await tagRepo.CreateTagAsync("security", "#f59e0b", t0, CancellationToken.None);
+        await tagRepo.AddTagToPrAsync(row.Identity.Url, "security", t0, CancellationToken.None);
+
+        await tagRepo.DeleteTagAsync("security", CancellationToken.None);
+
+        var tagsOnPr = await tagRepo.GetTagsForPrAsync(row.Identity.Url, CancellationToken.None);
+        tagsOnPr.Should().BeEmpty();
+        var dictionary = await tagRepo.ListTagsAsync(CancellationToken.None);
+        dictionary.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task GetAllPrTags_Bulk_Returns_Per_Pr_Lists()
+    {
+        var prRepo = new PullRequestRepository(_db);
+        var tagRepo = new TagRepository(_db);
+        var rowA = SampleRow();
+        var rowB = SampleRow(new PrIdentity(
+            Url: "https://github.com/agency-microsoft/playground/pull/9999",
+            Stable: "gh.com:100#9999"));
+        await prRepo.UpsertAsync(rowA, CancellationToken.None);
+        await prRepo.UpsertAsync(rowB, CancellationToken.None);
+
+        var t0 = DateTimeOffset.Parse("2026-05-21T13:00:00Z");
+        await tagRepo.CreateTagAsync("security", "#f59e0b", t0, CancellationToken.None);
+        await tagRepo.CreateTagAsync("my-team", "#3b82f6", t0.AddSeconds(1), CancellationToken.None);
+        await tagRepo.AddTagToPrAsync(rowA.Identity.Url, "security", t0, CancellationToken.None);
+        await tagRepo.AddTagToPrAsync(rowA.Identity.Url, "my-team", t0.AddSeconds(1), CancellationToken.None);
+        await tagRepo.AddTagToPrAsync(rowB.Identity.Url, "my-team", t0.AddSeconds(2), CancellationToken.None);
+
+        var all = await tagRepo.GetAllPrTagsAsync(CancellationToken.None);
+        all.Should().HaveCount(2);
+        all[rowA.Identity.Url].Select(t => t.Name).Should().BeEquivalentTo(new[] { "security", "my-team" });
+        all[rowB.Identity.Url].Select(t => t.Name).Should().BeEquivalentTo(new[] { "my-team" });
+    }
+
+    [Fact]
+    public async Task SetTagColor_Updates_Color_Without_Touching_Links()
+    {
+        var prRepo = new PullRequestRepository(_db);
+        var tagRepo = new TagRepository(_db);
+        var row = SampleRow();
+        await prRepo.UpsertAsync(row, CancellationToken.None);
+
+        var t0 = DateTimeOffset.Parse("2026-05-21T13:00:00Z");
+        await tagRepo.CreateTagAsync("security", "#f59e0b", t0, CancellationToken.None);
+        await tagRepo.AddTagToPrAsync(row.Identity.Url, "security", t0, CancellationToken.None);
+
+        await tagRepo.SetTagColorAsync("security", "#dc2626", CancellationToken.None);
+        var tags = await tagRepo.GetTagsForPrAsync(row.Identity.Url, CancellationToken.None);
+        tags.Should().HaveCount(1);
+        tags[0].Color.Should().Be("#dc2626");
+    }
 }
 
