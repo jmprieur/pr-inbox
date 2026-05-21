@@ -17,6 +17,7 @@
 @inject IConfigService ConfigSvc
 @inject ConsoleWindowRegistry Consoles
 @inject NavigationManager Nav
+@inject IJSRuntime Js
 @inject ILogger<Inbox> Log
 
 <h1>Pull requests assigned to me</h1>
@@ -264,7 +265,7 @@ else
         <tbody>
             @foreach (var row in visible)
             {
-                <tr class="@RowClasses(row)">
+                <tr class="@RowClasses(row)" data-pr-url="@row.Url">
                     <td><span class="badge @SourceClass(row)">@SourceLabel(row)</span></td>
                     <td>
                         <button type="button"
@@ -636,6 +637,13 @@ else
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
+        // Fire on every render: if the user just came back from /review, the
+        // JS pulls the stashed URL out of localStorage, scrolls the row into
+        // view, and pulses it for ~2s -- then clears the storage so we
+        // don't re-flash on subsequent renders. No-op if storage is empty.
+        try { await Js.InvokeVoidAsync("prInboxLastVisited.flash"); }
+        catch (Exception ex) { Log.LogDebug(ex, "flash last-visited failed"); }
+
         if (!firstRender) return;
         // If the user just changed config on /settings (added/removed a
         // source), trigger an out-of-band fast+enrich pass so the inbox
@@ -647,7 +655,6 @@ else
         {
             _ = Sync.TriggerNowAsync(CancellationToken.None);
         }
-        await Task.CompletedTask;
     }
 
     private async Task LoadPrefsAsync()

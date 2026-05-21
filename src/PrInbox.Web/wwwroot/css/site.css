@@ -783,6 +783,26 @@ button.flag-star:hover { color: #b45309; }
 button.flag-star.is-on { color: #f59e0b; }
 button.flag-star.is-on:hover { color: #d97706; }
 
+button.link-like.review-flag.is-on { color: #f59e0b; font-weight: 600; }
+button.link-like.done-and-back { color: #166534; font-weight: 600; }
+button.link-like.done-and-back:hover { color: #14532d; }
+
+.action-error {
+    margin: 8px 0;
+    padding: 8px 12px;
+    background: #fef2f2;
+    border: 1px solid #fecaca;
+    color: #991b1b;
+    border-radius: 4px;
+}
+
+@keyframes returnPulse {
+    0%   { background-color: rgba(245, 158, 11, 0.45); }
+    35%  { background-color: rgba(245, 158, 11, 0.30); }
+    100% { background-color: transparent; }
+}
+tr.row-just-returned > td { animation: returnPulse 2.2s ease-out; }
+
 tr.row-hidden { opacity: 0.55; }
 tr.row-hidden td.title { font-style: italic; }
 

@@ -2,6 +2,7 @@
 @rendermode InteractiveServer
 @using System.Collections.Generic
 @using System.IO
+@using System.Linq
 @using PrInbox.Core.Findings
 @using PrInbox.Core.Models
 @using PrInbox.Core.Storage
@@ -10,6 +11,8 @@
 @inject ReviewRunStore Runs
 @inject ReviewPublishOrchestrator Orchestrator
 @inject PrSnapshotRepository SnapRepo
+@inject InboxState State
+@inject PullRequestRepository PrRepo
 @inject IJSRuntime Js
 @inject ILogger<Review> Log
 @inject NavigationManager Nav
@@ -25,6 +28,23 @@
 
 <div class="toolbar">
     <a href="/" class="muted">← back to inbox</a>
+    <span>&nbsp;·&nbsp;</span>
+    <button type="button"
+            class="link-like done-and-back"
+            title="Mark this PR as Done at the current head, then return to the inbox."
+            disabled="@_actionBusy"
+            @onclick="OnDoneAndBackAsync">
+        ✓ Mark done &amp; back
+    </button>
+    <span>&nbsp;·&nbsp;</span>
+    <button type="button"
+            class="link-like review-flag @(_inboxRow?.IsFlagged == true ? "is-on" : "")"
+            title="@(_inboxRow?.IsFlagged == true ? "Unflag — remove from 'of interest'." : "Flag as 'of interest'.")"
+            aria-pressed="@(_inboxRow?.IsFlagged == true ? "true" : "false")"
+            disabled="@_actionBusy"
+            @onclick="OnToggleFlagAsync">
+        @(_inboxRow?.IsFlagged == true ? "★ Flagged" : "☆ Flag")
+    </button>
     <span>&nbsp;·&nbsp;</span>
     <a href="@Url" target="_blank" rel="noopener">@Url</a>
     @if (IsGitHubUrl)
@@ -44,6 +64,11 @@
         </button>
     }
 </div>
+
+@if (!string.IsNullOrEmpty(_actionMessage))
+{
+    <div class="action-error" role="alert">@_actionMessage</div>
+}
 
     @if (_run is not null && _drift is not null
          && (_drift.Kind == DriftKind.Ahead || _drift.Kind == DriftKind.ForcePushed))
@@ -261,12 +286,17 @@ else
     private ReviewEvent _reviewEvent = ReviewEvent.Comment;
     private bool _posting;
     private PublishResult? _result;
+    private InboxRow? _inboxRow;
+    private bool _actionBusy;
+    private string? _actionMessage;
 
     protected override void OnInitialized()
     {
         Runs.Changed += OnRunsChanged;
+        State.Changed += OnInboxStateChanged;
         ApplyShowOverride();
         RefreshRun();
+        RefreshInboxRow();
         _ = RefreshDriftAsync();
     }
 
@@ -274,7 +304,99 @@ else
     {
         ApplyShowOverride();
         RefreshRun();
+        RefreshInboxRow();
         _ = RefreshDriftAsync();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        // Stash this PR's URL so when the user returns to the inbox (via
+        // "← back" or "Mark done & back"), the inbox can scroll to and pulse
+        // exactly this row. See wwwroot/js/last-visited.js.
+        if (!string.IsNullOrWhiteSpace(Url))
+        {
+            try { await Js.InvokeVoidAsync("prInboxLastVisited.mark", Url); }
+            catch (Exception ex) { Log.LogDebug(ex, "mark last-visited failed"); }
+        }
+    }
+
+    private void OnInboxStateChanged()
+    {
+        RefreshInboxRow();
+        InvokeAsync(StateHasChanged);
+    }
+
+    private void RefreshInboxRow()
+    {
+        if (string.IsNullOrWhiteSpace(Url)) { _inboxRow = null; return; }
+        _inboxRow = State.CurrentRows.FirstOrDefault(
+            r => string.Equals(r.Url, Url, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private async Task OnDoneAndBackAsync()
+    {
+        if (string.IsNullOrWhiteSpace(Url) || _actionBusy) return;
+        _actionBusy = true;
+        try
+        {
+            // Anchor "done" at the SHA we have in hand -- prefer the live
+            // snapshot head, then the SHA the active review ran at, then a
+            // sentinel. Mirrors OnToggleDoneAsync in Inbox.razor.
+            var row = _inboxRow;
+            var sha = row?.CurrentHeadSha
+                      ?? row?.LastReviewedHeadSha
+                      ?? _run?.HeadSha
+                      ?? "unknown";
+            var when = DateTimeOffset.UtcNow;
+            await PrRepo.MarkDoneAsync(Url, sha, when, CancellationToken.None);
+            if (row is not null)
+            {
+                State.Upsert(row with { MarkedDoneHeadSha = sha, MarkedDoneAt = when });
+            }
+            Nav.NavigateTo("/");
+        }
+        catch (Exception ex)
+        {
+            Log.LogError(ex, "Mark done & back for {Url} failed", Url);
+            _actionMessage = $"Could not mark done: {ex.Message}";
+            _actionBusy = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task OnToggleFlagAsync()
+    {
+        if (string.IsNullOrWhiteSpace(Url) || _actionBusy) return;
+        _actionBusy = true;
+        try
+        {
+            var row = _inboxRow;
+            if (row?.IsFlagged == true)
+            {
+                await PrRepo.UnflagAsync(Url, CancellationToken.None);
+                State.Upsert(row with { FlaggedAt = null });
+            }
+            else
+            {
+                var when = DateTimeOffset.UtcNow;
+                await PrRepo.FlagAsync(Url, when, CancellationToken.None);
+                if (row is not null)
+                {
+                    State.Upsert(row with { FlaggedAt = when });
+                }
+            }
+            RefreshInboxRow();
+        }
+        catch (Exception ex)
+        {
+            Log.LogError(ex, "Toggle flag for {Url} failed", Url);
+            _actionMessage = $"Could not update flag: {ex.Message}";
+        }
+        finally
+        {
+            _actionBusy = false;
+            StateHasChanged();
+        }
     }
 
     /// <summary>
@@ -601,5 +723,6 @@ else
     public void Dispose()
     {
         Runs.Changed -= OnRunsChanged;
+        State.Changed -= OnInboxStateChanged;
     }
 }
