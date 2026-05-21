@@ -130,7 +130,7 @@ The Inbox page is your morning triage view. Pulled-down summary:
 Source chips: [✓ EMU] [✓ public] [✓ proxima] [✓ ADO]    ← click to filter
 Repos • 23 / 3 hidden ▾                                  ← click to filter
 Authors • 24 / 1 hidden ▾                                ← click to filter
-[  Show closed   ]   [  Show ignored  ]   [  Show done (N)  ]
+[  Show closed   ]   [  Show ignored  ]   [  Show done (N)  ]   [  Show only flagged (N)  ]
 [ Refresh now ]   12 shown · 47 total      Last sync: 2026-05-18 13:42
 ```
 
@@ -144,7 +144,7 @@ just `Repos • 23` / `Authors • 24`.
 
 | Column | What it shows | Notes |
 |---|---|---|
-| **Repo** | `owner/repo` (clickable) | EMU/public/GHE/ADO color-coded |
+| **Repo** | `☆` star + `owner/repo` (clickable) | Click the star to flag the PR as "of interest"; star turns gold ★ |
 | **#PR** | PR number + title | Click to open on the platform |
 | **Author** | `@login` (avatar where available) | |
 | **Age** | Days since opened | `Xd`; gets warmer over time |
@@ -169,6 +169,7 @@ all PRs
   → drop authors in your author denylist
   → drop ignored / disappeared unless "Show ignored"
   → drop marked-done (where the author hasn't pushed since) unless "Show done"
+  → drop unflagged rows when "Show only flagged" is on
 ```
 
 All four filters persist per-user in SQLite (`ui_preferences` table).
@@ -217,6 +218,17 @@ both count as "author activity" and bring the row back. To bring a row
 back manually (e.g. you marked it done by mistake), expand **Show
 done** and click **Undo done**. Unlike Ignore — which is a permanent
 hide — Done is a soft snooze that resolves itself on the next push.
+
+**Flag** (the **☆ / ★** star in the Repo column): a third axis next to
+Done and Ignore. Click the star on a row to mark it "of interest" —
+the star turns gold and the PR joins your flagged set. Use the
+**Show only flagged (N)** toolbar toggle to isolate the inbox to just
+those rows. Flag is *orthogonal* to Done/Ignore/Closed: flagging a
+PR does **not** bypass the other filters. A PR that's both flagged
+and done stays hidden until you turn on Show done (or Show only
+flagged). Use Flag when you want to keep tabs on a PR you don't need
+to review — to see how it lands, wait for an author reply, or follow
+a teammate's work.
 
 ### Disappeared PRs
 

@@ -357,6 +357,43 @@ public sealed class PullRequestRepository
     }
 
     /// <summary>
+    /// Flag a PR as "of interest." A flagged row gets a visible ⭐ marker
+    /// and can be isolated via the inbox "Show only flagged" filter.
+    /// Orthogonal to done / ignore / closed: flagging does not bypass
+    /// any other filter. Idempotent — calling twice keeps the original
+    /// <paramref name="flaggedAt"/> if the caller passes the same value.
+    /// </summary>
+    public async Task FlagAsync(string url, DateTimeOffset flaggedAt, CancellationToken ct)
+    {
+        await using var conn = await _db.OpenAsync(ct);
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            UPDATE pull_requests
+            SET flagged_at = $at
+            WHERE pr_identity = $id;
+            """;
+        cmd.Parameters.AddWithValue("$at", FormatTimestamp(flaggedAt));
+        cmd.Parameters.AddWithValue("$id", url);
+        await cmd.ExecuteNonQueryAsync(ct);
+    }
+
+    /// <summary>
+    /// Clear the "of interest" flag.
+    /// </summary>
+    public async Task UnflagAsync(string url, CancellationToken ct)
+    {
+        await using var conn = await _db.OpenAsync(ct);
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            UPDATE pull_requests
+            SET flagged_at = NULL
+            WHERE pr_identity = $id;
+            """;
+        cmd.Parameters.AddWithValue("$id", url);
+        await cmd.ExecuteNonQueryAsync(ct);
+    }
+
+    /// <summary>
     /// Update <c>pull_requests.status</c>. Used by the enrich path so a PR
     /// that has been merged/closed since the last fast pass surfaces its
     /// new state in the UI instead of remaining stuck at <c>open</c>.
@@ -506,7 +543,8 @@ public sealed class PullRequestRepository
             MarkedDoneHeadSha: HasColumn(reader, "marked_done_head_sha")
                 ? GetStringOrNull(reader, "marked_done_head_sha")
                 : null,
-            MarkedDoneAt: ParseOptionalTimestamp(reader, "marked_done_at"));
+            MarkedDoneAt: ParseOptionalTimestamp(reader, "marked_done_at"),
+            FlaggedAt: ParseOptionalTimestamp(reader, "flagged_at"));
     }
 
     private static bool HasColumn(SqliteDataReader reader, string name)

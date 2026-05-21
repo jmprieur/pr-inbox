@@ -32,6 +32,7 @@ public sealed record InboxFilters(
     bool ShowClosed,
     bool ShowIgnored,
     bool ShowDone,
+    bool OnlyFlagged,
     FrozenSet<string> EnabledSources,
     FrozenSet<string> ExcludedRepos,
     FrozenSet<string> ExcludedAuthors,
@@ -49,6 +50,7 @@ public sealed record InboxFilters(
     private const string PrefShowClosed = "inbox.show_closed";
     private const string PrefShowIgnored = "inbox.show_ignored";
     private const string PrefShowDone = "inbox.show_done";
+    private const string PrefOnlyFlagged = "inbox.only_flagged";
     private const string PrefSourceFilter = "inbox.source_filter";
     private const string PrefExcludedRepos = "inbox.excluded_repos";
     private const string PrefExcludedAuthors = "inbox.excluded_authors";
@@ -69,6 +71,7 @@ public sealed record InboxFilters(
         var showClosed = await prefs.GetBoolAsync(PrefShowClosed, defaultValue: false, ct);
         var showIgnored = await prefs.GetBoolAsync(PrefShowIgnored, defaultValue: false, ct);
         var showDone = await prefs.GetBoolAsync(PrefShowDone, defaultValue: false, ct);
+        var onlyFlagged = await prefs.GetBoolAsync(PrefOnlyFlagged, defaultValue: false, ct);
 
         var enabledSources = ParseJsonStringSet(await prefs.GetAsync(PrefSourceFilter, null, ct))
                              ?? KnownSourceClasses;
@@ -83,6 +86,7 @@ public sealed record InboxFilters(
             showClosed,
             showIgnored,
             showDone,
+            onlyFlagged,
             enabledSources,
             excludedRepos,
             excludedAuthors,
@@ -99,6 +103,7 @@ public sealed record InboxFilters(
         bool showClosed,
         bool showIgnored,
         bool showDone,
+        bool onlyFlagged,
         IEnumerable<string> enabledSources,
         IEnumerable<string> excludedRepos,
         IEnumerable<string> excludedAuthors,
@@ -108,11 +113,30 @@ public sealed record InboxFilters(
             showClosed,
             showIgnored,
             showDone,
+            onlyFlagged,
             enabledSources.ToFrozenSet(StringComparer.OrdinalIgnoreCase),
             excludedRepos.ToFrozenSet(StringComparer.OrdinalIgnoreCase),
             excludedAuthors.ToFrozenSet(StringComparer.OrdinalIgnoreCase),
             ignoredRepoRegexes,
             BuildSourceClassMap(sourceConfigs));
+
+    /// <summary>
+    /// Back-compat overload: predates the <c>OnlyFlagged</c> filter.
+    /// Defaults <c>onlyFlagged</c> to <c>false</c> so existing call sites
+    /// behave identically.
+    /// </summary>
+    public static InboxFilters From(
+        bool showClosed,
+        bool showIgnored,
+        bool showDone,
+        IEnumerable<string> enabledSources,
+        IEnumerable<string> excludedRepos,
+        IEnumerable<string> excludedAuthors,
+        IReadOnlyList<Regex> ignoredRepoRegexes,
+        IEnumerable<SourceConfig>? sourceConfigs = null)
+        => From(showClosed, showIgnored, showDone, onlyFlagged: false,
+                enabledSources, excludedRepos, excludedAuthors,
+                ignoredRepoRegexes, sourceConfigs);
 
     /// <summary>
     /// Back-compat overload for callers (and tests) written before the
@@ -128,7 +152,7 @@ public sealed record InboxFilters(
         IEnumerable<string> excludedAuthors,
         IReadOnlyList<Regex> ignoredRepoRegexes,
         IEnumerable<SourceConfig>? sourceConfigs = null)
-        => From(showClosed, showIgnored, showDone: true,
+        => From(showClosed, showIgnored, showDone: true, onlyFlagged: false,
                 enabledSources, excludedRepos, excludedAuthors,
                 ignoredRepoRegexes, sourceConfigs);
 
@@ -144,12 +168,12 @@ public sealed record InboxFilters(
     /// </summary>
     public bool ShouldShow(PullRequestRow row, bool isMarkedDone = false) => ShouldShowCore(
         row.Status, row.SourceId, row.DisplayRepo, row.AuthorLogin,
-        row.IsIgnored, isMarkedDone);
+        row.IsIgnored, isMarkedDone, row.FlaggedAt.HasValue);
 
     /// <summary>Visible on the dashboard right now? (UI-side overload.)</summary>
     public bool ShouldShow(InboxRow row) => ShouldShowCore(
         row.Status, row.SourceId, row.DisplayRepo, row.AuthorLogin,
-        row.IsIgnored, row.IsMarkedDone);
+        row.IsIgnored, row.IsMarkedDone, row.IsFlagged);
 
     /// <summary>
     /// Map a SourceId to the UI chip class. Exposed because the chip
@@ -274,7 +298,8 @@ public sealed record InboxFilters(
         string displayRepo,
         string? authorLogin,
         bool isIgnored,
-        bool isMarkedDone = false)
+        bool isMarkedDone = false,
+        bool isFlagged = false)
     {
         // 1. Closed unless "Show closed".
         if (!ShowClosed && status != PullRequestStatus.Open) return false;
@@ -321,6 +346,14 @@ public sealed record InboxFilters(
         //    A row stops being "marked done" automatically once the
         //    author pushes a new commit (see InboxRow.IsMarkedDone).
         if (!ShowDone && isMarkedDone) return false;
+
+        // 7. "Show only flagged" — a positive restrict, applied last so
+        //    the other filters still apply (e.g. Closed PRs are still
+        //    hidden unless Show closed is on, even when OnlyFlagged is
+        //    on). This is a deliberate orthogonality choice: flagging
+        //    doesn't bypass anything, it just lets you isolate the
+        //    flagged subset of whatever is otherwise visible.
+        if (OnlyFlagged && !isFlagged) return false;
 
         return true;
     }

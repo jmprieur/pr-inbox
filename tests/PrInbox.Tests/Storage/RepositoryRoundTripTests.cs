@@ -1025,5 +1025,49 @@ public class RepositoryRoundTripTests : IAsyncLifetime
         fetched.MarkedDoneAt.Should().Be(when);
         fetched.Title.Should().Be("Updated title");
     }
+
+    [Fact]
+    public async Task FlagAsync_Persists_Timestamp_And_Unflag_Clears()
+    {
+        var repo = new PullRequestRepository(_db);
+        var row = SampleRow();
+        await repo.UpsertAsync(row, CancellationToken.None);
+
+        var when = DateTimeOffset.Parse("2026-05-21T08:00:00Z");
+        await repo.FlagAsync(row.Identity.Url, when, CancellationToken.None);
+        var flagged = await repo.GetAsync(row.Identity.Url, CancellationToken.None);
+
+        flagged.Should().NotBeNull();
+        flagged!.FlaggedAt.Should().Be(when);
+
+        await repo.UnflagAsync(row.Identity.Url, CancellationToken.None);
+        var cleared = await repo.GetAsync(row.Identity.Url, CancellationToken.None);
+        cleared!.FlaggedAt.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task Upsert_Preserves_FlaggedAt_Across_Subsequent_Sync_Writes()
+    {
+        // Mirror invariant for Flag: the sync UPSERT path must not touch
+        // flagged_at — only FlagAsync / UnflagAsync do.
+        var repo = new PullRequestRepository(_db);
+        var row = SampleRow();
+        await repo.UpsertAsync(row, CancellationToken.None);
+
+        var when = DateTimeOffset.Parse("2026-05-21T08:00:00Z");
+        await repo.FlagAsync(row.Identity.Url, when, CancellationToken.None);
+
+        var refreshed = row with
+        {
+            LastSyncedAt = row.LastSyncedAt.AddMinutes(5),
+            Title = "Updated title",
+        };
+        await repo.UpsertAsync(refreshed, CancellationToken.None);
+
+        var fetched = await repo.GetAsync(row.Identity.Url, CancellationToken.None);
+        fetched.Should().NotBeNull();
+        fetched!.FlaggedAt.Should().Be(when);
+        fetched.Title.Should().Be("Updated title");
+    }
 }
 

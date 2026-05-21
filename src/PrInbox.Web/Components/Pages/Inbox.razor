@@ -189,6 +189,11 @@
                @onchange="@(e => OnShowDoneToggleAsync((bool)e.Value!))" />
         Show done@(HiddenDoneCount > 0 ? $" ({HiddenDoneCount})" : "")
     </label>
+    <label class="only-flagged" title="Show only PRs you've flagged as 'of interest'.">
+        <input type="checkbox" checked="@_onlyFlagged"
+               @onchange="@(e => OnOnlyFlaggedToggleAsync((bool)e.Value!))" />
+        Show only flagged@(FlaggedCount > 0 ? $" ({FlaggedCount})" : "")
+    </label>
     @if (!string.IsNullOrEmpty(_lastLaunchMessage))
     {
         <span class="muted">@_lastLaunchMessage</span>
@@ -262,6 +267,14 @@ else
                 <tr class="@RowClasses(row)">
                     <td><span class="badge @SourceClass(row)">@SourceLabel(row)</span></td>
                     <td>
+                        <button type="button"
+                                class="flag-star @(row.IsFlagged ? "is-on" : "")"
+                                title="@(row.IsFlagged ? "Unflag — remove from 'of interest'." : "Flag as 'of interest'. Use 'Show only flagged' to isolate.")"
+                                aria-label="@(row.IsFlagged ? "Unflag PR" : "Flag PR")"
+                                aria-pressed="@(row.IsFlagged ? "true" : "false")"
+                                @onclick="() => OnToggleFlagAsync(row)">
+                            @(row.IsFlagged ? "★" : "☆")
+                        </button>
                         <a href="@row.Url" target="_blank" rel="noopener">
                             @row.DisplayRepo #@row.Number
                         </a>
@@ -448,6 +461,7 @@ else
     private const string PrefShowClosed   = "inbox.show_closed";
     private const string PrefShowIgnored  = "inbox.show_ignored";
     private const string PrefShowDone     = "inbox.show_done";
+    private const string PrefOnlyFlagged  = "inbox.only_flagged";
     private const string PrefSourceFilter = "inbox.source_filter";
     private const string PrefExcludedRepos = "inbox.excluded_repos";
     private const string PrefExcludedAuthors = "inbox.excluded_authors";
@@ -460,6 +474,7 @@ else
     private bool _showClosed;
     private bool _showIgnored;
     private bool _showDone;
+    private bool _onlyFlagged;
     private bool _refreshing;
 
     // Source classes that are currently enabled. Default = all known
@@ -550,6 +565,7 @@ else
         _showClosed,
         _showIgnored,
         _showDone,
+        _onlyFlagged,
         _enabledSources,
         _excludedRepos,
         _excludedAuthors,
@@ -589,6 +605,15 @@ else
             return count;
         }
     }
+
+    /// <summary>
+    /// Total flagged rows currently in the in-memory set. Shown next to
+    /// the "Show only flagged" label so the user always knows how many
+    /// PRs they're tracking. Counts the underlying flag, not the filter
+    /// output, so the badge stays meaningful regardless of which row is
+    /// otherwise hidden.
+    /// </summary>
+    private int FlaggedCount => _rows.Count(r => r.IsFlagged);
 
     protected override async Task OnInitializedAsync()
     {
@@ -632,6 +657,7 @@ else
             _showClosed  = await Prefs.GetBoolAsync(PrefShowClosed, defaultValue: false);
             _showIgnored = await Prefs.GetBoolAsync(PrefShowIgnored, defaultValue: false);
             _showDone    = await Prefs.GetBoolAsync(PrefShowDone, defaultValue: false);
+            _onlyFlagged = await Prefs.GetBoolAsync(PrefOnlyFlagged, defaultValue: false);
 
             var rawSources = await Prefs.GetAsync(PrefSourceFilter);
             if (!string.IsNullOrWhiteSpace(rawSources))
@@ -731,6 +757,36 @@ else
         _showDone = value;
         try { await Prefs.SetBoolAsync(PrefShowDone, value); }
         catch (Exception ex) { Log.LogDebug(ex, "Persist {Key} failed.", PrefShowDone); }
+    }
+
+    private async Task OnOnlyFlaggedToggleAsync(bool value)
+    {
+        _onlyFlagged = value;
+        try { await Prefs.SetBoolAsync(PrefOnlyFlagged, value); }
+        catch (Exception ex) { Log.LogDebug(ex, "Persist {Key} failed.", PrefOnlyFlagged); }
+    }
+
+    private async Task OnToggleFlagAsync(InboxRow row)
+    {
+        try
+        {
+            if (row.IsFlagged)
+            {
+                await PrRepo.UnflagAsync(row.Url, CancellationToken.None);
+                State.Upsert(row with { FlaggedAt = null });
+            }
+            else
+            {
+                var when = DateTimeOffset.UtcNow;
+                await PrRepo.FlagAsync(row.Url, when, CancellationToken.None);
+                State.Upsert(row with { FlaggedAt = when });
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.LogError(ex, "Toggle flag for {Url} failed", row.Url);
+            _lastLaunchMessage = $"Could not update flag: {ex.Message}";
+        }
     }
 
     private async Task OnToggleDoneAsync(InboxRow row)

@@ -1,0 +1,27 @@
+-- Migration 011 — Per-PR "of interest" flag.
+--
+-- Why: a user may want to keep an eye on a PR they aren't reviewing —
+-- to follow how it lands, learn from it, or wait for a reply. Unlike
+-- Done (snooze) or Ignore (hide), Flag is a *highlight*: a visible
+-- marker that lets the user filter the inbox to just "what I care
+-- about right now."
+--
+-- Mechanism:
+--   * flagged_at — when the marker was set. NULL = not flagged.
+--
+-- A row is "flagged" when flagged_at IS NOT NULL. The UI shows a
+-- filled star ⭐ on flagged rows and an outline ☆ otherwise; clicking
+-- toggles. The toolbar gains a "Show only flagged (N)" filter.
+--
+-- Orthogonal to Done / Ignore / Closed: flagging does NOT bypass
+-- those filters. A flagged PR that is also done stays hidden unless
+-- "Show done" (or "Show only flagged") is enabled. This keeps the
+-- mental model clean — each axis is independent.
+--
+-- The sync upsert path deliberately leaves this column alone — only
+-- the dedicated FlagAsync / UnflagAsync methods write it.
+--
+-- Backfill: NULL on every existing row — no PRs are flagged at
+-- migration time, which is the correct default.
+
+ALTER TABLE pull_requests ADD COLUMN flagged_at TEXT;

@@ -594,6 +594,7 @@ public class InboxFiltersTests
         string? markedDoneHeadSha = null,
         string? currentHeadSha = null,
         DateTimeOffset? markedDoneAt = null,
+        DateTimeOffset? flaggedAt = null,
         PullRequestStatus status = PullRequestStatus.Open,
         bool isIgnored = false)
         => new(
@@ -616,7 +617,8 @@ public class InboxFiltersTests
             CurrentHeadSha: currentHeadSha,
             IsIgnored: isIgnored,
             MarkedDoneHeadSha: markedDoneHeadSha,
-            MarkedDoneAt: markedDoneAt);
+            MarkedDoneAt: markedDoneAt,
+            FlaggedAt: flaggedAt);
 
     [Fact]
     public void InboxRow_IsMarkedDone_True_When_Sha_Matches_Current()
@@ -697,6 +699,74 @@ public class InboxFiltersTests
 
         reactivated.IsMarkedDone.Should().BeFalse();
         filters.ShouldShow(reactivated).Should().BeTrue();
+    }
+
+    // ---------- Flag / OnlyFlagged semantics ----------
+
+    [Fact]
+    public void InboxRow_IsFlagged_True_When_FlaggedAt_Set()
+    {
+        MakeInboxRow(flaggedAt: DateTimeOffset.UtcNow).IsFlagged.Should().BeTrue();
+        MakeInboxRow().IsFlagged.Should().BeFalse();
+    }
+
+    [Fact]
+    public void OnlyFlagged_True_Hides_Unflagged_Rows()
+    {
+        var filters = InboxFilters.From(
+            showClosed: false, showIgnored: false, showDone: false, onlyFlagged: true,
+            enabledSources: InboxFilters.KnownSourceClasses,
+            excludedRepos: Array.Empty<string>(),
+            excludedAuthors: Array.Empty<string>(),
+            ignoredRepoRegexes: Array.Empty<Regex>());
+
+        var flagged   = MakeInboxRow(flaggedAt: DateTimeOffset.UtcNow);
+        var unflagged = MakeInboxRow();
+
+        filters.ShouldShow(flagged).Should().BeTrue();
+        filters.ShouldShow(unflagged).Should().BeFalse();
+    }
+
+    [Fact]
+    public void OnlyFlagged_False_Default_Does_Not_Restrict()
+    {
+        var filters = InboxFilters.From(
+            showClosed: false, showIgnored: false, showDone: false, onlyFlagged: false,
+            enabledSources: InboxFilters.KnownSourceClasses,
+            excludedRepos: Array.Empty<string>(),
+            excludedAuthors: Array.Empty<string>(),
+            ignoredRepoRegexes: Array.Empty<Regex>());
+
+        filters.ShouldShow(MakeInboxRow()).Should().BeTrue();
+        filters.ShouldShow(MakeInboxRow(flaggedAt: DateTimeOffset.UtcNow)).Should().BeTrue();
+    }
+
+    [Fact]
+    public void Flag_Does_Not_Bypass_Done_Or_Closed_Filters()
+    {
+        // Orthogonality: a flagged-and-done PR is still hidden when
+        // Show done is off and Show only flagged is off. The user must
+        // either enable Show done OR enable Show only flagged.
+        var filters = InboxFilters.From(
+            showClosed: false, showIgnored: false, showDone: false, onlyFlagged: false,
+            enabledSources: InboxFilters.KnownSourceClasses,
+            excludedRepos: Array.Empty<string>(),
+            excludedAuthors: Array.Empty<string>(),
+            ignoredRepoRegexes: Array.Empty<Regex>());
+
+        var flaggedAndDone = MakeInboxRow(
+            flaggedAt: DateTimeOffset.UtcNow,
+            markedDoneHeadSha: "abc",
+            currentHeadSha: "abc");
+
+        filters.ShouldShow(flaggedAndDone).Should().BeFalse();
+
+        // Closed flagged row also stays hidden behind Show closed.
+        var flaggedAndClosed = MakeInboxRow(
+            flaggedAt: DateTimeOffset.UtcNow,
+            status: PullRequestStatus.Merged);
+
+        filters.ShouldShow(flaggedAndClosed).Should().BeFalse();
     }
 
     // ---------- Combinations (a small parity probe) ----------

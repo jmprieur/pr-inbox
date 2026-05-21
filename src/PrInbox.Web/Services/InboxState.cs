@@ -31,8 +31,17 @@ public sealed record InboxRow(
     int LikelyDoneCount = 0,
     DateTimeOffset? LastUpstreamUpdatedAt = null,
     string? MarkedDoneHeadSha = null,
-    DateTimeOffset? MarkedDoneAt = null)
+    DateTimeOffset? MarkedDoneAt = null,
+    DateTimeOffset? FlaggedAt = null)
 {
+    /// <summary>
+    /// True when the user has flagged this PR as "of interest." Flag is
+    /// orthogonal to done / ignore / closed — flagging does not bypass
+    /// any other filter. The "Show only flagged" toolbar toggle isolates
+    /// the dashboard to just these rows.
+    /// </summary>
+    public bool IsFlagged => FlaggedAt.HasValue;
+
     /// <summary>
     /// True when the user marked this PR done and the author has NOT
     /// pushed since (or the current head SHA is unknown — defensive: we
@@ -85,7 +94,8 @@ public sealed record InboxRow(
             likelyDone,
             row.LastUpstreamUpdatedAt,
             row.MarkedDoneHeadSha,
-            row.MarkedDoneAt);
+            row.MarkedDoneAt,
+            row.FlaggedAt);
     }
 }
 
