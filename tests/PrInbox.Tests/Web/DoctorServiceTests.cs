@@ -1,6 +1,7 @@
 using FluentAssertions;
 using PrInbox.Core.Config;
 using PrInbox.Core.Credentials;
+using PrInbox.Core.Models;
 using PrInbox.Core.Storage;
 using PrInbox.Web.Services;
 
@@ -66,7 +67,7 @@ public class DoctorServiceTests : IAsyncLifetime
             new GitHubAuthIdentity("jmprieur", IsActive: true),
             new GitHubAuthIdentity("jmprieur_microsoft", IsActive: false),
         });
-        var doctor = new DoctorService(configSvc, _prs, _db, ghDiscovery);
+        var doctor = new DoctorService(configSvc, _prs, _db, ghDiscovery, new StubRateLimitProbe());
 
         var report = await doctor.RunAsync();
 
@@ -104,7 +105,7 @@ public class DoctorServiceTests : IAsyncLifetime
             new GitHubAuthIdentity("jmprieur", IsActive: true),
             new GitHubAuthIdentity("jmprieur_microsoft", IsActive: false),
         });
-        var doctor = new DoctorService(configSvc, _prs, _db, ghDiscovery);
+        var doctor = new DoctorService(configSvc, _prs, _db, ghDiscovery, new StubRateLimitProbe());
 
         var report = await doctor.RunAsync();
 
@@ -124,7 +125,7 @@ public class DoctorServiceTests : IAsyncLifetime
         {
             new GitHubAuthIdentity("jmprieur", IsActive: true),
         });
-        var doctor = new DoctorService(configSvc, _prs, _db, ghDiscovery);
+        var doctor = new DoctorService(configSvc, _prs, _db, ghDiscovery, new StubRateLimitProbe());
 
         var report = await doctor.RunAsync();
 
@@ -140,7 +141,7 @@ public class DoctorServiceTests : IAsyncLifetime
         {
             new GitHubAuthIdentity("jmprieur", IsActive: true),
         });
-        var doctor = new DoctorService(configSvc, _prs, _db, ghDiscovery);
+        var doctor = new DoctorService(configSvc, _prs, _db, ghDiscovery, new StubRateLimitProbe());
 
         var report = await doctor.RunAsync();
 
@@ -163,7 +164,7 @@ public class DoctorServiceTests : IAsyncLifetime
             new GitHubAuthIdentity("jmprieur", IsActive: true),                  // public + active
             new GitHubAuthIdentity("jmprieur_microsoft", IsActive: false),       // EMU (underscore) + not active
         });
-        var doctor = new DoctorService(configSvc, _prs, _db, ghDiscovery);
+        var doctor = new DoctorService(configSvc, _prs, _db, ghDiscovery, new StubRateLimitProbe());
 
         var report = await doctor.RunAsync();
 
@@ -185,7 +186,7 @@ public class DoctorServiceTests : IAsyncLifetime
         {
             new GitHubAuthIdentity("jmprieur", IsActive: true),
         });
-        var doctor = new DoctorService(configSvc, _prs, _db, ghDiscovery);
+        var doctor = new DoctorService(configSvc, _prs, _db, ghDiscovery, new StubRateLimitProbe());
 
         var report = await doctor.RunAsync();
 
@@ -194,6 +195,190 @@ public class DoctorServiceTests : IAsyncLifetime
         var row = report.Sources.Single();
         row.IsEmu.Should().BeNull();
         row.IsActiveGhLogin.Should().BeFalse();
+    }
+
+    // ---------- Failed-sync advisory ----------
+
+    [Fact]
+    public async Task Advisory_Fires_When_Last_Sync_Failed_With_Retry_Action()
+    {
+        // One source, last run = Failed. Advisory should appear with a
+        // RetrySync action pointing at the right source id.
+        var sources = new[] { OkCheck("gh.com:jenny", "jenny") };
+        var configSvc = new StubConfigSvc(BaseReport(sources, allOk: true));
+        var ghDiscovery = new StubGhDiscovery(Array.Empty<GitHubAuthIdentity>());
+
+        var runId = await _syncRuns.StartAsync("gh.com:jenny", "jenny", CancellationToken.None);
+        await _syncRuns.CompleteAsync(runId, SyncRunStatus.Failed, prsSeen: 0,
+            error: "HTTP 502 from api.github.com", ct: CancellationToken.None);
+
+        var doctor = new DoctorService(configSvc, _prs, _db, ghDiscovery, new StubRateLimitProbe());
+        var report = await doctor.RunAsync();
+
+        var failedAdvisory = report.Advisories.SingleOrDefault(a => a.Title.StartsWith("Last sync failed"));
+        failedAdvisory.Should().NotBeNull();
+        failedAdvisory!.Severity.Should().Be(DoctorAdvisorySeverity.Warning);
+        failedAdvisory.Detail.Should().Contain("HTTP 502");
+        failedAdvisory.Actions.Should().NotBeNull();
+        failedAdvisory.Actions!.Should().ContainSingle()
+            .Which.Kind.Should().Be(DoctorAdvisoryActionKind.RetrySync);
+        failedAdvisory.Actions![0].SourceId.Should().Be("gh.com:jenny");
+    }
+
+    [Fact]
+    public async Task Failed_Sync_Advisory_Does_Not_Fire_When_Last_Sync_Succeeded()
+    {
+        var sources = new[] { OkCheck("gh.com:jenny", "jenny") };
+        var configSvc = new StubConfigSvc(BaseReport(sources, allOk: true));
+        var ghDiscovery = new StubGhDiscovery(Array.Empty<GitHubAuthIdentity>());
+
+        var runId = await _syncRuns.StartAsync("gh.com:jenny", "jenny", CancellationToken.None);
+        await _syncRuns.CompleteAsync(runId, SyncRunStatus.Ok, prsSeen: 5,
+            error: null, ct: CancellationToken.None);
+
+        var doctor = new DoctorService(configSvc, _prs, _db, ghDiscovery, new StubRateLimitProbe());
+        var report = await doctor.RunAsync();
+
+        report.Advisories.Should().NotContain(a => a.Title.StartsWith("Last sync failed"));
+    }
+
+    // ---------- Missing-scopes advisory ----------
+
+    [Fact]
+    public async Task Advisory_Fires_When_Required_Scopes_Are_Missing()
+    {
+        // Identity present, scopes don't include "repo".
+        var sources = new[] { OkCheck("gh.com:jenny", "jenny") };
+        var configSvc = new StubConfigSvc(BaseReport(sources, allOk: true));
+        var ghDiscovery = new StubGhDiscovery(new[]
+        {
+            new GitHubAuthIdentity("jenny", IsActive: true) { Scopes = new[] { "gist", "read:org" } },
+        });
+
+        var doctor = new DoctorService(configSvc, _prs, _db, ghDiscovery, new StubRateLimitProbe());
+        var report = await doctor.RunAsync();
+
+        var scopeAdvisory = report.Advisories.SingleOrDefault(a => a.Title.StartsWith("Missing token scopes"));
+        scopeAdvisory.Should().NotBeNull();
+        scopeAdvisory!.Detail.Should().Contain("repo");
+        scopeAdvisory.Suggestion.Should().Contain("gh auth refresh");
+        scopeAdvisory.Suggestion.Should().Contain("-s repo");
+    }
+
+    [Fact]
+    public async Task Scopes_Advisory_Does_Not_Fire_When_Parser_Reports_Empty_Scopes()
+    {
+        // Empty scopes list = parser didn't see the line (older gh). We
+        // treat that as unknown, not as missing — better to under-warn.
+        var sources = new[] { OkCheck("gh.com:jenny", "jenny") };
+        var configSvc = new StubConfigSvc(BaseReport(sources, allOk: true));
+        var ghDiscovery = new StubGhDiscovery(new[]
+        {
+            new GitHubAuthIdentity("jenny", IsActive: true),
+        });
+
+        var doctor = new DoctorService(configSvc, _prs, _db, ghDiscovery, new StubRateLimitProbe());
+        var report = await doctor.RunAsync();
+
+        report.Advisories.Should().NotContain(a => a.Title.StartsWith("Missing token scopes"));
+    }
+
+    [Fact]
+    public async Task Scopes_Advisory_Does_Not_Fire_When_All_Required_Scopes_Present()
+    {
+        var sources = new[] { OkCheck("gh.com:jenny", "jenny") };
+        var configSvc = new StubConfigSvc(BaseReport(sources, allOk: true));
+        var ghDiscovery = new StubGhDiscovery(new[]
+        {
+            new GitHubAuthIdentity("jenny", IsActive: true)
+                { Scopes = new[] { "repo", "read:org", "workflow" } },
+        });
+
+        var doctor = new DoctorService(configSvc, _prs, _db, ghDiscovery, new StubRateLimitProbe());
+        var report = await doctor.RunAsync();
+
+        report.Advisories.Should().NotContain(a => a.Title.StartsWith("Missing token scopes"));
+    }
+
+    [Fact]
+    public async Task Scopes_Advisory_Dedupes_When_Multiple_Sources_Share_One_Login()
+    {
+        // Two sources bound to the same login should only produce one
+        // scopes advisory — the missing scope is a property of the
+        // token, not the source.
+        var sources = new[]
+        {
+            OkCheck("gh.com:jenny#a", "jenny"),
+            OkCheck("gh.com:jenny#b", "jenny"),
+        };
+        var configSvc = new StubConfigSvc(BaseReport(sources, allOk: true));
+        var ghDiscovery = new StubGhDiscovery(new[]
+        {
+            new GitHubAuthIdentity("jenny", IsActive: true) { Scopes = new[] { "gist" } },
+        });
+
+        var doctor = new DoctorService(configSvc, _prs, _db, ghDiscovery, new StubRateLimitProbe());
+        var report = await doctor.RunAsync();
+
+        report.Advisories.Count(a => a.Title.StartsWith("Missing token scopes"))
+            .Should().Be(1);
+    }
+
+    // ---------- Rate-limit advisory ----------
+
+    [Fact]
+    public async Task Advisory_Fires_When_Rate_Limit_Below_Threshold()
+    {
+        // 100/5000 = 2%, well under the 15% threshold.
+        var sources = new[] { OkCheck("gh.com:jenny", "jenny") };
+        var configSvc = new StubConfigSvc(BaseReport(sources, allOk: true));
+        var ghDiscovery = new StubGhDiscovery(Array.Empty<GitHubAuthIdentity>());
+        var probe = new StubRateLimitProbe(
+            new RateLimitSnapshot(Remaining: 100, Limit: 5000,
+                ResetAt: DateTimeOffset.UtcNow.AddMinutes(20)));
+
+        var doctor = new DoctorService(configSvc, _prs, _db, ghDiscovery, probe);
+        var report = await doctor.RunAsync();
+
+        var rate = report.Advisories.SingleOrDefault(a => a.Title.StartsWith("Low API rate-limit"));
+        rate.Should().NotBeNull();
+        rate!.Severity.Should().Be(DoctorAdvisorySeverity.Info);
+        rate.Detail.Should().Contain("100/5000");
+        // No actions — informational only.
+        (rate.Actions == null || rate.Actions.Count == 0).Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task Rate_Limit_Advisory_Does_Not_Fire_When_Headroom_Is_Healthy()
+    {
+        // 3000/5000 = 60%, well above the 15% threshold.
+        var sources = new[] { OkCheck("gh.com:jenny", "jenny") };
+        var configSvc = new StubConfigSvc(BaseReport(sources, allOk: true));
+        var ghDiscovery = new StubGhDiscovery(Array.Empty<GitHubAuthIdentity>());
+        var probe = new StubRateLimitProbe(
+            new RateLimitSnapshot(Remaining: 3000, Limit: 5000,
+                ResetAt: DateTimeOffset.UtcNow.AddMinutes(40)));
+
+        var doctor = new DoctorService(configSvc, _prs, _db, ghDiscovery, probe);
+        var report = await doctor.RunAsync();
+
+        report.Advisories.Should().NotContain(a => a.Title.StartsWith("Low API rate-limit"));
+    }
+
+    [Fact]
+    public async Task Rate_Limit_Advisory_Does_Not_Fire_When_Probe_Returns_Null()
+    {
+        // Probe failure (gh missing, network down, JSON parse error)
+        // must not surface a noisy advisory.
+        var sources = new[] { OkCheck("gh.com:jenny", "jenny") };
+        var configSvc = new StubConfigSvc(BaseReport(sources, allOk: true));
+        var ghDiscovery = new StubGhDiscovery(Array.Empty<GitHubAuthIdentity>());
+        var probe = new StubRateLimitProbe(snap: null);
+
+        var doctor = new DoctorService(configSvc, _prs, _db, ghDiscovery, probe);
+        var report = await doctor.RunAsync();
+
+        report.Advisories.Should().NotContain(a => a.Title.StartsWith("Low API rate-limit"));
     }
 
     // ---------- helpers ----------
@@ -235,5 +420,13 @@ public class DoctorServiceTests : IAsyncLifetime
         public StubGhDiscovery(IReadOnlyList<GitHubAuthIdentity> identities) => _identities = identities;
         public Task<IReadOnlyList<GitHubAuthIdentity>> ListIdentitiesAsync(string host, CancellationToken ct = default) =>
             Task.FromResult(_identities);
+    }
+
+    private sealed class StubRateLimitProbe : IGitHubRateLimitProbe
+    {
+        private readonly RateLimitSnapshot? _snap;
+        public StubRateLimitProbe(RateLimitSnapshot? snap = null) => _snap = snap;
+        public Task<RateLimitSnapshot?> GetCoreAsync(string hostname, CancellationToken ct = default)
+            => Task.FromResult(_snap);
     }
 }

@@ -176,4 +176,42 @@ public sealed class GhAuthStatusParserTests
         ids.Single(i => i.Login == "alpha").IsActive.Should().BeFalse();
         ids.Single(i => i.Login == "beta").IsActive.Should().BeTrue();
     }
+
+    [Fact]
+    public void Parse_Extracts_Token_Scopes_Per_Account()
+    {
+        const string output = """
+              ✓ Logged in to github.com account jmprieur (keyring)
+              - Active account: true
+              - Token: gho_*****
+              - Token scopes: 'gist', 'read:org', 'repo'
+
+              ✓ Logged in to github.com account jmprieur_microsoft (keyring)
+              - Active account: false
+              - Token: gho_*****
+              - Token scopes: 'admin:public_key', 'gist', 'read:org', 'repo', 'workflow'
+            """;
+
+        var ids = GhAuthStatusParser.Parse(output, "github.com");
+
+        ids.Single(i => i.Login == "jmprieur").Scopes
+            .Should().BeEquivalentTo(new[] { "gist", "read:org", "repo" });
+        ids.Single(i => i.Login == "jmprieur_microsoft").Scopes
+            .Should().BeEquivalentTo(new[] { "admin:public_key", "gist", "read:org", "repo", "workflow" });
+    }
+
+    [Fact]
+    public void Parse_Missing_Scopes_Line_Yields_Empty_List()
+    {
+        const string output = """
+              ✓ Logged in to github.com account someone (keyring)
+              - Active account: true
+              - Token: gho_*****
+            """;
+
+        var ids = GhAuthStatusParser.Parse(output, "github.com");
+
+        ids.Should().ContainSingle();
+        ids[0].Scopes.Should().BeEmpty();
+    }
 }

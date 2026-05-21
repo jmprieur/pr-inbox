@@ -19,6 +19,15 @@ namespace PrInbox.Core.Credentials;
 public sealed record GitHubAuthIdentity(string Login, bool IsActive)
 {
     /// <summary>
+    /// OAuth scopes granted to this login's token, as reported on the
+    /// <c>- Token scopes: 'a', 'b', 'c'</c> line of <c>gh auth status</c>.
+    /// Empty when the parser did not see the line (older gh versions or
+    /// partial output) — callers should not treat empty as definitive
+    /// "no scopes" but as "unknown".
+    /// </summary>
+    public IReadOnlyList<string> Scopes { get; init; } = Array.Empty<string>();
+
+    /// <summary>
     /// Best-effort EMU detection. GitHub Enterprise Managed User logins
     /// follow the convention <c>&lt;personal&gt;_&lt;org&gt;</c> — the
     /// underscore is the canonical signal. Pragmatic v1 heuristic: any

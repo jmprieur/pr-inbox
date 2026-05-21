@@ -53,6 +53,15 @@ public static class GhAuthStatusParser
         @"Active account:\s*(?<value>true|false)",
         RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
+    // Matches "- Token scopes: 'gist', 'read:org', 'repo'". Quotes may
+    // be straight ' or curly ’ depending on terminal; we accept either.
+    private static readonly Regex ScopesLine = new(
+        @"Token scopes:\s*(?<list>.+)$",
+        RegexOptions.Compiled);
+    private static readonly Regex SingleScope = new(
+        @"['""\u2018\u2019\u201C\u201D]([^'""\u2018\u2019\u201C\u201D,]+)['""\u2018\u2019\u201C\u201D]",
+        RegexOptions.Compiled);
+
     /// <summary>
     /// Parse the combined stdout+stderr of <c>gh auth status</c>. Returns
     /// every login it finds matching <paramref name="hostname"/>
@@ -80,17 +89,31 @@ public static class GhAuthStatusParser
             // lines (single-account hosts). For newer-style "account"
             // lines, look ahead a few lines for the explicit marker.
             bool isActive = lines[i].Contains(" as ", StringComparison.Ordinal);
-            for (int j = i + 1; j < Math.Min(i + 8, lines.Length); j++)
+            IReadOnlyList<string> scopes = Array.Empty<string>();
+            for (int j = i + 1; j < Math.Min(i + 12, lines.Length); j++)
             {
                 // Stop looking if we hit the next account entry.
                 if (LoggedInLine.IsMatch(lines[j])) break;
                 var a = ActiveLine.Match(lines[j]);
-                if (!a.Success) continue;
-                isActive = string.Equals(a.Groups["value"].Value, "true", StringComparison.OrdinalIgnoreCase);
-                break;
+                if (a.Success)
+                {
+                    isActive = string.Equals(a.Groups["value"].Value, "true", StringComparison.OrdinalIgnoreCase);
+                    continue;
+                }
+                var s = ScopesLine.Match(lines[j]);
+                if (s.Success)
+                {
+                    var found = new List<string>();
+                    foreach (Match sm in SingleScope.Matches(s.Groups["list"].Value))
+                    {
+                        var scope = sm.Groups[1].Value.Trim();
+                        if (!string.IsNullOrEmpty(scope)) found.Add(scope);
+                    }
+                    scopes = found;
+                }
             }
 
-            result.Add(new GitHubAuthIdentity(login, isActive));
+            result.Add(new GitHubAuthIdentity(login, isActive) { Scopes = scopes });
         }
 
         return result;

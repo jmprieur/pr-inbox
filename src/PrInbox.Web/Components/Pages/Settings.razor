@@ -724,6 +724,20 @@ else
                     _bindingSourceId = null;
                 }
                 break;
+
+            case DoctorAdvisoryActionKind.RetrySync:
+                // Kicks the background sync immediately (out-of-band).
+                // The sync loop reloads config each cycle, so we don't
+                // need to mutate anything here — just nudge it.
+                Sync.NoteConfigChanged();
+                SetMessage($"Sync nudged for `{action.SourceId}` — the background loop will pick it up momentarily.");
+                // Briefly delay then re-run Doctor so the user sees the
+                // status update once the sync completes. We don't await
+                // sync completion (no such hook today); ~3s is enough
+                // for a typical single-source fetch.
+                await Task.Delay(TimeSpan.FromSeconds(3));
+                await RunDoctorAsync();
+                break;
         }
     }
 

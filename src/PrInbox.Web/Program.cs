@@ -59,6 +59,7 @@ builder.Services.AddSingleton<IConfigService>(sp =>
 // back to the legacy default-identity add.
 builder.Services.AddSingleton<IGhCliRunner, GhCliRunner>();
 builder.Services.AddSingleton<IGitHubAuthDiscovery, GhCliGitHubAuthDiscovery>();
+builder.Services.AddSingleton<IGitHubRateLimitProbe, GhCliRateLimitProbe>();
 builder.Services.AddSingleton<DoctorService>();
 
 builder.Services.AddHttpClient("publisher", c => c.Timeout = TimeSpan.FromSeconds(30));

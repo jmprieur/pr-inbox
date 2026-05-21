@@ -470,14 +470,28 @@ Auto-runs the first time you open Settings with at least one source
 configured; otherwise click **Run Doctor**. The report has two parts:
 
 1. **Advisories** — pattern-detection across your config. Today the
-   one shipped pattern is **Double-fetch**: amber warning when a
-   default-identity gh.com source coexists with an explicit-identity
-   source bound to the currently-active `gh` login. Both fetch the
-   same PRs; click the green **Fix: Bind `<id>` to `<login>`**
-   button on the advisory to migrate the default source in one click
-   — it removes the redundant default and (since the explicit one
-   already covers that login) leaves you with a clean per-identity
-   setup.
+   shipped patterns are:
+   - **Double-fetch** (amber): a default-identity gh.com source
+     coexists with an explicit-identity source bound to the currently-
+     active `gh` login. Both fetch the same PRs; click the green
+     **Fix: Bind `<id>` to `<login>`** button to migrate the default
+     source in one click — it removes the redundant default and (since
+     the explicit one already covers that login) leaves you with a
+     clean per-identity setup.
+   - **Last sync failed** (amber): the most recent sync for a source
+     ended with an error. Shows the source id and error message, plus
+     a **Retry sync** button that nudges the sync loop and re-runs
+     Doctor a few seconds later.
+   - **Missing `gh` scopes** (amber): the token bound to a github.com
+     login is missing one of the scopes pr-inbox relies on (`repo`,
+     `read:org`). Surfaces the host + login + missing scopes and a
+     copy-pasteable `gh auth refresh -h <host> -s <scopes>` command.
+     No button — the refresh flow is interactive (device-code), so you
+     run it yourself in a terminal.
+   - **Rate-limit headroom low** (info): the core GitHub/GHE rate-limit
+     for a host has dropped below 15% remaining for the hour. Just an
+     FYI — sync will keep working, but if you trigger a big enrichment
+     burst right now it may stall until the next reset window.
 2. **Per-source table** — ID, Kind, Identity (with `EMU` / `public` /
    `active` chips), Auth status (token length / az identity), **Last
    sync** (relative time), and **Open PRs** count. The runtime columns
