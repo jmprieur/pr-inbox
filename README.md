@@ -213,7 +213,7 @@ before launching the web UI to change what the Review tab spins up:
 |---|---|---|
 | `PRINBOX_REVIEW_AGENT` | `security-toolkit:dual-model-review` | Agency agent id |
 | `PRINBOX_REVIEW_PLUGIN` | `github:1ES-microsoft/ai-plugins:plugins/security-toolkit` | Plugin source (use `local:<path>` if the default repo is unreachable) |
-| `PRINBOX_REVIEW_MODEL` | `claude-opus-4.7-xhigh` | Model id passed to `agency copilot` |
+| `PRINBOX_REVIEW_MODEL` | `claude-opus-4.8` | Model id passed to `agency copilot` |
 | `PRINBOX_REVIEW_MCPS` | `workiq,teams` | Comma-separated MCP servers; set to empty string to disable |
 
 ---
