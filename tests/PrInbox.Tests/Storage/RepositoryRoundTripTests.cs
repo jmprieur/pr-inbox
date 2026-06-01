@@ -966,6 +966,72 @@ public class RepositoryRoundTripTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task PullRequest_Upsert_Persists_UpstreamCreatedAt()
+    {
+        var repo = new PullRequestRepository(_db);
+        var opened = DateTimeOffset.Parse("2026-04-02T09:15:00Z");
+        var row = SampleRow() with { UpstreamCreatedAt = opened };
+
+        await repo.UpsertAsync(row, CancellationToken.None);
+        var fetched = await repo.GetAsync(row.Identity.Url, CancellationToken.None);
+
+        fetched.Should().NotBeNull();
+        fetched!.UpstreamCreatedAt.Should().Be(opened);
+    }
+
+    [Fact]
+    public async Task PullRequest_Upsert_With_Null_UpstreamCreatedAt_Persists_Null()
+    {
+        // Pre-migration / not-yet-resynced rows carry null and must round-trip.
+        var repo = new PullRequestRepository(_db);
+        var row = SampleRow(); // UpstreamCreatedAt defaults to null
+
+        await repo.UpsertAsync(row, CancellationToken.None);
+        var fetched = await repo.GetAsync(row.Identity.Url, CancellationToken.None);
+
+        fetched.Should().NotBeNull();
+        fetched!.UpstreamCreatedAt.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task PullRequest_Upsert_Preserves_UpstreamCreatedAt_When_Conflict_Brings_Null()
+    {
+        // The upstream "opened" date is immutable; a later sync that returns
+        // null (e.g. a source/path that doesn't supply it) must NOT wipe the
+        // value we already captured. The upsert COALESCEs to the stored value.
+        var repo = new PullRequestRepository(_db);
+        var opened = DateTimeOffset.Parse("2026-04-02T09:15:00Z");
+        var first = SampleRow() with { UpstreamCreatedAt = opened };
+        var second = first with { UpstreamCreatedAt = null, Title = "renamed" };
+
+        await repo.UpsertAsync(first, CancellationToken.None);
+        await repo.UpsertAsync(second, CancellationToken.None);
+        var fetched = await repo.GetAsync(first.Identity.Url, CancellationToken.None);
+
+        fetched.Should().NotBeNull();
+        fetched!.UpstreamCreatedAt.Should().Be(opened);
+        fetched.Title.Should().Be("renamed");
+    }
+
+    [Fact]
+    public async Task PullRequest_Upsert_Fills_UpstreamCreatedAt_When_Initially_Null()
+    {
+        // First sight had no opened date; a later sync supplies one and should
+        // fill the column (COALESCE picks the non-null incoming value).
+        var repo = new PullRequestRepository(_db);
+        var opened = DateTimeOffset.Parse("2026-04-02T09:15:00Z");
+        var first = SampleRow(); // null
+        var second = first with { UpstreamCreatedAt = opened };
+
+        await repo.UpsertAsync(first, CancellationToken.None);
+        await repo.UpsertAsync(second, CancellationToken.None);
+        var fetched = await repo.GetAsync(first.Identity.Url, CancellationToken.None);
+
+        fetched.Should().NotBeNull();
+        fetched!.UpstreamCreatedAt.Should().Be(opened);
+    }
+
+    [Fact]
     public async Task MarkDoneAsync_Persists_Sha_And_Timestamp()
     {
         var repo = new PullRequestRepository(_db);

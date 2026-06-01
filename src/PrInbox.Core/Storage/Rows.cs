@@ -31,7 +31,8 @@ public sealed record PullRequestRow(
     DateTimeOffset? LastUpstreamUpdatedAt = null,
     string? MarkedDoneHeadSha = null,
     DateTimeOffset? MarkedDoneAt = null,
-    DateTimeOffset? FlaggedAt = null);
+    DateTimeOffset? FlaggedAt = null,
+    DateTimeOffset? UpstreamCreatedAt = null);
 
 /// <summary>
 /// Row from <c>pr_snapshots</c>. Append-only.

@@ -33,6 +33,7 @@ public sealed record InboxRow(
     string? MarkedDoneHeadSha = null,
     DateTimeOffset? MarkedDoneAt = null,
     DateTimeOffset? FlaggedAt = null,
+    DateTimeOffset? UpstreamCreatedAt = null,
     IReadOnlyList<TagRow>? Tags = null)
 {
     /// <summary>
@@ -106,6 +107,7 @@ public sealed record InboxRow(
             row.MarkedDoneHeadSha,
             row.MarkedDoneAt,
             row.FlaggedAt,
+            row.UpstreamCreatedAt,
             tags);
     }
 }
