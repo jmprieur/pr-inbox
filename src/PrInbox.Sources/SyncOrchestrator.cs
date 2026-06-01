@@ -360,7 +360,11 @@ public sealed class SyncOrchestrator
             // the PR level, so pr.LastUpdated is CreationDate for ADO sources
             // and pr.UpdatedAt for GitHub. The UI's "Recent" sort treats this
             // as best-available activity signal and ranks NULL last.
-            LastUpstreamUpdatedAt: pr.LastUpdated);
+            LastUpstreamUpdatedAt: pr.LastUpdated,
+            // Immutable upstream "opened" timestamp, drives the inbox Age
+            // column. May be null on adapters/paths that don't supply it; the
+            // repository COALESCEs on upsert so a null never wipes a known value.
+            UpstreamCreatedAt: pr.CreatedAt);
 
         await _pullRequests.UpsertAsync(row, ct);
     }

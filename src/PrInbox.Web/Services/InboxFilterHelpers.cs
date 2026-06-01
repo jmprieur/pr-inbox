@@ -18,6 +18,51 @@ public enum InboxFilterSortMode
 }
 
 /// <summary>
+/// Sort order for the inbox table's "Age" column header. Cycles
+/// None → OldestFirst → NewestFirst → None on successive header clicks.
+/// </summary>
+public enum AgeSortMode
+{
+    /// <summary>No age sort applied; preserve the incoming row order.</summary>
+    None,
+
+    /// <summary>Oldest PRs first (earliest opened upstream at the top).</summary>
+    OldestFirst,
+
+    /// <summary>Newest PRs first (most recently opened upstream at the top).</summary>
+    NewestFirst,
+}
+
+/// <summary>
+/// Age-column ordering for the inbox table. Lives outside <c>Inbox.razor</c>
+/// so it can be unit-tested directly. Rows whose upstream "opened" date is
+/// unknown (<c>UpstreamCreatedAt == null</c>) always sort last, regardless of
+/// direction. Ordering is stable, so within-group order is preserved for the
+/// null bucket and for ties.
+/// </summary>
+public static class InboxAgeSort
+{
+    public static IReadOnlyList<InboxRow> Order(IReadOnlyList<InboxRow> rows, AgeSortMode mode)
+    {
+        switch (mode)
+        {
+            case AgeSortMode.OldestFirst:
+                return rows
+                    .OrderByDescending(r => r.UpstreamCreatedAt.HasValue)
+                    .ThenBy(r => r.UpstreamCreatedAt ?? DateTimeOffset.MaxValue)
+                    .ToList();
+            case AgeSortMode.NewestFirst:
+                return rows
+                    .OrderByDescending(r => r.UpstreamCreatedAt.HasValue)
+                    .ThenByDescending(r => r.UpstreamCreatedAt ?? DateTimeOffset.MinValue)
+                    .ToList();
+            default:
+                return rows;
+        }
+    }
+}
+
+/// <summary>
 /// Shared shape for filter-popover items so the sort and tally helpers can
 /// operate uniformly on both <c>RepoFilterItem</c> and <c>AuthorFilterItem</c>.
 /// </summary>

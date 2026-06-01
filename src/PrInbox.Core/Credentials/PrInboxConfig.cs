@@ -163,7 +163,7 @@ public sealed class ReviewLauncherSettings
     ///   <item><c>ado-git:&lt;org&gt;/&lt;project&gt;/&lt;repo&gt;:&lt;path&gt;</c></item>
     /// </list>
     /// </summary>
-    public string Plugin { get; init; } = "github:1ES-microsoft/ai-plugins:plugins/security-toolkit";
+    public string Plugin { get; init; } = " market:security-toolkit@1ES-microsoft/ai-plugins";
 
     /// <summary>Model id passed to <c>agency copilot --model</c>.</summary>
     public string Model { get; init; } = "claude-opus-4.7-xhigh";

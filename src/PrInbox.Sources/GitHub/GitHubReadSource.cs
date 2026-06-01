@@ -557,7 +557,8 @@ public sealed class GitHubReadSource : IPrReadSource
             AuthorLogin: item.User?.Login,
             Url: canonicalUrl,
             Status: item.State.Value == ItemState.Open ? PullRequestStatus.Open : PullRequestStatus.Closed,
-            LastUpdated: item.UpdatedAt ?? item.CreatedAt);
+            LastUpdated: item.UpdatedAt ?? item.CreatedAt,
+            CreatedAt: item.CreatedAt);
     }
 
     /// <summary>

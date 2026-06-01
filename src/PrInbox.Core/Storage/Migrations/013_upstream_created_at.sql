@@ -1,0 +1,26 @@
+-- Migration 013 — Persist the upstream "PR opened" timestamp for the inbox
+-- "Age" column.
+--
+-- Why: the Web UI inbox shows (and sorts by) how long each PR has been open
+-- upstream. The adapters already have this value in hand at fast-sync time
+-- (GitHub: issue.created_at; ADO: pullRequest.creationDate) but the
+-- orchestrator never persisted it — pull_requests only stored first_seen_at
+-- (when WE first observed the PR) and last_upstream_updated_at (activity).
+--
+-- Semantics:
+--   * NULL  → opened date not recorded yet. Either a pre-migration row that
+--             fast-sync hasn't touched again, or a row the fast-sync query no
+--             longer returns (closed / merged / no-longer-assigned). The UI
+--             renders these as "–" and sorts them last in either direction.
+--   * value → the upstream creation timestamp captured at the last fast-sync
+--             that touched this row. Immutable upstream, so once set it is
+--             preserved across subsequent upserts (the upsert COALESCEs rather
+--             than overwriting, so a source returning NULL never wipes it).
+--
+-- Backfill: existing rows get NULL on migration. The next fast-sync cycle
+-- (which runs at startup) populates every still-listed PR.
+--
+-- MigrationRunner gates re-runs via the schema_version table, so this script
+-- runs exactly once.
+
+ALTER TABLE pull_requests ADD COLUMN upstream_created_at TEXT;

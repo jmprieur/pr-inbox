@@ -344,6 +344,30 @@ public class SyncOrchestratorTests : IAsyncLifetime
         row!.LastUpstreamUpdatedAt.Should().Be(lastUpdated);
     }
 
+    [Fact]
+    public async Task RunFast_Persists_UpstreamCreatedAt_From_Source()
+    {
+        // Asserts the bridge from RemotePullRequest.CreatedAt → DB
+        // pull_requests.upstream_created_at via SyncOrchestrator's
+        // UpsertFastAsync path. This is the source-of-truth for the inbox
+        // "Age" column.
+        var idAlpha = new PrIdentity("https://github.com/owner/repo/pull/1", "gh.com:100#1000");
+        var opened = DateTimeOffset.Parse("2026-04-02T09:15:00Z");
+        var pr = BuildBasicPr(idAlpha, DateTimeOffset.Parse("2026-05-18T15:30:00Z"))
+            with { CreatedAt = opened };
+
+        var source = new FakePrReadSourceBuilder("gh.com:emu", SourceKind.GitHub)
+            .WithPullRequest(pr, BuildDetail(idAlpha))
+            .Build();
+        var orch = new SyncOrchestrator(source, _prs, _snaps, _threads, _syncRuns);
+
+        await orch.RunFastAsync("jmprieur_microsoft", progress: null, CancellationToken.None);
+
+        var row = await _prs.GetAsync(idAlpha.Url, CancellationToken.None);
+        row.Should().NotBeNull();
+        row!.UpstreamCreatedAt.Should().Be(opened);
+    }
+
     // ----- Visible-first contract -----
     //
     // InboxSyncHostedService relies on RunEnrichAsync accepting a

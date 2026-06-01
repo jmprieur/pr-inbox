@@ -241,7 +241,7 @@
 }
 
 @{
-    var visible = VisibleRows;
+    var visible = InboxAgeSort.Order(VisibleRows, _ageSortMode);
 }
 @if (visible.Count == 0)
 {
@@ -265,6 +265,12 @@ else
                 <th>Author</th>
                 <th>Threads</th>
                 <th>State</th>
+                <th class="age-th">
+                    <button type="button"
+                            class="th-sort @(_ageSortMode != AgeSortMode.None ? "active" : "")"
+                            title="Age since the PR was opened upstream. Click to cycle sort: oldest first → newest first → off."
+                            @onclick="OnAgeHeaderClickAsync">Age@(AgeSortGlyph)</button>
+                </th>
                 <th>Last sync</th>
                 <th>Review</th>
                 <th></th>
@@ -276,7 +282,7 @@ else
                 @if (_groupBy != GroupByMode.None)
                 {
                     <tr class="group-header">
-                        <td colspan="9">
+                        <td colspan="10">
                             <span class="group-marker" style="@(group.color is null ? "" : $"background:{group.color};")"></span>
                             <span class="group-name">@group.name</span>
                             <span class="muted">(@group.rows.Count)</span>
@@ -418,6 +424,7 @@ else
                             </span>
                         }
                     </td>
+                    <td class="age muted" title="@AgeTooltip(row.UpstreamCreatedAt)">@AgeLabel(row.UpstreamCreatedAt)</td>
                     <td class="muted" title="@EnrichTooltip(row.EnrichState)">
                         @RelativeTime(row.LastSyncedAt)
                         @if (row.EnrichState != EnrichState.Enriched)
@@ -563,6 +570,7 @@ else
     private const string PrefAuthorSortMode = "inbox.author_sort_mode";
     private const string PrefRepoSortMode   = "inbox.repo_sort_mode";
     private const string PrefGroupBy        = "inbox.group_by";
+    private const string PrefAgeSortMode    = "inbox.age_sort_mode";
 
     public enum GroupByMode { None, Tag }
 
@@ -636,6 +644,10 @@ else
     // page reload. Defaults to Count to match the previous behavior.
     private InboxFilterSortMode _authorSortMode = InboxFilterSortMode.Count;
     private InboxFilterSortMode _repoSortMode = InboxFilterSortMode.Count;
+
+    // Age-column sort for the main table. Persisted so the choice survives a
+    // page reload. Defaults to None (preserve the last-synced ordering).
+    private AgeSortMode _ageSortMode = AgeSortMode.None;
 
     private const string UnknownAuthorKey = InboxFilters.UnknownAuthorKey;
 
@@ -852,6 +864,7 @@ else
 
             _authorSortMode = ParseSortMode(await Prefs.GetAsync(PrefAuthorSortMode), InboxFilterSortMode.Count);
             _repoSortMode   = ParseSortMode(await Prefs.GetAsync(PrefRepoSortMode),   InboxFilterSortMode.Count);
+            _ageSortMode    = ParseAgeSortMode(await Prefs.GetAsync(PrefAgeSortMode));
         }
         catch (Exception ex)
         {
@@ -866,6 +879,63 @@ else
             ? parsed
             : fallback;
     }
+
+    private static AgeSortMode ParseAgeSortMode(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) return AgeSortMode.None;
+        return Enum.TryParse<AgeSortMode>(raw, ignoreCase: true, out var parsed)
+            ? parsed
+            : AgeSortMode.None;
+    }
+
+    // Direction glyph shown next to the "Age" header. ▲ = oldest first
+    // (ascending age-at-top is the oldest open PR), ▼ = newest first.
+    private string AgeSortGlyph => _ageSortMode switch
+    {
+        AgeSortMode.OldestFirst => " ▲",
+        AgeSortMode.NewestFirst => " ▼",
+        _ => "",
+    };
+
+    /// <summary>
+    /// Cycle the Age column sort on header click: None → OldestFirst →
+    /// NewestFirst → None. Persisted so it survives a reload.
+    /// </summary>
+    private async Task OnAgeHeaderClickAsync()
+    {
+        _ageSortMode = _ageSortMode switch
+        {
+            AgeSortMode.None => AgeSortMode.OldestFirst,
+            AgeSortMode.OldestFirst => AgeSortMode.NewestFirst,
+            _ => AgeSortMode.None,
+        };
+        try { await Prefs.SetAsync(PrefAgeSortMode, _ageSortMode.ToString()); }
+        catch (Exception ex) { Log.LogDebug(ex, "Persist {Key} failed.", PrefAgeSortMode); }
+    }
+
+    /// <summary>
+    /// Compact age label for the inbox "Age" column: how long the PR has been
+    /// open upstream. Clamps negative deltas (clock skew / bad source data) to
+    /// "just now" and renders "–" when the opened date hasn't been recorded.
+    /// </summary>
+    private static string AgeLabel(DateTimeOffset? createdAt)
+    {
+        if (createdAt is not { } opened) return "–";
+        var delta = DateTimeOffset.UtcNow - opened;
+        if (delta < TimeSpan.Zero) return "just now";
+        if (delta.TotalSeconds < 60) return "just now";
+        if (delta.TotalMinutes < 60) return $"{(int)delta.TotalMinutes}m";
+        if (delta.TotalHours   < 24) return $"{(int)delta.TotalHours}h";
+        if (delta.TotalDays    < 30) return $"{(int)delta.TotalDays}d";
+        if (delta.TotalDays    < 365) return $"{(int)(delta.TotalDays / 30)}mo";
+        return $"{(int)(delta.TotalDays / 365)}y";
+    }
+
+    private static string AgeTooltip(DateTimeOffset? createdAt)
+        => createdAt is { } opened
+            ? $"Opened {opened.LocalDateTime:yyyy-MM-dd HH:mm}"
+            : "Opened date not recorded yet — will appear after the next sync.";
+
 
     private void CompileIgnoredRepoRegexes()
     {

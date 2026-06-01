@@ -32,14 +32,14 @@ public sealed class PullRequestRepository
               status, tracking_reason, identity_used,
               first_seen_at, last_synced_at, enrich_state,
               last_briefed_head_sha, last_review_run_head_sha, last_posted_review_head_sha,
-              body, last_upstream_updated_at
+              body, last_upstream_updated_at, upstream_created_at
             ) VALUES (
               $prId, $stableId, $sourceId, $sourceKind,
               $displayRepo, $number, $title, $author, $url,
               $status, $tracking, $identityUsed,
               $firstSeen, $lastSynced, $enrichState,
               $lastBriefed, $lastReviewRun, $lastPosted,
-              $body, $lastUpstreamUpdated
+              $body, $lastUpstreamUpdated, $upstreamCreated
             )
             ON CONFLICT(stable_identity) DO UPDATE SET
               pr_identity   = excluded.pr_identity,
@@ -60,7 +60,10 @@ public sealed class PullRequestRepository
               -- Always overwrite the upstream updated-at: fast-sync has
               -- the freshest value (or NULL on adapters that don't
               -- supply one — we still want to clear stale values).
-              last_upstream_updated_at = excluded.last_upstream_updated_at;
+              last_upstream_updated_at = excluded.last_upstream_updated_at,
+              -- The upstream "opened" date is immutable; never let a source
+              -- that returns NULL wipe a value we already captured.
+              upstream_created_at = COALESCE(excluded.upstream_created_at, pull_requests.upstream_created_at);
 
             -- Record this (source, identity) binding for the PR. Idempotent:
             -- the first sync that discovered the PR seeded one row in
@@ -96,6 +99,11 @@ public sealed class PullRequestRepository
             row.LastUpstreamUpdatedAt is null
                 ? DBNull.Value
                 : (object)FormatTimestamp(row.LastUpstreamUpdatedAt.Value));
+        cmd.Parameters.AddWithValue(
+            "$upstreamCreated",
+            row.UpstreamCreatedAt is null
+                ? DBNull.Value
+                : (object)FormatTimestamp(row.UpstreamCreatedAt.Value));
 
         await cmd.ExecuteNonQueryAsync(ct);
     }
@@ -544,7 +552,8 @@ public sealed class PullRequestRepository
                 ? GetStringOrNull(reader, "marked_done_head_sha")
                 : null,
             MarkedDoneAt: ParseOptionalTimestamp(reader, "marked_done_at"),
-            FlaggedAt: ParseOptionalTimestamp(reader, "flagged_at"));
+            FlaggedAt: ParseOptionalTimestamp(reader, "flagged_at"),
+            UpstreamCreatedAt: ParseOptionalTimestamp(reader, "upstream_created_at"));
     }
 
     private static bool HasColumn(SqliteDataReader reader, string name)
