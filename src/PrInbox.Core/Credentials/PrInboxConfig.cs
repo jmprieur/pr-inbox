@@ -166,7 +166,7 @@ public sealed class ReviewLauncherSettings
     public string Plugin { get; init; } = "github:1ES-microsoft/ai-plugins:plugins/security-toolkit";
 
     /// <summary>Model id passed to <c>agency copilot --model</c>.</summary>
-    public string Model { get; init; } = "claude-opus-4.7-xhigh";
+    public string Model { get; init; } = "claude-opus-4.8";
 
     /// <summary>Agent id passed to <c>agency copilot --agent</c>.</summary>
     public string Agent { get; init; } = "security-toolkit:dual-model-review";

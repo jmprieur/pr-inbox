@@ -36,7 +36,7 @@
     (fetched once and cached by agency).
 
 .PARAMETER Model
-    --model argument. Defaults to claude-opus-4.7-xhigh.
+    --model argument. Defaults to claude-opus-4.8.
 
 .PARAMETER Mcps
     Comma-separated list of MCP servers to enable. Defaults to
@@ -72,7 +72,7 @@ param(
 
 if (-not $Agent)  { $Agent  = 'security-toolkit:dual-model-review' }
 if (-not $Plugin) { $Plugin = 'github:1ES-microsoft/ai-plugins:plugins/security-toolkit' }
-if (-not $Model)  { $Model  = 'claude-opus-4.7-xhigh' }
+if (-not $Model)  { $Model  = 'claude-opus-4.8' }
 if (-not $Mcps)   { $Mcps   = 'workiq,teams' }
 
 $ErrorActionPreference = 'Stop'
