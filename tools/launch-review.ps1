@@ -28,11 +28,11 @@
     Absolute path to the run directory. Required.
 
 .PARAMETER Agent
-    Agent id. Defaults to security-toolkit:dual-model-review.
+    Agent id. Defaults to dual-review:dual-model-review.
 
 .PARAMETER Plugin
     --plugin argument. Defaults to
-    github:1ES-microsoft/ai-plugins:plugins/security-toolkit
+    market:dual-review@jmprieur/pr-inbox
     (fetched once and cached by agency).
 
 .PARAMETER Model
@@ -70,8 +70,8 @@ param(
     [switch] $Yolo
 )
 
-if (-not $Agent)  { $Agent  = 'security-toolkit:dual-model-review' }
-if (-not $Plugin) { $Plugin = 'github:1ES-microsoft/ai-plugins:plugins/security-toolkit' }
+if (-not $Agent)  { $Agent  = 'dual-review:dual-model-review' }
+if (-not $Plugin) { $Plugin = 'market:dual-review@jmprieur/pr-inbox' }
 if (-not $Model)  { $Model  = 'claude-opus-4.8' }
 if (-not $Mcps)   { $Mcps   = 'workiq,teams' }
 

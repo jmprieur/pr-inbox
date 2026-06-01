@@ -155,21 +155,24 @@ public sealed class ReviewLauncherSettings
 {
     /// <summary>
     /// Plugin spec passed to <c>agency copilot --plugin &lt;...&gt;</c>.
-    /// Default fetches the security-toolkit plugin directly from GitHub
-    /// (cached by agency after first use). Examples:
+    /// Defaults to the <c>dual-review</c> plugin published from this
+    /// repo's marketplace (<c>.github/plugin/marketplace.json</c>). For
+    /// local development against an unpublished working tree, use a
+    /// <c>local:</c> spec. Examples:
     /// <list type="bullet">
-    ///   <item><c>github:1ES-microsoft/ai-plugins:plugins/security-toolkit</c></item>
-    ///   <item><c>local:d:/1es/ai-plugins/plugins/security-toolkit</c></item>
+    ///   <item><c>market:dual-review@jmprieur/pr-inbox</c></item>
+    ///   <item><c>github:jmprieur/pr-inbox:plugins/dual-review</c></item>
+    ///   <item><c>local:d:/1es/pr-inbox/plugins/dual-review</c></item>
     ///   <item><c>ado-git:&lt;org&gt;/&lt;project&gt;/&lt;repo&gt;:&lt;path&gt;</c></item>
     /// </list>
     /// </summary>
-    public string Plugin { get; init; } = " market:security-toolkit@1ES-microsoft/ai-plugins";
+    public string Plugin { get; init; } = "market:dual-review@jmprieur/pr-inbox";
 
     /// <summary>Model id passed to <c>agency copilot --model</c>.</summary>
     public string Model { get; init; } = "claude-opus-4.8";
 
     /// <summary>Agent id passed to <c>agency copilot --agent</c>.</summary>
-    public string Agent { get; init; } = "security-toolkit:dual-model-review";
+    public string Agent { get; init; } = "dual-review:dual-model-review";
 
     /// <summary>MCP servers to enable (each becomes one <c>--mcp</c> flag).</summary>
     public List<string> AdditionalMcps { get; init; } = new() { "workiq", "teams" };

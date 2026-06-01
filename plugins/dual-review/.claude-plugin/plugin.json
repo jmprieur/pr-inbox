@@ -1,0 +1,18 @@
+{
+  "name": "dual-review",
+  "description": "Dual-model code review: orchestrate two independent reviewer models over the same change set, then post the cross-referenced verdict as inline GitHub PR comments.",
+  "version": "0.1.0",
+  "author": {
+    "name": "pr-inbox maintainers",
+    "email": "jmprieur@microsoft.com"
+  },
+  "homepage": "https://github.com/jmprieur/pr-inbox",
+  "keywords": [
+    "code-review",
+    "pull-request",
+    "dual-model",
+    "github",
+    "agents",
+    "skills"
+  ]
+}

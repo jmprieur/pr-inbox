@@ -1,0 +1,15 @@
+{
+  "shared": {
+    "name": "pr-inbox-plugins",
+    "metadata": {
+      "description": "GitHub Copilot plugin marketplace for the pr-inbox repository. Dual-model PR review agents and delivery skills.",
+      "version": "1.0.0"
+    },
+    "owner": {
+      "name": "pr-inbox maintainers",
+      "email": "jmprieur@microsoft.com"
+    }
+  },
+  "claude": {},
+  "copilot": {}
+}
