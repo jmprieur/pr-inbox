@@ -1,0 +1,33 @@
+{
+  "name": "pr-inbox-plugins",
+  "metadata": {
+    "description": "GitHub Copilot plugin marketplace for the pr-inbox repository. Dual-model PR review agents and delivery skills.",
+    "version": "1.0.0"
+  },
+  "owner": {
+    "name": "pr-inbox maintainers",
+    "email": "jmprieur@microsoft.com"
+  },
+  "plugins": [
+    {
+      "name": "dual-review",
+      "source": "./plugins/dual-review",
+      "strict": true,
+      "version": "0.1.0",
+      "description": "Dual-model code review: orchestrate two independent reviewer models over the same change set, then post the cross-referenced verdict as inline GitHub PR comments.",
+      "author": {
+        "name": "pr-inbox maintainers",
+        "email": "jmprieur@microsoft.com"
+      },
+      "keywords": [
+        "code-review",
+        "pull-request",
+        "dual-model",
+        "github",
+        "agents",
+        "skills"
+      ],
+      "category": "review"
+    }
+  ]
+}
