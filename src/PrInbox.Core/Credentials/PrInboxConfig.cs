@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.RegularExpressions;
 
 namespace PrInbox.Core.Credentials;
 
@@ -173,6 +174,40 @@ public sealed class ReviewLauncherSettings
 
     /// <summary>Agent id passed to <c>agency copilot --agent</c>.</summary>
     public string Agent { get; init; } = "dual-review:dual-model-review";
+
+    /// <summary>
+    /// Hex colour applied to the Windows Terminal tab spawned for a
+    /// review (<c>wt nt --tabColor</c>), so every review window is
+    /// visually distinct from ordinary terminals. Accepts <c>#rgb</c> or
+    /// <c>#rrggbb</c>. Defaults to the app accent so all review tabs
+    /// share one colour. Set to empty to disable colouring. Ignored by
+    /// the non-<c>wt</c> fallback launcher (plain pwsh has no tab colour).
+    /// </summary>
+    /// <remarks>
+    /// Mutable (<c>set</c> not <c>init</c>) so the Settings page can
+    /// update it on the live DI singleton and the next review launch
+    /// picks it up without a process restart.
+    /// </remarks>
+    public string TabColor { get; set; } = "#5da4ff";
+
+    /// <summary>
+    /// Returns <paramref name="value"/> trimmed if it is a Windows
+    /// Terminal–acceptable hex colour (<c>#rgb</c> or <c>#rrggbb</c>);
+    /// otherwise <c>null</c>. The single source of truth shared by the
+    /// launcher (which drops invalid values rather than letting <c>wt</c>
+    /// reject the whole command line) and the Settings page (which uses
+    /// it to validate user input). Empty / whitespace returns
+    /// <c>null</c> — i.e. "no tab colour".
+    /// </summary>
+    public static string? NormalizeTabColor(string? value)
+    {
+        var v = value?.Trim();
+        if (string.IsNullOrEmpty(v)) return null;
+        return TabColorPattern.IsMatch(v) ? v : null;
+    }
+
+    private static readonly Regex TabColorPattern =
+        new("^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$", RegexOptions.Compiled);
 
     /// <summary>MCP servers to enable (each becomes one <c>--mcp</c> flag).</summary>
     public List<string> AdditionalMcps { get; init; } = new() { "workiq", "teams" };

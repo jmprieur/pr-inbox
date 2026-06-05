@@ -221,6 +221,13 @@ public sealed class ReviewLauncher : IReviewLauncher, IAsyncDisposable
         var token = ConsoleWindowRegistry.TokenFor(runId);
         var safeTitle = $"{humanTitle} [{token}]";
 
+        // Optional per-tab colour so review windows stand out from plain
+        // terminals. Validated to a wt-acceptable hex (#rgb / #rrggbb);
+        // anything else (incl. empty) is dropped so wt never mis-parses.
+        var tabColorArg = ReviewLauncherSettings.NormalizeTabColor(rl.TabColor) is { } color
+            ? $" --tabColor \"{color}\""
+            : "";
+
         var wt = ResolveOnPath("wt.exe");
         try
         {
@@ -229,7 +236,11 @@ public sealed class ReviewLauncher : IReviewLauncher, IAsyncDisposable
                 // -w new gives each review its own Windows Terminal window
                 // so the inbox UI can minimize / restore one without
                 // affecting the others.
-                var args = $"-w new nt --title \"{safeTitle}\" -d \"{runDir}\" pwsh -NoExit -File \"{ps1}\" {launcherArgs}";
+                // --suppressApplicationTitle keeps OUR --title authoritative:
+                // agency copilot emits OSC title sequences at runtime that
+                // would otherwise overwrite the tab title AND erase the
+                // run-id token the registry polls for during discovery.
+                var args = $"-w new nt --title \"{safeTitle}\" --suppressApplicationTitle{tabColorArg} -d \"{runDir}\" pwsh -NoExit -File \"{ps1}\" {launcherArgs}";
                 Process.Start(new ProcessStartInfo
                 {
                     FileName = wt,

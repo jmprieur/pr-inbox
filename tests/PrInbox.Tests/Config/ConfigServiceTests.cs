@@ -238,6 +238,43 @@ public sealed class ConfigServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task SetReviewLauncherTabColorAsync_Normalizes_Persists_And_Mirrors_Singleton()
+    {
+        var singleton = new PrInboxConfig();
+        var svc = new ConfigService(singleton, _path);
+        singleton.ReviewLauncher.TabColor.Should().Be("#5da4ff"); // baseline default
+
+        // Valid hex is stored as-is and mirrored onto the singleton.
+        await svc.SetReviewLauncherTabColorAsync("#ff8800");
+        singleton.ReviewLauncher.TabColor.Should().Be("#ff8800");
+        (await svc.GetAsync()).ReviewLauncher.TabColor.Should().Be("#ff8800");
+
+        // Blank disables colouring (stored as empty).
+        await svc.SetReviewLauncherTabColorAsync("   ");
+        singleton.ReviewLauncher.TabColor.Should().BeEmpty();
+        (await svc.GetAsync()).ReviewLauncher.TabColor.Should().BeEmpty();
+
+        // Garbage is rejected to empty rather than reaching wt.
+        await svc.SetReviewLauncherTabColorAsync("not-a-colour");
+        singleton.ReviewLauncher.TabColor.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData("#5da4ff", "#5da4ff")]
+    [InlineData("  #ABC  ", "#ABC")]
+    [InlineData("#FFFFFF", "#FFFFFF")]
+    [InlineData("", null)]
+    [InlineData("   ", null)]
+    [InlineData("5da4ff", null)]      // missing leading '#'
+    [InlineData("#12", null)]          // wrong length
+    [InlineData("#1234", null)]        // wrong length
+    [InlineData("#gggggg", null)]      // non-hex
+    public void NormalizeTabColor_AcceptsHexRejectsRest(string input, string? expected)
+    {
+        ReviewLauncherSettings.NormalizeTabColor(input).Should().Be(expected);
+    }
+
+    [Fact]
     public void ConfigPath_Reflects_Constructor_Arg()
     {
         var svc = new ConfigService(_path);

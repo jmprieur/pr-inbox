@@ -91,6 +91,17 @@ public interface IConfigService
     Task SetReviewLauncherFlagsAsync(bool autoSend, bool yolo, CancellationToken ct = default);
 
     /// <summary>
+    /// Sets the Review-launcher tab colour
+    /// (<see cref="ReviewLauncherSettings.TabColor"/>) and mirrors it onto
+    /// the DI singleton so the next review launch picks it up without a
+    /// process restart. The value is normalized via
+    /// <see cref="ReviewLauncherSettings.NormalizeTabColor"/>: a valid
+    /// <c>#rgb</c>/<c>#rrggbb</c> hex is stored as-is; anything else
+    /// (including blank) is stored as empty, which disables colouring.
+    /// </summary>
+    Task SetReviewLauncherTabColorAsync(string tabColor, CancellationToken ct = default);
+
+    /// <summary>
     /// Runs the same auth/identity checks the CLI <c>config doctor</c>
     /// runs and returns a structured report. Shell-outs to <c>gh</c> and
     /// the Azure CLI happen inside; expect a few hundred ms per source.

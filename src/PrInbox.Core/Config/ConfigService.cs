@@ -201,6 +201,17 @@ public sealed class ConfigService : IConfigService
     }
 
     /// <inheritdoc />
+    public async Task SetReviewLauncherTabColorAsync(string tabColor, CancellationToken ct = default)
+    {
+        // Store the normalized form (or empty = disabled). Mirrors the
+        // launcher's validation so an invalid value can never reach wt.
+        var normalized = ReviewLauncherSettings.NormalizeTabColor(tabColor) ?? string.Empty;
+        var cfg = await PrInboxConfig.LoadAsync(_configPath, ct);
+        cfg.ReviewLauncher.TabColor = normalized;
+        await SaveAndRefreshAsync(cfg, ct);
+    }
+
+    /// <inheritdoc />
     public async Task<BindIdentityResult> BindGitHubSourceToIdentityAsync(
         string sourceId,
         string identity,
@@ -346,6 +357,7 @@ public sealed class ConfigService : IConfigService
         // changes effective without a restart.
         _singleton.ReviewLauncher.AutoSend = cfg.ReviewLauncher.AutoSend;
         _singleton.ReviewLauncher.Yolo = cfg.ReviewLauncher.Yolo;
+        _singleton.ReviewLauncher.TabColor = cfg.ReviewLauncher.TabColor;
     }
 
     private static string DefaultIdFor(SourceConfigKind kind, string host) => kind switch
