@@ -159,7 +159,7 @@ public sealed class InboxSyncHostedService : BackgroundService
             var snap = await snapRepo.GetLatestAsync(pr.Identity, ct);
             var drift = DriftInfo.Compute(pr, snap);
             tagsByUrl.TryGetValue(pr.Url, out var tags);
-            rows.Add(InboxRow.FromRow(pr, open, bot, drift, likelyDone, tags));
+            rows.Add(InboxRow.FromRow(pr, open, bot, drift, likelyDone, tags, snap?.Files));
         }
         _state.ReplaceAll(rows);
     }
@@ -510,7 +510,7 @@ public sealed class InboxSyncHostedService : BackgroundService
                     var snap = await snapRepo.GetLatestAsync(fresh.Identity, ct);
                     var drift = DriftInfo.Compute(fresh, snap);
                     var tags = await tagRepo.GetTagsForPrAsync(fresh.Url, ct);
-                    _state.Upsert(InboxRow.FromRow(fresh, open, bot, drift, likelyDone, tags));
+                    _state.Upsert(InboxRow.FromRow(fresh, open, bot, drift, likelyDone, tags, snap?.Files));
                 }
             }
             catch (Exception ex)

@@ -406,7 +406,7 @@ else
             var drift = DriftInfo.Compute(pr, snap);
             var tags = await TagRepo.GetTagsForPrAsync(pr.Url, CancellationToken.None);
 
-            State.Upsert(InboxRow.FromRow(pr, openCount, unresolvedBot, drift, likelyDone, tags));
+            State.Upsert(InboxRow.FromRow(pr, openCount, unresolvedBot, drift, likelyDone, tags, snap?.Files));
         }
         catch (Exception ex)
         {
