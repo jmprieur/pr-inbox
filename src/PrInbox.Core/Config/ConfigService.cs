@@ -201,6 +201,27 @@ public sealed class ConfigService : IConfigService
     }
 
     /// <inheritdoc />
+    public async Task SetRepoPathFiltersAsync(
+        IReadOnlyDictionary<string, IReadOnlyList<string>> filters,
+        CancellationToken ct = default)
+    {
+        var cfg = await PrInboxConfig.LoadAsync(_configPath, ct);
+        cfg.RepoPathFilters.Clear();
+        foreach (var (repo, patterns) in filters)
+        {
+            if (string.IsNullOrWhiteSpace(repo)) continue;
+            var cleaned = patterns
+                .Where(p => !string.IsNullOrWhiteSpace(p))
+                .Select(p => p.Trim())
+                .ToList();
+            // Empty list = unconfigured = show all; don't persist a no-op entry.
+            if (cleaned.Count == 0) continue;
+            cfg.RepoPathFilters[repo.Trim()] = cleaned;
+        }
+        await SaveAndRefreshAsync(cfg, ct);
+    }
+
+    /// <inheritdoc />
     public async Task SetReviewLauncherTabColorAsync(string tabColor, CancellationToken ct = default)
     {
         // Store the normalized form (or empty = disabled). Mirrors the
@@ -347,6 +368,12 @@ public sealed class ConfigService : IConfigService
 
         _singleton.IgnoredRepos.Clear();
         foreach (var r in cfg.IgnoredRepos) _singleton.IgnoredRepos.Add(r);
+
+        _singleton.RepoPathFilters.Clear();
+        foreach (var (repo, patterns) in cfg.RepoPathFilters)
+        {
+            _singleton.RepoPathFilters[repo] = new List<string>(patterns);
+        }
 
         _singleton.Bots.ExtraLogins.Clear();
         foreach (var b in cfg.Bots.ExtraLogins) _singleton.Bots.ExtraLogins.Add(b);

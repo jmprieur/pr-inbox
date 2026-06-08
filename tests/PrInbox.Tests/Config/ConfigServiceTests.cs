@@ -184,6 +184,49 @@ public sealed class ConfigServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task SetRepoPathFiltersAsync_Persists_Trims_And_Drops_Empty_Repos()
+    {
+        var svc = new ConfigService(_path);
+
+        await svc.SetRepoPathFiltersAsync(new Dictionary<string, IReadOnlyList<string>>
+        {
+            ["contoso/mono"] = new List<string> { "src/A", "  src/B  ", "", "  " },
+            ["contoso/blank"] = new List<string> { "  ", "" },
+            ["  "] = new List<string> { "src/X" },
+        });
+
+        var cfg = await svc.GetAsync();
+        cfg.RepoPathFilters.Should().ContainKey("contoso/mono");
+        cfg.RepoPathFilters["contoso/mono"].Should().BeEquivalentTo(new[] { "src/A", "src/B" });
+        cfg.RepoPathFilters.Should().NotContainKey("contoso/blank");
+        cfg.RepoPathFilters.Keys.Should().NotContain(k => string.IsNullOrWhiteSpace(k));
+    }
+
+    [Fact]
+    public async Task SetRepoPathFiltersAsync_Refreshes_Singleton_InPlace()
+    {
+        var singleton = new PrInboxConfig();
+        var svc = new ConfigService(singleton, _path);
+
+        await svc.SetRepoPathFiltersAsync(new Dictionary<string, IReadOnlyList<string>>
+        {
+            ["contoso/mono"] = new List<string> { "src/A" },
+        });
+
+        singleton.RepoPathFilters.Should().ContainKey("contoso/mono");
+        singleton.RepoPathFilters["contoso/mono"].Should().BeEquivalentTo(new[] { "src/A" });
+
+        // A subsequent save replaces the prior content in place.
+        await svc.SetRepoPathFiltersAsync(new Dictionary<string, IReadOnlyList<string>>
+        {
+            ["contoso/other"] = new List<string> { "lib/C" },
+        });
+
+        singleton.RepoPathFilters.Should().NotContainKey("contoso/mono");
+        singleton.RepoPathFilters.Should().ContainKey("contoso/other");
+    }
+
+    [Fact]
     public async Task Mutations_Refresh_Singleton_Lists_InPlace()
     {
         var singleton = new PrInboxConfig();

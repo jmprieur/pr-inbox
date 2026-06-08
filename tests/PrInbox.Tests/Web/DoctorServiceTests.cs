@@ -412,6 +412,7 @@ public class DoctorServiceTests : IAsyncLifetime
         public Task SetIgnoredReposAsync(IReadOnlyList<string> patterns, CancellationToken ct = default) => throw new NotImplementedException();
         public Task SetReviewLauncherFlagsAsync(bool autoSend, bool yolo, CancellationToken ct = default) => throw new NotImplementedException();
         public Task SetReviewLauncherTabColorAsync(string tabColor, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task SetRepoPathFiltersAsync(IReadOnlyDictionary<string, IReadOnlyList<string>> filters, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<BindIdentityResult> BindGitHubSourceToIdentityAsync(string sourceId, string identity, CancellationToken ct = default) => throw new NotImplementedException();
     }
 

@@ -102,6 +102,16 @@ public interface IConfigService
     Task SetReviewLauncherTabColorAsync(string tabColor, CancellationToken ct = default);
 
     /// <summary>
+    /// Replaces the entire <see cref="PrInboxConfig.RepoPathFilters"/> map
+    /// (monorepo path scoping) and mirrors it onto the DI singleton so the
+    /// inbox picks it up without a restart. Repos with an empty pattern
+    /// list are dropped (treated as unconfigured = show all).
+    /// </summary>
+    Task SetRepoPathFiltersAsync(
+        IReadOnlyDictionary<string, IReadOnlyList<string>> filters,
+        CancellationToken ct = default);
+
+    /// <summary>
     /// Runs the same auth/identity checks the CLI <c>config doctor</c>
     /// runs and returns a structured report. Shell-outs to <c>gh</c> and
     /// the Azure CLI happen inside; expect a few hundred ms per source.
