@@ -37,7 +37,9 @@ public sealed record InboxFilters(
     FrozenSet<string> ExcludedRepos,
     FrozenSet<string> ExcludedAuthors,
     IReadOnlyList<Regex> IgnoredRepoRegexes,
-    FrozenDictionary<string, string> SourceClassByConfigId)
+    FrozenDictionary<string, string> SourceClassByConfigId,
+    bool ShowOutOfScope = false,
+    FrozenDictionary<string, IReadOnlyList<Regex>>? PathScopeByRepo = null)
 {
     /// <summary>The four <c>src-*</c> classes the UI surfaces as chips.</summary>
     public static readonly FrozenSet<string> KnownSourceClasses =
@@ -54,6 +56,7 @@ public sealed record InboxFilters(
     private const string PrefSourceFilter = "inbox.source_filter";
     private const string PrefExcludedRepos = "inbox.excluded_repos";
     private const string PrefExcludedAuthors = "inbox.excluded_authors";
+    private const string PrefShowOutOfScope = "inbox.show_out_of_scope";
 
     /// <summary>Match-time cap for an ignored-repo regex. Anything slower is
     /// almost certainly catastrophic backtracking — treated as a non-match.</summary>
@@ -72,6 +75,7 @@ public sealed record InboxFilters(
         var showIgnored = await prefs.GetBoolAsync(PrefShowIgnored, defaultValue: false, ct);
         var showDone = await prefs.GetBoolAsync(PrefShowDone, defaultValue: false, ct);
         var onlyFlagged = await prefs.GetBoolAsync(PrefOnlyFlagged, defaultValue: false, ct);
+        var showOutOfScope = await prefs.GetBoolAsync(PrefShowOutOfScope, defaultValue: false, ct);
 
         var enabledSources = ParseJsonStringSet(await prefs.GetAsync(PrefSourceFilter, null, ct))
                              ?? KnownSourceClasses;
@@ -81,6 +85,7 @@ public sealed record InboxFilters(
                               ?? FrozenSet<string>.Empty;
 
         var regexes = CompileIgnoredRepoRegexes(config.IgnoredRepos);
+        var pathScopes = RepoPathScope.CompileRepoScopes(config.RepoPathFilters);
 
         return new InboxFilters(
             showClosed,
@@ -91,7 +96,9 @@ public sealed record InboxFilters(
             excludedRepos,
             excludedAuthors,
             regexes,
-            BuildSourceClassMap(config.Sources));
+            BuildSourceClassMap(config.Sources),
+            showOutOfScope,
+            pathScopes);
     }
 
     /// <summary>
@@ -108,7 +115,9 @@ public sealed record InboxFilters(
         IEnumerable<string> excludedRepos,
         IEnumerable<string> excludedAuthors,
         IReadOnlyList<Regex> ignoredRepoRegexes,
-        IEnumerable<SourceConfig>? sourceConfigs = null)
+        IEnumerable<SourceConfig>? sourceConfigs = null,
+        bool showOutOfScope = false,
+        FrozenDictionary<string, IReadOnlyList<Regex>>? pathScopeByRepo = null)
         => new(
             showClosed,
             showIgnored,
@@ -118,7 +127,9 @@ public sealed record InboxFilters(
             excludedRepos.ToFrozenSet(StringComparer.OrdinalIgnoreCase),
             excludedAuthors.ToFrozenSet(StringComparer.OrdinalIgnoreCase),
             ignoredRepoRegexes,
-            BuildSourceClassMap(sourceConfigs));
+            BuildSourceClassMap(sourceConfigs),
+            showOutOfScope,
+            pathScopeByRepo);
 
     /// <summary>
     /// Back-compat overload: predates the <c>OnlyFlagged</c> filter.
@@ -170,10 +181,21 @@ public sealed record InboxFilters(
         row.Status, row.SourceId, row.DisplayRepo, row.AuthorLogin,
         row.IsIgnored, isMarkedDone, row.FlaggedAt.HasValue);
 
-    /// <summary>Visible on the dashboard right now? (UI-side overload.)</summary>
+    /// <summary>Visible on the dashboard right now? (UI-side overload.)
+    /// <para>
+    /// This is the ONLY overload that applies monorepo path scoping —
+    /// it has the row's changed-file signal (<see cref="InboxRow.TouchedPaths"/>
+    /// / <see cref="InboxRow.TouchedPathState"/>). The sync-side
+    /// <see cref="ShouldShow(PullRequestRow, bool)"/> deliberately does
+    /// NOT, because sync candidates have no file data yet and hiding them
+    /// would deprioritize their enrichment — they'd never get files and
+    /// would stay hidden forever (enrichment deadlock).
+    /// </para>
+    /// </summary>
     public bool ShouldShow(InboxRow row) => ShouldShowCore(
         row.Status, row.SourceId, row.DisplayRepo, row.AuthorLogin,
-        row.IsIgnored, row.IsMarkedDone, row.IsFlagged);
+        row.IsIgnored, row.IsMarkedDone, row.IsFlagged,
+        row.TouchedPaths, row.TouchedPathState, applyPathScope: true);
 
     /// <summary>
     /// Map a SourceId to the UI chip class. Exposed because the chip
@@ -299,7 +321,10 @@ public sealed record InboxFilters(
         string? authorLogin,
         bool isIgnored,
         bool isMarkedDone = false,
-        bool isFlagged = false)
+        bool isFlagged = false,
+        IReadOnlyList<string>? touchedPaths = null,
+        TouchedPathState touchedState = TouchedPathState.Unknown,
+        bool applyPathScope = false)
     {
         // 1. Closed unless "Show closed".
         if (!ShowClosed && status != PullRequestStatus.Open) return false;
@@ -330,7 +355,26 @@ public sealed record InboxFilters(
         // 4. Per-author denylist (with null-safe bucketing).
         if (ExcludedAuthors.Count > 0 && ExcludedAuthors.Contains(AuthorKeyOf(authorLogin))) return false;
 
-        // 5. Ignored (per-PR flag + config regex list).
+        // 5. Monorepo path scope (DASHBOARD-ONLY — see ShouldShow(InboxRow)).
+        //    A repo with a configured path filter only shows PRs that touch
+        //    one of its folders. Fail-open by construction: a row is hidden
+        //    ONLY when its changed-file list is Complete AND matches none of
+        //    the repo's globs. Unknown (not enriched), Unavailable (ADO /
+        //    fetch failed) and Truncated (huge PR past the file cap) all
+        //    show. The "Show out-of-scope" toggle reveals the hidden set.
+        if (applyPathScope && !ShowOutOfScope && PathScopeByRepo is { Count: > 0 } scopes)
+        {
+            var key = RepoPathScope.NormalizeRepoKey(displayRepo);
+            if (scopes.TryGetValue(key, out var globs)
+                && touchedState == TouchedPathState.Complete
+                && touchedPaths is { Count: > 0 }
+                && !RepoPathScope.IsInScope(touchedPaths, globs))
+            {
+                return false;
+            }
+        }
+
+        // 6. Ignored (per-PR flag + config regex list).
         // Note: `disappeared_at != null` does NOT hide the row — disappeared
         // PRs surface in the main inbox with a "no longer assigned" chip so
         // the user can still see and act on them if they want to. Explicit
@@ -341,13 +385,13 @@ public sealed record InboxFilters(
             if (MatchesIgnoredRepoRegex(displayRepo)) return false;
         }
 
-        // 6. Marked done (per-PR snooze). Same shape as Ignored: the
+        // 7. Marked done (per-PR snooze). Same shape as Ignored: the
         //    "Show done" toggle reveals them; otherwise they're hidden.
         //    A row stops being "marked done" automatically once the
         //    author pushes a new commit (see InboxRow.IsMarkedDone).
         if (!ShowDone && isMarkedDone) return false;
 
-        // 7. "Show only flagged" — a positive restrict, applied last so
+        // 8. "Show only flagged" — a positive restrict, applied last so
         //    the other filters still apply (e.g. Closed PRs are still
         //    hidden unless Show closed is on, even when OnlyFlagged is
         //    on). This is a deliberate orthogonality choice: flagging
