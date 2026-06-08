@@ -364,6 +364,28 @@ else
                 </span>
             </label>
         </div>
+        <div class="settings-toggle">
+            <label>
+                <strong>Tab colour</strong>
+                <span class="muted">
+                    Colours the Windows Terminal tab for every review so it stands out from ordinary terminals.
+                    Accepts a hex like <code>#5da4ff</code>; leave blank to disable.
+                </span>
+                <span style="display:inline-flex; align-items:center; gap:.5rem; margin-top:.35rem;">
+                    <input type="color"
+                           value="@TabColorPickerValue"
+                           @onchange="OnTabColorChanged"
+                           disabled="@_busy"
+                           title="Pick a colour" />
+                    <input type="text"
+                           value="@_tabColor"
+                           @onchange="OnTabColorChanged"
+                           placeholder="#5da4ff"
+                           disabled="@_busy"
+                           style="width:8rem;" />
+                </span>
+            </label>
+        </div>
     </section>
 
     <p class="muted">
@@ -377,6 +399,7 @@ else
     private string _ignoredReposText = string.Empty;
     private bool _autoSend = true;
     private bool _yolo;
+    private string _tabColor = string.Empty;
 
     private bool _showGheForm;
     private string _gheHost = string.Empty;
@@ -484,6 +507,7 @@ else
         _ignoredReposText = string.Join("\n", _cfg.IgnoredRepos);
         _autoSend = _cfg.ReviewLauncher.AutoSend;
         _yolo = _cfg.ReviewLauncher.Yolo;
+        _tabColor = _cfg.ReviewLauncher.TabColor;
     }
 
     private static string KindLabel(SourceConfigKind kind) => kind switch
@@ -779,6 +803,43 @@ else
         _yolo = value;
         return PersistLauncherFlagsAsync($"Yolo {(value ? "ON" : "OFF")}.");
     }
+
+    // Value bound to the native colour picker, which only accepts a
+    // 6-digit hex. Falls back to the app accent when the configured
+    // value is blank (disabled) or a 3-digit hex the picker can't show.
+    private string TabColorPickerValue =>
+        ReviewLauncherSettings.NormalizeTabColor(_tabColor) is { Length: 7 } hex
+            ? hex
+            : "#5da4ff";
+
+    private async Task OnTabColorChanged(ChangeEventArgs e)
+    {
+        var raw = e.Value?.ToString()?.Trim() ?? string.Empty;
+        if (raw.Length == 0)
+        {
+            _tabColor = string.Empty;
+            await PersistTabColorAsync(string.Empty, "Review tab colour disabled.");
+            return;
+        }
+
+        var normalized = ReviewLauncherSettings.NormalizeTabColor(raw);
+        if (normalized is null)
+        {
+            _tabColor = raw;
+            SetMessage("Enter a hex colour like #5da4ff, or leave blank to disable.", isError: true);
+            return;
+        }
+
+        _tabColor = normalized;
+        await PersistTabColorAsync(normalized, $"Review tab colour set to {normalized}.");
+    }
+
+    private Task PersistTabColorAsync(string tabColor, string okMessage) =>
+        WrapAsync(async () =>
+        {
+            await ConfigSvc.SetReviewLauncherTabColorAsync(tabColor);
+            SetMessage(okMessage);
+        });
 
     private async Task PersistLauncherFlagsAsync(string okMessage)
     {
