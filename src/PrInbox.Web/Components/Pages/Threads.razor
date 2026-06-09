@@ -247,6 +247,10 @@ else
         if (string.IsNullOrWhiteSpace(Url) || _refreshing) return;
         _refreshing = true;
         _refreshMessage = null;
+        // Render the "Refreshing…" state immediately, before the trigger's
+        // synchronous startup runs (see Inbox.OnRefreshAsync for the rationale).
+        StateHasChanged();
+        await Task.Yield();
         try
         {
             var (ok, error) = await SyncSvc.TriggerEnrichOneAsync(Url, CancellationToken.None);

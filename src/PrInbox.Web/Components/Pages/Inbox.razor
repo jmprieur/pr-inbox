@@ -1675,6 +1675,12 @@ else
     {
         if (_refreshing) return;
         _refreshing = true;
+        // Paint the "Refreshing..." state before TriggerNowAsync runs its
+        // synchronous startup work. Otherwise Blazor doesn't re-render until the
+        // sync chain reaches its first awaited I/O, so the button feedback lags
+        // behind the click.
+        StateHasChanged();
+        await Task.Yield();
         try
         {
             var started = await Sync.TriggerNowAsync(CancellationToken.None);
