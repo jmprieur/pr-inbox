@@ -1,5 +1,6 @@
 using System.Text.RegularExpressions;
 using FluentAssertions;
+using PrInbox.Core.Config;
 using PrInbox.Core.Credentials;
 using PrInbox.Core.Models;
 using PrInbox.Core.Storage;
@@ -596,10 +597,14 @@ public class InboxFiltersTests
         DateTimeOffset? markedDoneAt = null,
         DateTimeOffset? flaggedAt = null,
         PullRequestStatus status = PullRequestStatus.Open,
-        bool isIgnored = false)
+        bool isIgnored = false,
+        string displayRepo = "o/r",
+        EnrichState enrichState = EnrichState.Enriched,
+        IReadOnlyList<string>? touchedPaths = null,
+        TouchedPathState touchedState = TouchedPathState.Unknown)
         => new(
             Url: url,
-            DisplayRepo: "o/r",
+            DisplayRepo: displayRepo,
             Number: 1,
             Title: "T",
             AuthorLogin: "octo",
@@ -607,7 +612,7 @@ public class InboxFiltersTests
             SourceKind: SourceKind.GitHub,
             IdentityUsed: "jmprieur",
             Status: status,
-            EnrichState: EnrichState.Enriched,
+            EnrichState: enrichState,
             LastSyncedAt: DateTimeOffset.UnixEpoch,
             OpenThreadCount: 0,
             UnresolvedBotCount: 0,
@@ -618,7 +623,9 @@ public class InboxFiltersTests
             IsIgnored: isIgnored,
             MarkedDoneHeadSha: markedDoneHeadSha,
             MarkedDoneAt: markedDoneAt,
-            FlaggedAt: flaggedAt);
+            FlaggedAt: flaggedAt,
+            TouchedPaths: touchedPaths,
+            TouchedPathState: touchedState);
 
     [Fact]
     public void InboxRow_IsMarkedDone_True_When_Sha_Matches_Current()
@@ -856,5 +863,188 @@ public class InboxFiltersTests
 
         visible.Should().BeEquivalentTo(rows);
         hidden.Should().BeEmpty();
+    }
+
+    // ---------- Monorepo path scope ----------
+
+    private static InboxFilters PathScopedFilters(
+        Dictionary<string, List<string>> repoFilters,
+        bool showOutOfScope = false)
+        => InboxFilters.From(
+            showClosed: false, showIgnored: false, showDone: true, onlyFlagged: false,
+            enabledSources: InboxFilters.KnownSourceClasses,
+            excludedRepos: Array.Empty<string>(),
+            excludedAuthors: Array.Empty<string>(),
+            ignoredRepoRegexes: Array.Empty<Regex>(),
+            sourceConfigs: null,
+            showOutOfScope: showOutOfScope,
+            pathScopeByRepo: RepoPathScope.CompileRepoScopes(repoFilters));
+
+    private static Dictionary<string, List<string>> Scope(string repo, params string[] globs)
+        => new() { [repo] = new List<string>(globs) };
+
+    [Fact]
+    public void PathScope_Complete_In_Scope_Row_Is_Shown()
+    {
+        var filters = PathScopedFilters(Scope("o/r", "src/A"));
+        var row = MakeInboxRow(
+            touchedPaths: new[] { "src/A/Foo.cs" },
+            touchedState: TouchedPathState.Complete);
+
+        filters.ShouldShow(row).Should().BeTrue();
+    }
+
+    [Fact]
+    public void PathScope_Complete_Out_Of_Scope_Row_Is_Hidden()
+    {
+        var filters = PathScopedFilters(Scope("o/r", "src/A"));
+        var row = MakeInboxRow(
+            touchedPaths: new[] { "docs/readme.md" },
+            touchedState: TouchedPathState.Complete);
+
+        filters.ShouldShow(row).Should().BeFalse();
+    }
+
+    [Fact]
+    public void PathScope_Out_Of_Scope_Row_Is_Shown_When_ShowOutOfScope()
+    {
+        var filters = PathScopedFilters(Scope("o/r", "src/A"), showOutOfScope: true);
+        var row = MakeInboxRow(
+            touchedPaths: new[] { "docs/readme.md" },
+            touchedState: TouchedPathState.Complete);
+
+        filters.ShouldShow(row).Should().BeTrue();
+    }
+
+    [Theory]
+    [InlineData(TouchedPathState.Unknown)]
+    [InlineData(TouchedPathState.Unavailable)]
+    [InlineData(TouchedPathState.Truncated)]
+    public void PathScope_Fails_Open_For_NonComplete_States(TouchedPathState state)
+    {
+        // Even though none of these touch src/A, only a COMPLETE file list
+        // may hide a row. Unknown / Unavailable / Truncated always show.
+        var filters = PathScopedFilters(Scope("o/r", "src/A"));
+        var row = MakeInboxRow(
+            touchedPaths: state == TouchedPathState.Unknown ? null : new[] { "docs/readme.md" },
+            touchedState: state);
+
+        filters.ShouldShow(row).Should().BeTrue();
+    }
+
+    [Fact]
+    public void PathScope_Repo_Without_Filter_Is_Unaffected()
+    {
+        var filters = PathScopedFilters(Scope("o/r", "src/A"));
+        // Different repo: no configured scope -> always shown regardless of paths.
+        var row = MakeInboxRow(
+            displayRepo: "other/repo",
+            touchedPaths: new[] { "anywhere/else.cs" },
+            touchedState: TouchedPathState.Complete);
+
+        filters.ShouldShow(row).Should().BeTrue();
+    }
+
+    [Fact]
+    public void PathScope_Repo_Key_Match_Is_Case_Insensitive()
+    {
+        var filters = PathScopedFilters(Scope("O/R", "src/A"));
+        var row = MakeInboxRow(
+            displayRepo: "o/r",
+            touchedPaths: new[] { "docs/readme.md" },
+            touchedState: TouchedPathState.Complete);
+
+        filters.ShouldShow(row).Should().BeFalse();
+    }
+
+    [Fact]
+    public void PathScope_Is_Never_Applied_Sync_Side()
+    {
+        // The PullRequestRow overload feeds the enrichment prioritizer.
+        // It must NEVER path-filter: sync candidates have no file data, and
+        // hiding them would deprioritize their enrichment -> they'd never
+        // get files -> permanently hidden (the deadlock this design avoids).
+        var filters = PathScopedFilters(Scope("o/r", "src/A"));
+        var pr = MakePr(displayRepo: "o/r");
+
+        filters.ShouldShow(pr).Should().BeTrue();
+    }
+
+    // ---------- InboxRow.ClassifyTouchedPaths ----------
+
+    [Fact]
+    public void Classify_Basic_Is_Unknown()
+    {
+        var (paths, state) = InboxRow.ClassifyTouchedPaths(EnrichState.Basic, files: null);
+        state.Should().Be(TouchedPathState.Unknown);
+        paths.Should().BeNull();
+    }
+
+    [Fact]
+    public void Classify_Basic_With_Files_Is_Still_Unknown()
+    {
+        // An unenriched row's snapshot files (if any) aren't authoritative yet.
+        var files = new[] { new SnapshotFileChange("src/A/x.cs", 1, 0, "modified") };
+        var (paths, state) = InboxRow.ClassifyTouchedPaths(EnrichState.Basic, files);
+        state.Should().Be(TouchedPathState.Unknown);
+        paths.Should().BeNull();
+    }
+
+    [Fact]
+    public void Classify_Enriched_Null_Files_Is_Unavailable()
+    {
+        var (paths, state) = InboxRow.ClassifyTouchedPaths(EnrichState.Enriched, files: null);
+        state.Should().Be(TouchedPathState.Unavailable);
+        paths.Should().BeNull();
+    }
+
+    [Fact]
+    public void Classify_Enriched_Empty_Or_Blank_Files_Is_Unavailable()
+    {
+        // A zero-file PR, or files with no usable path, can't be scoped.
+        // Fail open (Unavailable) rather than hide on an empty signal.
+        InboxRow.ClassifyTouchedPaths(EnrichState.Enriched, Array.Empty<SnapshotFileChange>())
+            .State.Should().Be(TouchedPathState.Unavailable);
+
+        var blank = new[] { new SnapshotFileChange("   ", 0, 0, null) };
+        InboxRow.ClassifyTouchedPaths(EnrichState.Enriched, blank)
+            .State.Should().Be(TouchedPathState.Unavailable);
+    }
+
+    [Fact]
+    public void Classify_Enriched_With_Files_Is_Complete_And_Extracts_Paths()
+    {
+        var files = new[]
+        {
+            new SnapshotFileChange("src/A/x.cs", 1, 0, "modified"),
+            new SnapshotFileChange("docs/readme.md", 2, 1, "modified"),
+        };
+        var (paths, state) = InboxRow.ClassifyTouchedPaths(EnrichState.Enriched, files);
+        state.Should().Be(TouchedPathState.Complete);
+        paths.Should().BeEquivalentTo(new[] { "src/A/x.cs", "docs/readme.md" });
+    }
+
+    [Fact]
+    public void Classify_Enriched_At_File_Cap_Is_Truncated()
+    {
+        var files = Enumerable
+            .Range(0, InboxRow.GitHubChangedFileCap)
+            .Select(i => new SnapshotFileChange($"src/f{i}.cs", 1, 0, "modified"))
+            .ToList();
+        var (paths, state) = InboxRow.ClassifyTouchedPaths(EnrichState.Enriched, files);
+        state.Should().Be(TouchedPathState.Truncated);
+        paths.Should().BeNull();
+    }
+
+    [Fact]
+    public void FromRow_Populates_TouchedPaths_From_Snapshot_Files()
+    {
+        var pr = MakePr(displayRepo: "o/r");
+        var files = new[] { new SnapshotFileChange("src/A/x.cs", 1, 0, "modified") };
+
+        var row = InboxRow.FromRow(pr, openThreads: 0, unresolvedBot: 0, snapshotFiles: files);
+
+        row.TouchedPathState.Should().Be(TouchedPathState.Complete);
+        row.TouchedPaths.Should().BeEquivalentTo(new[] { "src/A/x.cs" });
     }
 }

@@ -331,6 +331,26 @@ else
     </section>
 
     <section class="settings-section">
+        <h2>Monorepo path filters</h2>
+        <p class="muted">
+            For a monorepo, only show PRs that touch certain folders. One line per repo,
+            in the form <code>owner/repo: folder1, folder2/**</code>. A PR is shown when it
+            touches <em>any</em> listed folder (OR). Repos with no line here are unaffected.
+        </p>
+        <ul class="muted" style="margin-top:0">
+            <li><code>src/ServiceA</code> — that folder and everything under it (a bare path matches its whole subtree).</li>
+            <li><code>src/Shared/**</code> — end a pattern with <code>/**</code> to match everything inside a folder.</li>
+            <li><code>src/*/api/**</code> — <code>*</code> matches a single folder name; <code>**</code> matches across folders.</li>
+            <li>Out-of-scope PRs are hidden by default; the Inbox "Show out-of-scope" toggle reveals them.</li>
+            <li>PRs not yet enriched, Azure DevOps PRs, and very large PRs are always shown (fail-open).</li>
+        </ul>
+        <textarea class="settings-textarea" rows="5" placeholder="contoso/monorepo: src/ServiceA, src/Shared/**" @bind="_pathFiltersText"></textarea>
+        <div class="settings-actions">
+            <button @onclick="SavePathFiltersAsync" disabled="@_busy">Save</button>
+        </div>
+    </section>
+
+    <section class="settings-section">
         <h2>Review launcher</h2>
         <p class="muted">
             How the Review button drives the dual-model-review agent.
@@ -397,6 +417,7 @@ else
     private PrInboxConfig? _cfg;
     private EnrichedDoctorReport? _doctorReport;
     private string _ignoredReposText = string.Empty;
+    private string _pathFiltersText = string.Empty;
     private bool _autoSend = true;
     private bool _yolo;
     private string _tabColor = string.Empty;
@@ -505,10 +526,16 @@ else
     {
         _cfg = await ConfigSvc.GetAsync();
         _ignoredReposText = string.Join("\n", _cfg.IgnoredRepos);
+        _pathFiltersText = FormatPathFilters(_cfg.RepoPathFilters);
         _autoSend = _cfg.ReviewLauncher.AutoSend;
         _yolo = _cfg.ReviewLauncher.Yolo;
         _tabColor = _cfg.ReviewLauncher.TabColor;
     }
+
+    private static string FormatPathFilters(IReadOnlyDictionary<string, List<string>> filters)
+        => string.Join("\n", filters
+            .Where(kv => kv.Value is { Count: > 0 })
+            .Select(kv => $"{kv.Key}: {string.Join(", ", kv.Value)}"));
 
     private static string KindLabel(SourceConfigKind kind) => kind switch
     {
@@ -790,6 +817,52 @@ else
             await ConfigSvc.SetIgnoredReposAsync(patterns);
             SetMessage($"Saved {patterns.Length} ignored-repo pattern(s).");
         });
+    }
+
+    private async Task SavePathFiltersAsync()
+    {
+        await WrapAsync(async () =>
+        {
+            var map = ParsePathFilters(_pathFiltersText);
+            await ConfigSvc.SetRepoPathFiltersAsync(map);
+            var repoCount = map.Count;
+            var globCount = map.Values.Sum(v => v.Count);
+            SetMessage($"Saved path filters for {repoCount} repo(s) ({globCount} folder pattern(s)).");
+        });
+    }
+
+    /// <summary>
+    /// Parse the "owner/repo: glob1, glob2" textarea into a repo -> patterns
+    /// map. Lines without a colon, or with no usable patterns, are dropped.
+    /// Only the first colon splits repo from patterns so paths can't contain
+    /// one anyway, but we stay defensive.
+    /// </summary>
+    private static Dictionary<string, IReadOnlyList<string>> ParsePathFilters(string? text)
+    {
+        var map = new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase);
+        if (string.IsNullOrWhiteSpace(text)) return map;
+
+        foreach (var rawLine in text.Split('\n', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var line = rawLine.Trim();
+            if (line.Length == 0) continue;
+
+            var colon = line.IndexOf(':');
+            if (colon <= 0) continue; // no repo key, or empty key
+
+            var repo = line[..colon].Trim();
+            if (repo.Length == 0) continue;
+
+            var globs = line[(colon + 1)..]
+                .Split(',', StringSplitOptions.RemoveEmptyEntries)
+                .Select(g => g.Trim())
+                .Where(g => g.Length > 0)
+                .ToList();
+            if (globs.Count == 0) continue;
+
+            map[repo] = globs;
+        }
+        return map;
     }
 
     private Task OnAutoSendChanged(bool value)

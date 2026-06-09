@@ -1,6 +1,7 @@
 @page "/"
 @rendermode InteractiveServer
 @implements IDisposable
+@using System.Collections.Frozen
 @using System.Text.Json
 @using System.Text.RegularExpressions
 @using PrInbox.Core.Config
@@ -191,6 +192,14 @@
                @onchange="@(e => OnShowDoneToggleAsync((bool)e.Value!))" />
         Show done@(HiddenDoneCount > 0 ? $" ({HiddenDoneCount})" : "")
     </label>
+    @if (_pathScopeByRepo is { Count: > 0 })
+    {
+        <label class="show-out-of-scope" title="Repos with a monorepo path filter only show PRs that touch the configured folders. Turn this on to also reveal the out-of-scope PRs.">
+            <input type="checkbox" checked="@_showOutOfScope"
+                   @onchange="@(e => OnShowOutOfScopeToggleAsync((bool)e.Value!))" />
+            Show out-of-scope@(HiddenOutOfScopeCount > 0 ? $" ({HiddenOutOfScopeCount})" : "")
+        </label>
+    }
     <label class="only-flagged" title="Show only PRs you've flagged as 'of interest'.">
         <input type="checkbox" checked="@_onlyFlagged"
                @onchange="@(e => OnOnlyFlaggedToggleAsync((bool)e.Value!))" />
@@ -564,6 +573,7 @@ else
     private const string PrefShowIgnored  = "inbox.show_ignored";
     private const string PrefShowDone     = "inbox.show_done";
     private const string PrefOnlyFlagged  = "inbox.only_flagged";
+    private const string PrefShowOutOfScope = "inbox.show_out_of_scope";
     private const string PrefSourceFilter = "inbox.source_filter";
     private const string PrefExcludedRepos = "inbox.excluded_repos";
     private const string PrefExcludedAuthors = "inbox.excluded_authors";
@@ -597,6 +607,7 @@ else
     private bool _showIgnored;
     private bool _showDone;
     private bool _onlyFlagged;
+    private bool _showOutOfScope;
     private bool _refreshing;
 
     // Tags: dictionary of all known tags (for the popover's pick list)
@@ -655,6 +666,13 @@ else
     // a debug log; we never crash the page over bad config.
     private List<Regex> _ignoredRepoRegexes = new();
 
+    // Compiled monorepo path scopes: normalized repo key -> the repo's
+    // folder globs (as anchored regexes). Built once on load and on config
+    // change so VisibleRows never recompiles per render. Empty = no repo
+    // has a path filter configured.
+    private FrozenDictionary<string, IReadOnlyList<Regex>> _pathScopeByRepo =
+        FrozenDictionary<string, IReadOnlyList<Regex>>.Empty;
+
     private string RowCountLabel
     {
         get
@@ -711,7 +729,9 @@ else
         _excludedRepos,
         _excludedAuthors,
         _ignoredRepoRegexes,
-        Config.Sources);
+        Config.Sources,
+        _showOutOfScope,
+        _pathScopeByRepo);
 
     private IReadOnlyList<InboxRow> VisibleRows
     {
@@ -748,6 +768,30 @@ else
     }
 
     /// <summary>
+    /// Count of rows currently hidden ONLY because they're out of every
+    /// configured monorepo path scope (i.e. would be visible if "Show
+    /// out-of-scope" were on). Drives the "Show out-of-scope (N)" label.
+    /// </summary>
+    private int HiddenOutOfScopeCount
+    {
+        get
+        {
+            if (_showOutOfScope || _pathScopeByRepo.Count == 0) return 0;
+            // A row is hidden "only" for path scope when it's invisible now
+            // but visible once ShowOutOfScope is flipped on. This isolates
+            // the path-scope effect from every other filter.
+            var current = CurrentFilters;
+            var allowOutOfScope = current with { ShowOutOfScope = true };
+            var count = 0;
+            foreach (var r in _rows)
+            {
+                if (!current.ShouldShow(r) && allowOutOfScope.ShouldShow(r)) count++;
+            }
+            return count;
+        }
+    }
+
+    /// <summary>
     /// Total flagged rows currently in the in-memory set. Shown next to
     /// the "Show only flagged" label so the user always knows how many
     /// PRs they're tracking. Counts the underlying flag, not the filter
@@ -773,6 +817,7 @@ else
         await LoadPrefsAsync();
         await ReloadTagsAsync();
         CompileIgnoredRepoRegexes();
+        CompilePathScopes();
         SnapshotAll();
     }
 
@@ -806,6 +851,7 @@ else
             _showIgnored = await Prefs.GetBoolAsync(PrefShowIgnored, defaultValue: false);
             _showDone    = await Prefs.GetBoolAsync(PrefShowDone, defaultValue: false);
             _onlyFlagged = await Prefs.GetBoolAsync(PrefOnlyFlagged, defaultValue: false);
+            _showOutOfScope = await Prefs.GetBoolAsync(PrefShowOutOfScope, defaultValue: false);
             var gbRaw = await Prefs.GetAsync(PrefGroupBy);
             _groupBy = string.Equals(gbRaw, "tag", StringComparison.OrdinalIgnoreCase)
                 ? GroupByMode.Tag
@@ -948,6 +994,13 @@ else
         }
     }
 
+    private void CompilePathScopes()
+    {
+        // Precompile per-repo monorepo path globs once (shared compiler so
+        // normalization + glob dialect match the sync-side LoadAsync path).
+        _pathScopeByRepo = RepoPathScope.CompileRepoScopes(Config.RepoPathFilters);
+    }
+
     private async Task OnShowClosedToggleAsync(bool value)
     {
         _showClosed = value;
@@ -974,6 +1027,13 @@ else
         _onlyFlagged = value;
         try { await Prefs.SetBoolAsync(PrefOnlyFlagged, value); }
         catch (Exception ex) { Log.LogDebug(ex, "Persist {Key} failed.", PrefOnlyFlagged); }
+    }
+
+    private async Task OnShowOutOfScopeToggleAsync(bool value)
+    {
+        _showOutOfScope = value;
+        try { await Prefs.SetBoolAsync(PrefShowOutOfScope, value); }
+        catch (Exception ex) { Log.LogDebug(ex, "Persist {Key} failed.", PrefShowOutOfScope); }
     }
 
     private async Task PersistGroupByAsync()

@@ -4,6 +4,27 @@ using PrInbox.Core.Storage;
 namespace PrInbox.Web.Services;
 
 /// <summary>
+/// Classification of a PR's changed-file data for monorepo path scoping.
+/// Drives a fail-open filter: only <see cref="Complete"/> rows can ever be
+/// hidden for being out-of-scope — every other state shows.
+/// </summary>
+public enum TouchedPathState
+{
+    /// <summary>Not enriched yet; changed files unknown. Show (pending).</summary>
+    Unknown,
+
+    /// <summary>Complete changed-file list available. Eligible for matching.</summary>
+    Complete,
+
+    /// <summary>Enriched but no usable file list (ADO, a failed files fetch,
+    /// or a genuinely zero-file PR). Show — we can't classify scope.</summary>
+    Unavailable,
+
+    /// <summary>File list too large / capped (e.g. GitHub's 3000-file cap). Show.</summary>
+    Truncated,
+}
+
+/// <summary>
 /// Live PR-row plus presentation metadata. Decouples Blazor components
 /// from the <see cref="PullRequestRow"/> shape so the row can be
 /// progressively enriched on the server and pushed to the client.
@@ -34,7 +55,9 @@ public sealed record InboxRow(
     DateTimeOffset? MarkedDoneAt = null,
     DateTimeOffset? FlaggedAt = null,
     DateTimeOffset? UpstreamCreatedAt = null,
-    IReadOnlyList<TagRow>? Tags = null)
+    IReadOnlyList<TagRow>? Tags = null,
+    IReadOnlyList<string>? TouchedPaths = null,
+    TouchedPathState TouchedPathState = TouchedPathState.Unknown)
 {
     /// <summary>
     /// True when the user has flagged this PR as "of interest." Flag is
@@ -51,6 +74,18 @@ public sealed record InboxRow(
     public IReadOnlyList<TagRow> TagsSafe => Tags ?? Array.Empty<TagRow>();
 
     public bool HasTags => Tags is not null && Tags.Count > 0;
+
+    /// <summary>Changed paths, never null for safe iteration.</summary>
+    public IReadOnlyList<string> TouchedPathsSafe => TouchedPaths ?? Array.Empty<string>();
+
+    /// <summary>
+    /// GitHub's PR "list files" endpoint returns at most this many entries;
+    /// a PR with more changed files comes back truncated. We treat a file
+    /// list at (or above) the cap as <see cref="TouchedPathState.Truncated"/>
+    /// so path scoping fails open rather than hiding a huge PR on a partial
+    /// view of its files.
+    /// </summary>
+    public const int GitHubChangedFileCap = 3000;
 
     /// <summary>
     /// True when the user marked this PR done and the author has NOT
@@ -79,9 +114,11 @@ public sealed record InboxRow(
         int unresolvedBot,
         DriftInfo? drift = null,
         int likelyDone = 0,
-        IReadOnlyList<TagRow>? tags = null)
+        IReadOnlyList<TagRow>? tags = null,
+        IReadOnlyList<SnapshotFileChange>? snapshotFiles = null)
     {
         drift ??= DriftInfo.Unknown;
+        var (touchedPaths, touchedState) = ClassifyTouchedPaths(row.EnrichState, snapshotFiles);
         return new(
             row.Url,
             row.DisplayRepo,
@@ -108,7 +145,49 @@ public sealed record InboxRow(
             row.MarkedDoneAt,
             row.FlaggedAt,
             row.UpstreamCreatedAt,
-            tags);
+            tags,
+            touchedPaths,
+            touchedState);
+    }
+
+    /// <summary>
+    /// Derives the changed-path signal used by monorepo path scoping from
+    /// the row's enrichment state and its latest snapshot's file list.
+    /// Fail-open by construction: only <see cref="TouchedPathState.Complete"/>
+    /// yields a real path list eligible to hide a row; every other state is
+    /// a "show anyway" signal.
+    /// </summary>
+    internal static (IReadOnlyList<string>? Paths, TouchedPathState State) ClassifyTouchedPaths(
+        EnrichState enrichState,
+        IReadOnlyList<SnapshotFileChange>? files)
+    {
+        // Not enriched yet -> changed files are simply unknown. Show (pending).
+        if (enrichState != EnrichState.Enriched)
+            return (null, TouchedPathState.Unknown);
+
+        // Enriched but no file list -> ADO (never populates Files) or a failed
+        // GitHub files fetch. We can't classify; show.
+        if (files is null)
+            return (null, TouchedPathState.Unavailable);
+
+        // At/over the platform cap -> the list may be partial; fail open.
+        if (files.Count >= GitHubChangedFileCap)
+            return (null, TouchedPathState.Truncated);
+
+        var paths = new List<string>(files.Count);
+        foreach (var f in files)
+        {
+            if (!string.IsNullOrWhiteSpace(f.Path)) paths.Add(f.Path);
+        }
+
+        // No usable path -> can't decide scope (a genuinely zero-file PR, or
+        // a degenerate/empty fetch result). Fail open rather than hide on an
+        // empty signal. This also keeps us consistent with the persistence
+        // layer, which stores an empty file list as NULL (-> Unavailable).
+        if (paths.Count == 0)
+            return (null, TouchedPathState.Unavailable);
+
+        return (paths, TouchedPathState.Complete);
     }
 }
 

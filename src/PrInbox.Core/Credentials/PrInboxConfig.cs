@@ -35,6 +35,20 @@ public sealed class PrInboxConfig
     public List<string> IgnoredRepos { get; init; } = new();
 
     /// <summary>
+    /// Monorepo path scoping. Maps a repo (display form, e.g.
+    /// <c>owner/monorepo</c>) to an allow-list of folder globs. When a
+    /// repo has an entry, only its PRs that touch <em>at least one</em>
+    /// of the listed folders are shown (others are hidden by default;
+    /// toggle "Show out-of-scope" to reveal). Repos with no entry are
+    /// unaffected. Globs: <c>*</c> within a segment, <c>**</c> across
+    /// segments; a bare prefix like <c>src/ServiceA</c> matches that path
+    /// and its subtree. Matching is a UI-level filter (data is still
+    /// synced) and applies only to sources that report changed files
+    /// (GitHub/GHE); ADO PRs are left unclassified and always shown.
+    /// </summary>
+    public Dictionary<string, List<string>> RepoPathFilters { get; init; } = new();
+
+    /// <summary>
     /// Returns the path used by <see cref="LoadOrCreateAsync"/> when no
     /// override is supplied. Honors the optional environment variable
     /// <c>PR_INBOX_CONFIG_PATH</c> for tests.
