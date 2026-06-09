@@ -1,19 +1,23 @@
 @echo off
-REM Start.bat -- build the PrInbox solution, launch the Web UI, and open it in
-REM your default browser. Mirrors the README Quick-Start (Option A) so a fresh
-REM clone can be running with one double-click.
+REM Start.bat -- build PrInbox and launch the system-tray app. No console is
+REM left running: the app lives as a "PR" icon in the Windows notification area
+REM (click the ^ arrow near the clock if you don't see it). The tray starts the
+REM web server hidden, opens the dashboard in your browser, and the tray menu
+REM lets you Open, Restart, or Stop & Exit.
 REM
 REM Run from anywhere -- this script cd's to its own directory.
+REM
+REM Dev tip: to run the web app directly with a live console instead, use
+REM Option A in the README (set ASPNETCORE_URLS, then dotnet run).
 
 setlocal
 
-set "PRINBOX_URL=http://localhost:7341"
-set "ASPNETCORE_URLS=%PRINBOX_URL%"
-
 pushd "%~dp0"
 
+set "TRAY_EXE=src\PrInbox.Tray\bin\Debug\net10.0-windows\PrInbox.Tray.exe"
+
 echo.
-echo [1/3] Building PrInbox.slnx ...
+echo [1/2] Building PrInbox.slnx ...
 echo.
 dotnet build PrInbox.slnx --nologo
 if errorlevel 1 (
@@ -24,14 +28,17 @@ if errorlevel 1 (
     exit /b 1
 )
 
-echo.
-echo [2/3] Opening splash page (auto-redirects to %PRINBOX_URL% when ready)...
-start "" "%~dp0tools\splash.html"
+if not exist "%TRAY_EXE%" (
+    echo.
+    echo Could not find %TRAY_EXE% after build.
+    popd
+    endlocal
+    exit /b 1
+)
 
 echo.
-echo [3/3] Starting PrInbox.Web on %PRINBOX_URL% -- press Ctrl+C to stop.
-echo.
-dotnet run --project "src\PrInbox.Web" --no-launch-profile --no-build
+echo [2/2] Launching PR Inbox tray app ^(look for the PR icon near the clock^)...
+start "" "%TRAY_EXE%"
 
 popd
 endlocal
