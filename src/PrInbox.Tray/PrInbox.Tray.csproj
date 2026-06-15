@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWindowsForms>true</UseWindowsForms>
+    <RootNamespace>PrInbox.Tray</RootNamespace>
+    <AssemblyName>PrInbox.Tray</AssemblyName>
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Build the web app first so pr-inbox-web.exe exists next door, but do
+         NOT pull its assembly into this project. The tray launches the web
+         exe out-of-process; an assembly reference would drag the whole
+         ASP.NET host (and its net10.0 TFM) into this net10.0-windows app. -->
+    <ProjectReference Include="..\PrInbox.Web\PrInbox.Web.csproj"
+                      ReferenceOutputAssembly="false"
+                      Private="false"
+                      ExcludeAssets="all" />
+  </ItemGroup>
+
+</Project>

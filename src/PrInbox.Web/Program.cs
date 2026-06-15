@@ -105,6 +105,43 @@ app.UseAntiforgery();
 // mode: 'no-cors' — it only needs to know the connection succeeded.
 app.MapGet("/healthz", () => Results.Text("ok"));
 
+// Loopback-only graceful shutdown hook used by the system-tray launcher
+// (PrInbox.Tray) to stop the app cleanly. Going through here fires
+// ApplicationStopping -> ConsoleWindowRegistry.RestoreAll(), so review
+// consoles get un-minimized; a hard Kill() from the tray would orphan them.
+// Non-loopback callers are rejected. When the launcher injects
+// PRINBOX_SHUTDOWN_TOKEN, a matching X-Shutdown-Token header is also required
+// so a stray local web page can't POST the app into shutting down.
+app.MapPost("/shutdown", (HttpContext ctx, IHostApplicationLifetime lifetime) =>
+{
+    var remote = ctx.Connection.RemoteIpAddress;
+    if (remote is null || !System.Net.IPAddress.IsLoopback(remote))
+    {
+        return Results.StatusCode(StatusCodes.Status403Forbidden);
+    }
+
+    var expected = Environment.GetEnvironmentVariable("PRINBOX_SHUTDOWN_TOKEN");
+    if (!string.IsNullOrEmpty(expected))
+    {
+        var provided = ctx.Request.Headers["X-Shutdown-Token"].ToString();
+        var match = System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(
+            System.Text.Encoding.UTF8.GetBytes(provided),
+            System.Text.Encoding.UTF8.GetBytes(expected));
+        if (!match)
+        {
+            return Results.StatusCode(StatusCodes.Status403Forbidden);
+        }
+    }
+
+    // Defer so the 202 response flushes before Kestrel starts draining.
+    _ = Task.Run(async () =>
+    {
+        await Task.Delay(250);
+        lifetime.StopApplication();
+    });
+    return Results.Accepted();
+});
+
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
 

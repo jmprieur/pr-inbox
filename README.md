@@ -153,10 +153,15 @@ pr-inbox config doctor   # checks gh + az auth, ADO project access
 ### Option 0 — Fresh clone, one click (recommended for new users)
 
 Double-click [`Start.bat`](Start.bat) in the repo root. It builds
-`PrInbox.slnx`, starts the Web UI on `http://localhost:7341`, and
-opens your default browser to the Inbox. On first run the browser
-lands on `/settings`; add a source and you're going. Ctrl+C in the
-console window to stop.
+`PrInbox.slnx` and launches the **PR Inbox tray app** — a small "PR"
+icon in the Windows notification area (click the `^` arrow near the
+clock if you don't see it). The tray starts the web server hidden (no
+console window) and opens your default browser to the Inbox. On first
+run the browser lands on `/settings`; add a source and you're going.
+
+Right-click the tray icon for **Open PR Inbox**, **Restart**,
+**View log**, and **Stop & Exit** (which shuts the server down
+gracefully). Double-click the icon to reopen the dashboard.
 
 ### Option A — Web UI, manually
 
