@@ -271,6 +271,59 @@ in v0.1.5.
 
 ---
 
+## "My PRs" (authored view) — 2026-06-14
+
+*Full design in `MY_PRS_DESIGN.md`. Decision made: authored PRs are a separate
+population in a separate `/my-prs` view, distinguished by an orthogonal
+`my_role` dimension — not a filter on the reviewer inbox (that inbox never
+fetches `author:@me`, so filtering it by author = me is empty by construction).
+Three open questions below.*
+
+### ❓ 11. Author-only `tracking_reason` — sentinel vs. nullable?
+
+`tracking_reason` is `NOT NULL` and models the *reviewer* lifecycle
+(`assigned → previously_assigned → archived`). An author-only PR has no reviewer
+lifecycle, so it needs *something* in that column.
+
+**Recommended (working default):** add a sentinel value `'not_reviewer'`,
+applied only to `my_role = 'author'` rows. Cheap — no SQLite table rebuild — and
+keeps role ⟂ lifecycle (it is **not** the `TrackingReason.Authored` role value
+you rejected; it's a lifecycle state meaning "reviewer lifecycle N/A").
+
+**Alternative:** make `tracking_reason` nullable. Cleaner conceptually but SQLite
+can't drop `NOT NULL` in place, so it needs a table rebuild migration.
+
+**Impact if wrong:** internal only; either choice is invisible in the UI. Picking
+the sentinel now keeps migration `014` to a single `ADD COLUMN`.
+
+### ❓ 12. Closed/merged authored PRs — drop or keep a tail?
+
+When one of your PRs merges/closes it drops out of `is:pr is:open author:@me`.
+
+**Recommended (working default):** drop it from the active "My PRs" list on
+disappear (matches reviewer-inbox behaviour — open-only). The append-only
+snapshot model means we *can* later add a "recently merged" tail
+(e.g. last 7 days) without schema change if you want the history surfaced.
+
+**Impact if wrong:** low; a tail can be added later as a pure query change.
+
+### ❓ 13. Do authored PRs need full thread enrichment?
+
+The "# unresolved threads I must address" column needs tier-3 thread enrichment
+(`EnrichAsync`), which is one bundled call per PR. List-tier alone gives title,
+status, CI, review decision, mergeable — but not a precise unresolved-thread
+count for *your* PRs.
+
+**Recommended (working default):** ship v1 list-tier only (cheap, fast), and add
+authored-PR enrichment in a follow-up once the view earns its keep. If you review
+your own PRs' comment threads heavily, say so and I'll enrich from day one.
+
+**Impact:** enrich-from-day-one roughly doubles sync cost for the authored set
+(one extra bundled call per authored PR). For ~tens of open authored PRs that's
+seconds, not minutes.
+
+---
+
 ## Build journal
 
 *Phase-by-phase notes on what I built, what I learned, and what I'd change.*

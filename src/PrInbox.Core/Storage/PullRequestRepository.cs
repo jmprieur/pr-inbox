@@ -32,14 +32,14 @@ public sealed class PullRequestRepository
               status, tracking_reason, identity_used,
               first_seen_at, last_synced_at, enrich_state,
               last_briefed_head_sha, last_review_run_head_sha, last_posted_review_head_sha,
-              body, last_upstream_updated_at, upstream_created_at
+              body, last_upstream_updated_at, upstream_created_at, my_role
             ) VALUES (
               $prId, $stableId, $sourceId, $sourceKind,
               $displayRepo, $number, $title, $author, $url,
               $status, $tracking, $identityUsed,
               $firstSeen, $lastSynced, $enrichState,
               $lastBriefed, $lastReviewRun, $lastPosted,
-              $body, $lastUpstreamUpdated, $upstreamCreated
+              $body, $lastUpstreamUpdated, $upstreamCreated, $myRole
             )
             ON CONFLICT(stable_identity) DO UPDATE SET
               pr_identity   = excluded.pr_identity,
@@ -51,6 +51,7 @@ public sealed class PullRequestRepository
               author_login  = excluded.author_login,
               url           = excluded.url,
               status        = excluded.status,
+              my_role       = excluded.my_role,
               identity_used = excluded.identity_used,
               last_synced_at= excluded.last_synced_at,
               enrich_state  = excluded.enrich_state,
@@ -86,6 +87,7 @@ public sealed class PullRequestRepository
         cmd.Parameters.AddWithValue("$url", row.Url);
         cmd.Parameters.AddWithValue("$status", row.Status.ToString().ToLowerInvariant());
         cmd.Parameters.AddWithValue("$tracking", TrackingReasonToDb(row.TrackingReason));
+        cmd.Parameters.AddWithValue("$myRole", MyRoleToDb(row.MyRole));
         cmd.Parameters.AddWithValue("$identityUsed", row.IdentityUsed);
         cmd.Parameters.AddWithValue("$firstSeen", FormatTimestamp(row.FirstSeenAt));
         cmd.Parameters.AddWithValue("$lastSynced", FormatTimestamp(row.LastSyncedAt));
@@ -166,6 +168,30 @@ public sealed class PullRequestRepository
             SELECT * FROM pull_requests
             WHERE status = 'open'
               AND tracking_reason IN ('assigned','previously_assigned','manually_added')
+            ORDER BY last_synced_at DESC;
+            """;
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            rows.Add(MapRow(reader));
+        }
+        return rows;
+    }
+
+    /// <summary>
+    /// Returns open rows the authenticated user <em>authored</em> — i.e.
+    /// <c>my_role</c> of <c>author</c> or <c>both</c>. Backs the "My PRs"
+    /// view, the authored counterpart to <see cref="ListActiveAsync"/>.
+    /// </summary>
+    public async Task<IReadOnlyList<PullRequestRow>> ListAuthoredAsync(CancellationToken ct)
+    {
+        var rows = new List<PullRequestRow>();
+        await using var conn = await _db.OpenAsync(ct);
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            SELECT * FROM pull_requests
+            WHERE status = 'open'
+              AND my_role IN ('author','both')
             ORDER BY last_synced_at DESC;
             """;
         await using var reader = await cmd.ExecuteReaderAsync(ct);
@@ -553,7 +579,10 @@ public sealed class PullRequestRepository
                 : null,
             MarkedDoneAt: ParseOptionalTimestamp(reader, "marked_done_at"),
             FlaggedAt: ParseOptionalTimestamp(reader, "flagged_at"),
-            UpstreamCreatedAt: ParseOptionalTimestamp(reader, "upstream_created_at"));
+            UpstreamCreatedAt: ParseOptionalTimestamp(reader, "upstream_created_at"),
+            MyRole: HasColumn(reader, "my_role")
+                ? ParseMyRole(reader.GetString(reader.GetOrdinal("my_role")))
+                : MyRole.Reviewer);
     }
 
     private static bool HasColumn(SqliteDataReader reader, string name)
@@ -600,6 +629,7 @@ public sealed class PullRequestRepository
         "previously_assigned" => TrackingReason.PreviouslyAssigned,
         "manually_added" => TrackingReason.ManuallyAdded,
         "archived" => TrackingReason.Archived,
+        "not_reviewer" => TrackingReason.NotReviewer,
         _ => throw new InvalidOperationException($"Unknown tracking_reason '{value}'."),
     };
 
@@ -609,6 +639,23 @@ public sealed class PullRequestRepository
         TrackingReason.PreviouslyAssigned => "previously_assigned",
         TrackingReason.ManuallyAdded => "manually_added",
         TrackingReason.Archived => "archived",
+        TrackingReason.NotReviewer => "not_reviewer",
         _ => throw new ArgumentOutOfRangeException(nameof(reason), reason, null),
+    };
+
+    private static MyRole ParseMyRole(string value) => value switch
+    {
+        "reviewer" => MyRole.Reviewer,
+        "author" => MyRole.Author,
+        "both" => MyRole.Both,
+        _ => throw new InvalidOperationException($"Unknown my_role '{value}'."),
+    };
+
+    internal static string MyRoleToDb(MyRole role) => role switch
+    {
+        MyRole.Reviewer => "reviewer",
+        MyRole.Author => "author",
+        MyRole.Both => "both",
+        _ => throw new ArgumentOutOfRangeException(nameof(role), role, null),
     };
 }

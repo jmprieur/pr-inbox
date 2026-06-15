@@ -88,6 +88,7 @@ public sealed class SyncOrchestrator
         SyncRunStatus finalStatus = SyncRunStatus.Failed;
         string? finalError = null;
         var seenIdentities = new HashSet<string>();
+        var reviewerSeen = new HashSet<string>();
         var listingCompleted = false;
 
         try
@@ -98,11 +99,12 @@ public sealed class SyncOrchestrator
             {
                 ct.ThrowIfCancellationRequested();
                 seenIdentities.Add(pr.Identity.Url);
+                reviewerSeen.Add(pr.Identity.Url);
                 progress?.Report(new SyncProgress(_source.SourceId, $"#{pr.Number} {pr.DisplayRepo}", prsSeen, null));
 
                 try
                 {
-                    await UpsertFastAsync(pr, identityUsed, syncedAt, ct);
+                    await UpsertFastAsync(pr, MyRole.Reviewer, identityUsed, syncedAt, ct);
                     prsSeen++;
                 }
                 catch (Exception ex)
@@ -112,8 +114,38 @@ public sealed class SyncOrchestrator
                 }
             }
 
+            // Authored ("My PRs") pass — capability-gated. PRs the user opened
+            // are a separate population from the reviewer inbox; tag them
+            // MyRole.Author (the DB-read merge in UpsertFastAsync promotes to
+            // Both if the same PR was also reviewer-seen this run). These URLs
+            // join seenIdentities so the disappeared sweep can refresh merged
+            // authored PRs out of the open list, but are deliberately kept OUT
+            // of reviewerSeen so the reviewer reconcile never touches them.
+            if (_source.Capabilities.SupportsAuthoredInbox)
+            {
+                progress?.Report(new SyncProgress(_source.SourceId, "Fetching authored", prsSeen, null));
+
+                await foreach (var pr in _source.ListAuthoredFastAsync(ct))
+                {
+                    ct.ThrowIfCancellationRequested();
+                    seenIdentities.Add(pr.Identity.Url);
+                    progress?.Report(new SyncProgress(_source.SourceId, $"#{pr.Number} {pr.DisplayRepo}", prsSeen, null));
+
+                    try
+                    {
+                        await UpsertFastAsync(pr, MyRole.Author, identityUsed, syncedAt, ct);
+                        prsSeen++;
+                    }
+                    catch (Exception ex)
+                    {
+                        prsFailed++;
+                        _logger.LogWarning(ex, "Fast-upsert (authored) failed for {Pr}: {Message}", pr.Identity.Url, ex.Message);
+                    }
+                }
+            }
+
             listingCompleted = true;
-            await ReconcileMissingPrsAsync(_source.SourceId, seenIdentities, ct);
+            await ReconcileMissingPrsAsync(_source.SourceId, reviewerSeen, ct);
 
             finalStatus = prsFailed == 0
                 ? SyncRunStatus.Ok
@@ -324,7 +356,7 @@ public sealed class SyncOrchestrator
         return new SyncResult(runId, _source.SourceId, finalStatus, prsSeen, prsFailed, finalError);
     }
 
-    private async Task UpsertFastAsync(RemotePullRequest pr, string identityUsed, DateTimeOffset syncedAt, CancellationToken ct)
+    private async Task UpsertFastAsync(RemotePullRequest pr, MyRole rolePass, string identityUsed, DateTimeOffset syncedAt, CancellationToken ct)
     {
         var existing = await _pullRequests.GetAsync(pr.Identity.Url, ct);
 
@@ -336,6 +368,27 @@ public sealed class SyncOrchestrator
             ? EnrichState.Basic
             : existing!.EnrichState;
 
+        // Role is orthogonal to the reviewer lifecycle and sticky/accumulative:
+        // a PR seen in both passes (reviewer + authored) becomes Both.
+        var myRole = MergeRole(existing?.MyRole, rolePass);
+
+        // tracking_reason carries the *reviewer* lifecycle, which only applies
+        // when the role includes reviewer. Author-only rows use the
+        // 'not_reviewer' sentinel so the reviewer disappear-sweep skips them.
+        // (Only the INSERT path persists this — UpsertAsync preserves an
+        // existing row's tracking_reason across re-syncs, as before.)
+        var trackingReason = myRole == MyRole.Author
+            ? TrackingReason.NotReviewer
+            : existing?.TrackingReason switch
+            {
+                null => TrackingReason.Assigned,
+                TrackingReason.PreviouslyAssigned => TrackingReason.Assigned,
+                TrackingReason.NotReviewer => TrackingReason.Assigned,
+                TrackingReason.ManuallyAdded => TrackingReason.ManuallyAdded,
+                TrackingReason.Archived => TrackingReason.Archived,
+                _ => TrackingReason.Assigned,
+            };
+
         var row = new PullRequestRow(
             Identity: pr.Identity,
             SourceKind: pr.SourceKind,
@@ -346,9 +399,7 @@ public sealed class SyncOrchestrator
             AuthorLogin: pr.AuthorLogin,
             Url: pr.Url,
             Status: pr.Status,
-            TrackingReason: existing?.TrackingReason == TrackingReason.PreviouslyAssigned
-                ? TrackingReason.Assigned
-                : (existing?.TrackingReason ?? TrackingReason.Assigned),
+            TrackingReason: trackingReason,
             IdentityUsed: identityUsed,
             FirstSeenAt: existing?.FirstSeenAt ?? syncedAt,
             LastSyncedAt: syncedAt,
@@ -364,10 +415,18 @@ public sealed class SyncOrchestrator
             // Immutable upstream "opened" timestamp, drives the inbox Age
             // column. May be null on adapters/paths that don't supply it; the
             // repository COALESCEs on upsert so a null never wipes a known value.
-            UpstreamCreatedAt: pr.CreatedAt);
+            UpstreamCreatedAt: pr.CreatedAt,
+            MyRole: myRole);
 
         await _pullRequests.UpsertAsync(row, ct);
     }
+
+    /// <summary>
+    /// Merges an existing role with the role observed in the current pass.
+    /// Sticky: once a PR is seen in both passes it stays <see cref="MyRole.Both"/>.
+    /// </summary>
+    private static MyRole MergeRole(MyRole? existing, MyRole pass) =>
+        existing is null || existing == pass ? pass : MyRole.Both;
 
     /// <summary>
     /// Forced single-PR enrichment: bypasses

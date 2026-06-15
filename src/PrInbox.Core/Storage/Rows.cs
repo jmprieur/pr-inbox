@@ -32,7 +32,8 @@ public sealed record PullRequestRow(
     string? MarkedDoneHeadSha = null,
     DateTimeOffset? MarkedDoneAt = null,
     DateTimeOffset? FlaggedAt = null,
-    DateTimeOffset? UpstreamCreatedAt = null);
+    DateTimeOffset? UpstreamCreatedAt = null,
+    MyRole MyRole = MyRole.Reviewer);
 
 /// <summary>
 /// Row from <c>pr_snapshots</c>. Append-only.

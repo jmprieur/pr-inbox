@@ -1636,7 +1636,11 @@ else
 
     private void SnapshotAll()
     {
-        _rows = State.CurrentRows;
+        // The main inbox is the reviewer view: exclude PRs the user only
+        // authored (MyRole.Author). Those live in the "My PRs" view. Rows
+        // where the user is both author and reviewer (MyRole.Both) still
+        // belong here.
+        _rows = State.CurrentRows.Where(r => r.MyRole != MyRole.Author).ToArray();
         _runMap = Runs.Snapshot();
     }
 
