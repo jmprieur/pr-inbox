@@ -123,6 +123,24 @@ public class SyncOrchestratorAuthoredTests : IAsyncLifetime
         authored.TrackingReason.Should().Be(TrackingReason.NotReviewer);
     }
 
+    [Fact]
+    public async Task AuthoredRows_AreIncluded_InEnrichmentCandidates()
+    {
+        var authoredId = new PrIdentity("https://github.com/owner/repo/pull/9", "gh.com:100#9000");
+
+        var source = new FakePrReadSourceBuilder("gh.com:emu", SourceKind.GitHub)
+            .WithAuthoredPullRequest(BasicPr(authoredId))
+            .Build();
+        await new SyncOrchestrator(source, _prs, _snaps, _threads, _syncRuns)
+            .RunFastAsync("jmprieur_microsoft", progress: null, CancellationToken.None);
+
+        // Author-only rows (tracking_reason = not_reviewer) must still be
+        // enrichment candidates, so CI / mergeable / review-decision get fetched.
+        var candidates = await _prs.ListNeedingEnrichmentAsync(
+            "gh.com:emu", "jmprieur_microsoft", minDossierVersion: 0, CancellationToken.None);
+        candidates.Select(r => r.Url).Should().Contain(authoredId.Url);
+    }
+
     private static RemotePullRequest BasicPr(PrIdentity id) =>
         new(
             Identity: id,

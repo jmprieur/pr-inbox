@@ -478,7 +478,8 @@ public sealed class SyncOrchestrator
             bundle.Detail.RawMetadataJson, ct,
             mergeableState: bundle.Detail.MergeableState,
             ciStatus: bundle.Detail.CiStatus,
-            files: files);
+            files: files,
+            reviewDecision: bundle.Detail.ReviewDecision);
 
         if (!inserted)
         {
@@ -491,7 +492,8 @@ public sealed class SyncOrchestrator
                 mergeableState: bundle.Detail.MergeableState,
                 ciStatus: bundle.Detail.CiStatus,
                 files: files,
-                ct);
+                ct,
+                reviewDecision: bundle.Detail.ReviewDecision);
         }
 
         await _threads.UpsertManyAsync(row.Identity, bundle.Threads, enrichedAt, ct);
