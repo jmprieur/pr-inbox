@@ -138,4 +138,92 @@ public class GitHubReadSourceParseTests
             "is:pr is:open reviewed-by:@me",
         });
     }
+
+    [Fact]
+    public void AuthoredQueries_Cover_Open_PrsIAuthored()
+    {
+        GitHubReadSource.AuthoredQueries.Should().BeEquivalentTo(new[]
+        {
+            "is:pr is:open author:@me",
+        });
+    }
+}
+
+/// <summary>
+/// Tests for the aggregate review-decision computation used by the authored
+/// "My PRs" view (GitHub's reviewDecision semantics, computed from the REST
+/// reviews list).
+/// </summary>
+public class GitHubReviewDecisionTests
+{
+    private static readonly DateTimeOffset T0 = DateTimeOffset.Parse("2026-06-01T10:00:00Z");
+
+    [Fact]
+    public void No_Reviews_Is_Null()
+    {
+        GitHubReadSource.ComputeReviewDecisionCore(
+            Array.Empty<(string?, string?, DateTimeOffset)>()).Should().BeNull();
+    }
+
+    [Fact]
+    public void Only_Comments_Is_Null()
+    {
+        var reviews = new (string?, string?, DateTimeOffset)[]
+        {
+            ("alice", "COMMENTED", T0),
+            ("bob", "PENDING", T0),
+        };
+        GitHubReadSource.ComputeReviewDecisionCore(reviews).Should().BeNull();
+    }
+
+    [Fact]
+    public void Single_Approval_Is_Approved()
+    {
+        var reviews = new (string?, string?, DateTimeOffset)[] { ("alice", "APPROVED", T0) };
+        GitHubReadSource.ComputeReviewDecisionCore(reviews).Should().Be("approved");
+    }
+
+    [Fact]
+    public void Any_ChangesRequested_Wins_Over_Approval()
+    {
+        var reviews = new (string?, string?, DateTimeOffset)[]
+        {
+            ("alice", "APPROVED", T0),
+            ("bob", "CHANGES_REQUESTED", T0),
+        };
+        GitHubReadSource.ComputeReviewDecisionCore(reviews).Should().Be("changes_requested");
+    }
+
+    [Fact]
+    public void Latest_Review_Per_User_Wins_Approved_Supersedes_ChangesRequested()
+    {
+        var reviews = new (string?, string?, DateTimeOffset)[]
+        {
+            ("alice", "CHANGES_REQUESTED", T0),
+            ("alice", "APPROVED", T0.AddHours(1)),
+        };
+        GitHubReadSource.ComputeReviewDecisionCore(reviews).Should().Be("approved");
+    }
+
+    [Fact]
+    public void Latest_Review_Per_User_Wins_ChangesRequested_Supersedes_Approved()
+    {
+        var reviews = new (string?, string?, DateTimeOffset)[]
+        {
+            ("alice", "APPROVED", T0),
+            ("alice", "CHANGES_REQUESTED", T0.AddHours(1)),
+        };
+        GitHubReadSource.ComputeReviewDecisionCore(reviews).Should().Be("changes_requested");
+    }
+
+    [Fact]
+    public void Dismissed_Latest_Clears_That_Users_Decision()
+    {
+        var reviews = new (string?, string?, DateTimeOffset)[]
+        {
+            ("alice", "CHANGES_REQUESTED", T0),
+            ("alice", "DISMISSED", T0.AddHours(1)),
+        };
+        GitHubReadSource.ComputeReviewDecisionCore(reviews).Should().BeNull();
+    }
 }

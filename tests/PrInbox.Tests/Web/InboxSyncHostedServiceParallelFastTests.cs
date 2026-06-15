@@ -234,6 +234,12 @@ public class InboxSyncHostedServiceParallelFastTests : IAsyncLifetime
             SupportsForcePushDetection: true);
         public IAsyncEnumerable<RemotePullRequest> ListAssignedFastAsync(CancellationToken ct) =>
             ThrowAsync(_ex, ct);
+        public async IAsyncEnumerable<RemotePullRequest> ListAuthoredFastAsync(
+            [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
+        {
+            await Task.CompletedTask;
+            yield break;
+        }
         private static async IAsyncEnumerable<RemotePullRequest> ThrowAsync(
             Exception ex,
             [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
@@ -296,6 +302,12 @@ public class InboxSyncHostedServiceParallelFastTests : IAsyncLifetime
 
         public Task<PrEnrichmentBundle> EnrichAsync(PrIdentity id, CancellationToken ct) =>
             throw new NotSupportedException("Fast pass only.");
+        public async IAsyncEnumerable<RemotePullRequest> ListAuthoredFastAsync(
+            [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
+        {
+            await Task.CompletedTask;
+            yield break;
+        }
         public Task<IReadOnlyList<RemoteCommit>> GetCommitsAsync(PrIdentity id, CancellationToken ct) =>
             throw new NotSupportedException("Fast pass only.");
         public Task<CompareResult> CompareAsync(PrIdentity id, string previousHeadSha, string currentHeadSha, CancellationToken ct) =>

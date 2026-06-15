@@ -1,0 +1,337 @@
+@page "/my-prs"
+@rendermode InteractiveServer
+@implements IDisposable
+@using PrInbox.Core.Credentials
+@using PrInbox.Core.Models
+@inject InboxState State
+@inject InboxSyncHostedService Sync
+@inject PrInboxConfig Config
+@inject NavigationManager Nav
+@inject ILogger<MyPrs> Log
+
+<h1>My pull requests</h1>
+
+<div class="toolbar">
+    <span class="muted">@RowCountLabel</span>
+    <span class="muted">@LastSyncLabel</span>
+    <button class="refresh" @onclick="OnRefreshAsync" disabled="@_refreshing">
+        @(_refreshing ? "Refreshing..." : "Refresh")
+    </button>
+</div>
+
+@if (SourceChips.Count > 1)
+{
+    <div class="source-chips" role="group" aria-label="Source filter">
+        @foreach (var chip in SourceChips)
+        {
+            <label class="chip @chip.Class @(IsSourceEnabled(chip.Class) ? "on" : "off")">
+                <input type="checkbox"
+                       checked="@IsSourceEnabled(chip.Class)"
+                       @onchange="@(e => OnSourceChipToggle(chip.Class, (bool)e.Value!))" />
+                @chip.Label
+            </label>
+        }
+    </div>
+}
+
+@if (_rows.Count == 0)
+{
+    <p class="empty">
+        No open pull requests you authored@(SourceChips.Count > 1 ? " match the current source filter" : ""). These are fetched with
+        <code>author:@@me</code> on each sync — if you just opened one, hit Refresh.
+    </p>
+}
+else
+{
+    <table class="pr-table">
+        <thead>
+            <tr>
+                <th>Source</th>
+                <th>Repo / PR</th>
+                <th>Title</th>
+                <th>State</th>
+                <th>CI</th>
+                <th>Review</th>
+                <th>Mergeable</th>
+                <th>Age</th>
+                <th>Last sync</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var row in _rows)
+            {
+                <tr data-pr-url="@row.Url">
+                    <td><span class="badge @SourceClass(row)">@SourceLabel(row)</span></td>
+                    <td>
+                        <a href="@row.Url" target="_blank" rel="noopener">
+                            @row.DisplayRepo #@row.Number
+                        </a>
+                    </td>
+                    <td>@row.Title</td>
+                    <td><span class="badge @StatusClass(row.Status)">@StatusLabel(row.Status)</span></td>
+                    <td>
+                        @if (CiLabel(row.CiStatus) is { } ci)
+                        {
+                            <span class="badge @CiClass(row.CiStatus)" title="@($"CI: {row.CiStatus}")">@ci</span>
+                        }
+                        else { <span class="muted">@(row.EnrichState == EnrichState.Enriched ? "–" : "…")</span> }
+                    </td>
+                    <td>
+                        @if (ReviewLabel(row.ReviewDecision) is { } rv)
+                        {
+                            <span class="badge @ReviewClass(row.ReviewDecision)">@rv</span>
+                        }
+                        else { <span class="muted">@(row.EnrichState == EnrichState.Enriched ? "–" : "…")</span> }
+                    </td>
+                    <td>
+                        @if (MergeableLabel(row.MergeableState) is { } mg)
+                        {
+                            <span class="badge @MergeableClass(row.MergeableState)" title="@($"Mergeable: {row.MergeableState}")">@mg</span>
+                        }
+                        else { <span class="muted">@(row.EnrichState == EnrichState.Enriched ? "–" : "…")</span> }
+                    </td>
+                    <td title="@AgeTooltip(row.UpstreamCreatedAt)">@AgeLabel(row.UpstreamCreatedAt)</td>
+                    <td>@RelativeTime(row.LastSyncedAt)</td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+@code {
+    private IReadOnlyList<InboxRow> _allAuthored = Array.Empty<InboxRow>();
+    private IReadOnlyList<InboxRow> _rows = Array.Empty<InboxRow>();
+    private readonly HashSet<string> _disabledSources = new(StringComparer.OrdinalIgnoreCase);
+    private bool _refreshing;
+
+    private record SourceChip(string Class, string Label);
+
+    protected override void OnInitialized()
+    {
+        State.Changed += OnStateChanged;
+        SnapshotAll();
+    }
+
+    private void OnStateChanged()
+    {
+        SnapshotAll();
+        InvokeAsync(StateHasChanged);
+    }
+
+    private void SnapshotAll()
+    {
+        // The authored counterpart to the reviewer inbox: PRs the user opened
+        // (MyRole.Author or Both). Newest-opened first.
+        _allAuthored = State.CurrentRows
+            .Where(r => r.MyRole is MyRole.Author or MyRole.Both)
+            .OrderByDescending(r => r.UpstreamCreatedAt ?? DateTimeOffset.MinValue)
+            .ToArray();
+
+        _rows = _allAuthored.Where(SourcePasses).ToArray();
+    }
+
+    // ---- Source filter chips -------------------------------------------
+
+    /// Chips shown = the source classes actually present among authored PRs,
+    /// in a stable order. Hidden entirely when there's only one source.
+    private IReadOnlyList<SourceChip> SourceChips
+    {
+        get
+        {
+            var present = _allAuthored.Select(SourceClass).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var order = new[]
+            {
+                new SourceChip("src-emu", "EMU"),
+                new SourceChip("src-public", "public"),
+                new SourceChip("src-ghe", "proxima"),
+                new SourceChip("src-ado", "ADO"),
+                new SourceChip("src-other", "other"),
+            };
+            return order.Where(c => present.Contains(c.Class)).ToArray();
+        }
+    }
+
+    private bool IsSourceEnabled(string sourceClass) => !_disabledSources.Contains(sourceClass);
+
+    private void OnSourceChipToggle(string sourceClass, bool enabled)
+    {
+        if (enabled) _disabledSources.Remove(sourceClass);
+        else _disabledSources.Add(sourceClass);
+        _rows = _allAuthored.Where(SourcePasses).ToArray();
+    }
+
+    private bool SourcePasses(InboxRow row) => !_disabledSources.Contains(SourceClass(row));
+
+    private string RowCountLabel =>
+        _rows.Count == 1 ? "1 PR" : $"{_rows.Count} PRs";
+
+    private string LastSyncLabel
+    {
+        get
+        {
+            var last = State.LastSyncUtc;
+            return last is { } t ? $"Last sync {RelativeTime(t)}" : "Not synced yet";
+        }
+    }
+
+    private async Task OnRefreshAsync()
+    {
+        if (_refreshing) return;
+        _refreshing = true;
+        // Paint the "Refreshing..." state before the sync's synchronous startup
+        // runs (mirrors Inbox.OnRefreshAsync).
+        StateHasChanged();
+        await Task.Yield();
+        try
+        {
+            var started = await Sync.TriggerNowAsync(CancellationToken.None);
+            if (!started)
+            {
+                Log.LogDebug("Manual refresh skipped: sync already in progress.");
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.LogError(ex, "Manual refresh failed");
+        }
+        finally
+        {
+            _refreshing = false;
+        }
+    }
+
+    private string SourceLabel(InboxRow row)
+    {
+        foreach (var sc in Config.Sources)
+        {
+            if (string.Equals(sc.Id, row.SourceId, StringComparison.OrdinalIgnoreCase))
+            {
+                return InboxFilters.LabelForClass(InboxFilters.ClassifyConfig(sc), sc.Id);
+            }
+        }
+        return SourceLabelFromId(row.SourceId);
+    }
+
+    private static string SourceLabelFromId(string sourceId) => sourceId switch
+    {
+        "gh.com:emu"    => "EMU",
+        "gh.com"        => "public",
+        "gh.com:public" => "public",
+        var id when id.StartsWith("gh.com:", StringComparison.Ordinal) => "public",
+        var id when id.StartsWith("ghe.", StringComparison.Ordinal) => "proxima",
+        var id when id.StartsWith("ado:", StringComparison.Ordinal) => "ado",
+        _ => sourceId,
+    };
+
+    private string SourceClass(InboxRow row)
+    {
+        foreach (var sc in Config.Sources)
+        {
+            if (string.Equals(sc.Id, row.SourceId, StringComparison.OrdinalIgnoreCase))
+            {
+                return InboxFilters.ClassifyConfig(sc);
+            }
+        }
+        return InboxFilters.SourceClassOf(row.SourceId);
+    }
+
+    private static string StatusLabel(PullRequestStatus s) => s switch
+    {
+        PullRequestStatus.Open         => "open",
+        PullRequestStatus.Closed       => "closed",
+        PullRequestStatus.Merged       => "merged",
+        PullRequestStatus.Inaccessible => "inaccessible",
+        _                              => s.ToString().ToLowerInvariant(),
+    };
+
+    private static string StatusClass(PullRequestStatus s) => s switch
+    {
+        PullRequestStatus.Open         => "status-open",
+        PullRequestStatus.Closed       => "status-closed",
+        PullRequestStatus.Merged       => "status-merged",
+        PullRequestStatus.Inaccessible => "status-inaccessible",
+        _                              => "status-other",
+    };
+
+    // ---- CI / review / mergeable badges (authored dossier) -------------
+
+    private static string? CiLabel(string? ci) => ci?.ToLowerInvariant() switch
+    {
+        null => null,
+        "success" => "pass",
+        "failure" or "error" => "fail",
+        "pending" => "pending",
+        var other => other,
+    };
+
+    private static string CiClass(string? ci) => ci?.ToLowerInvariant() switch
+    {
+        "success" => "status-merged",
+        "failure" or "error" => "status-closed",
+        _ => "status-other",
+    };
+
+    private static string? ReviewLabel(string? decision) => decision switch
+    {
+        "approved" => "approved",
+        "changes_requested" => "changes",
+        _ => null,
+    };
+
+    private static string ReviewClass(string? decision) => decision switch
+    {
+        "approved" => "status-merged",
+        "changes_requested" => "status-closed",
+        _ => "status-other",
+    };
+
+    private static string? MergeableLabel(string? state) => state?.ToLowerInvariant() switch
+    {
+        null => null,
+        "clean" => "clean",
+        "dirty" or "conflicts" => "conflicts",
+        "blocked" => "blocked",
+        "behind" => "behind",
+        "unstable" => "unstable",
+        var other => other,
+    };
+
+    private static string MergeableClass(string? state) => state?.ToLowerInvariant() switch
+    {
+        "clean" => "status-merged",
+        "dirty" or "conflicts" or "blocked" => "status-closed",
+        _ => "status-other",
+    };
+
+    private static string AgeLabel(DateTimeOffset? createdAt)
+    {
+        if (createdAt is not { } opened) return "–";
+        var delta = DateTimeOffset.UtcNow - opened;
+        if (delta < TimeSpan.Zero) return "just now";
+        if (delta.TotalSeconds < 60) return "just now";
+        if (delta.TotalMinutes < 60) return $"{(int)delta.TotalMinutes}m";
+        if (delta.TotalHours   < 24) return $"{(int)delta.TotalHours}h";
+        if (delta.TotalDays    < 30) return $"{(int)delta.TotalDays}d";
+        if (delta.TotalDays    < 365) return $"{(int)(delta.TotalDays / 30)}mo";
+        return $"{(int)(delta.TotalDays / 365)}y";
+    }
+
+    private static string AgeTooltip(DateTimeOffset? createdAt)
+        => createdAt is { } opened
+            ? $"Opened {opened.LocalDateTime:yyyy-MM-dd HH:mm}"
+            : "Opened date not recorded yet — will appear after the next sync.";
+
+    private static string RelativeTime(DateTimeOffset when)
+    {
+        var delta = DateTimeOffset.UtcNow - when;
+        if (delta.TotalSeconds < 60) return "just now";
+        if (delta.TotalMinutes < 60) return $"{(int)delta.TotalMinutes}m ago";
+        if (delta.TotalHours   < 24) return $"{(int)delta.TotalHours}h ago";
+        return $"{(int)delta.TotalDays}d ago";
+    }
+
+    public void Dispose()
+    {
+        State.Changed -= OnStateChanged;
+    }
+}

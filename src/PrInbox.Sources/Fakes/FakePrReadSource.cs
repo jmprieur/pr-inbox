@@ -10,17 +10,20 @@ namespace PrInbox.Sources.Fakes;
 public sealed class FakePrReadSource : IPrReadSource
 {
     private readonly Dictionary<PrIdentity, FakePr> _prs;
+    private readonly IReadOnlyList<RemotePullRequest> _authored;
 
     public FakePrReadSource(
         string sourceId,
         SourceKind kind,
         SourceCapabilities capabilities,
-        IReadOnlyList<FakePr> prs)
+        IReadOnlyList<FakePr> prs,
+        IReadOnlyList<RemotePullRequest>? authored = null)
     {
         SourceId = sourceId;
         Kind = kind;
         Capabilities = capabilities;
         _prs = prs.ToDictionary(p => p.PullRequest.Identity);
+        _authored = authored ?? Array.Empty<RemotePullRequest>();
     }
 
     public string SourceId { get; }
@@ -31,6 +34,17 @@ public sealed class FakePrReadSource : IPrReadSource
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
     {
         foreach (var pr in _prs.Values.Select(p => p.PullRequest))
+        {
+            ct.ThrowIfCancellationRequested();
+            yield return pr;
+        }
+        await Task.CompletedTask;
+    }
+
+    public async IAsyncEnumerable<RemotePullRequest> ListAuthoredFastAsync(
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
+    {
+        foreach (var pr in _authored)
         {
             ct.ThrowIfCancellationRequested();
             yield return pr;
@@ -93,6 +107,7 @@ public sealed class FakePrReadSourceBuilder
     private readonly SourceKind _kind;
     private SourceCapabilities _capabilities;
     private readonly List<FakePr> _prs = new();
+    private readonly List<RemotePullRequest> _authored = new();
 
     public FakePrReadSourceBuilder(string sourceId, SourceKind kind)
     {
@@ -127,5 +142,18 @@ public sealed class FakePrReadSourceBuilder
         return this;
     }
 
-    public FakePrReadSource Build() => new(_sourceId, _kind, _capabilities, _prs);
+    /// <summary>
+    /// Adds a PR to the authored ("My PRs") stream returned by
+    /// <see cref="FakePrReadSource.ListAuthoredFastAsync"/>, and flips
+    /// <see cref="SourceCapabilities.SupportsAuthoredInbox"/> on so the
+    /// orchestrator exercises the authored pass.
+    /// </summary>
+    public FakePrReadSourceBuilder WithAuthoredPullRequest(RemotePullRequest pr)
+    {
+        _authored.Add(pr);
+        _capabilities = _capabilities with { SupportsAuthoredInbox = true };
+        return this;
+    }
+
+    public FakePrReadSource Build() => new(_sourceId, _kind, _capabilities, _prs, _authored);
 }

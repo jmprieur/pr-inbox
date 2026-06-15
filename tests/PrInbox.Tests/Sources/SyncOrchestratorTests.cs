@@ -437,6 +437,38 @@ public class SyncOrchestratorTests : IAsyncLifetime
         reports.Should().Contain(r => r.Message.Contains("Enriching (visible)"));
     }
 
+    [Fact]
+    public async Task ReviewerReappearance_Reactivates_PreviouslyAssigned_To_Assigned()
+    {
+        var id = new PrIdentity("https://github.com/owner/repo/pull/1", "gh.com:100#1000");
+        var when = DateTimeOffset.Parse("2026-05-13T10:00:00Z");
+
+        // T0: PR present in the reviewer query → assigned.
+        var t0 = new FakePrReadSourceBuilder("gh.com:emu", SourceKind.GitHub)
+            .WithPullRequest(BuildBasicPr(id, when), BuildDetail(id))
+            .Build();
+        await new SyncOrchestrator(t0, _prs, _snaps, _threads, _syncRuns)
+            .RunFastAsync("jmprieur_microsoft", progress: null, CancellationToken.None);
+        (await _prs.GetAsync(id.Url, CancellationToken.None))!.TrackingReason
+            .Should().Be(TrackingReason.Assigned);
+
+        // T1: PR gone (e.g. user submitted a review) → previously_assigned.
+        var t1 = new FakePrReadSourceBuilder("gh.com:emu", SourceKind.GitHub).Build();
+        await new SyncOrchestrator(t1, _prs, _snaps, _threads, _syncRuns)
+            .RunFastAsync("jmprieur_microsoft", progress: null, CancellationToken.None);
+        (await _prs.GetAsync(id.Url, CancellationToken.None))!.TrackingReason
+            .Should().Be(TrackingReason.PreviouslyAssigned);
+
+        // T2: re-requested → reappears in the reviewer query → reactivated.
+        var t2 = new FakePrReadSourceBuilder("gh.com:emu", SourceKind.GitHub)
+            .WithPullRequest(BuildBasicPr(id, when), BuildDetail(id))
+            .Build();
+        await new SyncOrchestrator(t2, _prs, _snaps, _threads, _syncRuns)
+            .RunFastAsync("jmprieur_microsoft", progress: null, CancellationToken.None);
+        (await _prs.GetAsync(id.Url, CancellationToken.None))!.TrackingReason
+            .Should().Be(TrackingReason.Assigned);
+    }
+
     private static FakePrReadSource BuildFakeSource(string sourceId, out PrIdentity idAlpha)
     {
         idAlpha = new PrIdentity("https://github.com/owner/repo/pull/1", "gh.com:100#1000");

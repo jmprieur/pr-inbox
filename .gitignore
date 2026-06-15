@@ -2,6 +2,7 @@
 bin/
 obj/
 out/
+.run/
 [Dd]ebug/
 [Rr]elease/
 x64/

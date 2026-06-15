@@ -32,7 +32,8 @@ public sealed record PullRequestRow(
     string? MarkedDoneHeadSha = null,
     DateTimeOffset? MarkedDoneAt = null,
     DateTimeOffset? FlaggedAt = null,
-    DateTimeOffset? UpstreamCreatedAt = null);
+    DateTimeOffset? UpstreamCreatedAt = null,
+    MyRole MyRole = MyRole.Reviewer);
 
 /// <summary>
 /// Row from <c>pr_snapshots</c>. Append-only.
@@ -50,7 +51,8 @@ public sealed record PrSnapshotRow(
     string? RawMetadataJson,
     string? MergeableState = null,
     string? CiStatus = null,
-    IReadOnlyList<SnapshotFileChange>? Files = null);
+    IReadOnlyList<SnapshotFileChange>? Files = null,
+    string? ReviewDecision = null);
 
 /// <summary>
 /// One changed file persisted in a snapshot's <c>files_json</c> column.

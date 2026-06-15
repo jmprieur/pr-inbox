@@ -41,7 +41,8 @@ public sealed class PrSnapshotRepository
         CancellationToken ct,
         string? mergeableState = null,
         string? ciStatus = null,
-        IReadOnlyList<SnapshotFileChange>? files = null)
+        IReadOnlyList<SnapshotFileChange>? files = null,
+        string? reviewDecision = null)
     {
         await using var conn = await _db.OpenAsync(ct);
 
@@ -62,11 +63,11 @@ public sealed class PrSnapshotRepository
             INSERT INTO pr_snapshots (
               pr_identity, synced_at, head_sha, base_sha, merge_base_sha,
               ordered_commit_shas, reviewer_state, pr_state, raw_metadata_json,
-              mergeable_state, ci_status, files_json
+              mergeable_state, ci_status, files_json, review_decision
             ) VALUES (
               $prId, $syncedAt, $headSha, $baseSha, $mergeBaseSha,
               $commitShas, $reviewerState, $prState, $rawJson,
-              $mergeable, $ci, $files
+              $mergeable, $ci, $files, $reviewDecision
             );
             """;
         cmd.Parameters.AddWithValue("$prId", identity.Url);
@@ -84,6 +85,7 @@ public sealed class PrSnapshotRepository
             files is null || files.Count == 0
                 ? DBNull.Value
                 : (object)JsonSerializer.Serialize(files));
+        cmd.Parameters.AddWithValue("$reviewDecision", (object?)reviewDecision ?? DBNull.Value);
 
         await cmd.ExecuteNonQueryAsync(ct);
         return true;
@@ -113,7 +115,8 @@ public sealed class PrSnapshotRepository
         string? mergeableState,
         string? ciStatus,
         IReadOnlyList<SnapshotFileChange>? files,
-        CancellationToken ct)
+        CancellationToken ct,
+        string? reviewDecision = null)
     {
         await using var conn = await _db.OpenAsync(ct);
         await using var cmd = conn.CreateCommand();
@@ -121,7 +124,8 @@ public sealed class PrSnapshotRepository
             UPDATE pr_snapshots
             SET mergeable_state = COALESCE($mergeable, mergeable_state),
                 ci_status       = COALESCE($ci,        ci_status),
-                files_json      = COALESCE($files,     files_json)
+                files_json      = COALESCE($files,     files_json),
+                review_decision = COALESCE($reviewDecision, review_decision)
             WHERE id = (
               SELECT id FROM pr_snapshots
               WHERE pr_identity = $prId
@@ -136,6 +140,7 @@ public sealed class PrSnapshotRepository
             files is null || files.Count == 0
                 ? DBNull.Value
                 : (object)JsonSerializer.Serialize(files));
+        cmd.Parameters.AddWithValue("$reviewDecision", (object?)reviewDecision ?? DBNull.Value);
         await cmd.ExecuteNonQueryAsync(ct);
     }
 
@@ -188,7 +193,8 @@ public sealed class PrSnapshotRepository
                 : reader.GetString(reader.GetOrdinal("raw_metadata_json")),
             MergeableState: ReadOptionalString(reader, "mergeable_state"),
             CiStatus: ReadOptionalString(reader, "ci_status"),
-            Files: ReadOptionalFiles(reader, "files_json"));
+            Files: ReadOptionalFiles(reader, "files_json"),
+            ReviewDecision: ReadOptionalString(reader, "review_decision"));
     }
 
     private static bool HasColumn(SqliteDataReader reader, string name)

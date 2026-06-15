@@ -159,7 +159,8 @@ public sealed class InboxSyncHostedService : BackgroundService
             var snap = await snapRepo.GetLatestAsync(pr.Identity, ct);
             var drift = DriftInfo.Compute(pr, snap);
             tagsByUrl.TryGetValue(pr.Url, out var tags);
-            rows.Add(InboxRow.FromRow(pr, open, bot, drift, likelyDone, tags, snap?.Files));
+            rows.Add(InboxRow.FromRow(pr, open, bot, drift, likelyDone, tags, snap?.Files,
+                snap?.CiStatus, snap?.MergeableState, snap?.ReviewDecision));
         }
         _state.ReplaceAll(rows);
     }
