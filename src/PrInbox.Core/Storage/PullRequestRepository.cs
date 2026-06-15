@@ -238,6 +238,28 @@ public sealed class PullRequestRepository
     }
 
     /// <summary>
+    /// Reactivate a PR's reviewer lifecycle: <c>previously_assigned →
+    /// assigned</c>. Called when a PR the user had reviewed (and thus dropped
+    /// off the requested-reviewers list) reappears in the reviewer query —
+    /// i.e. the user was re-requested. The inverse of
+    /// <see cref="MarkPreviouslyAssignedAsync"/>. Scoped to
+    /// <c>previously_assigned</c> so it never disturbs <c>manually_added</c>,
+    /// <c>archived</c>, or <c>not_reviewer</c> rows.
+    /// </summary>
+    public async Task ReactivateAssignedAsync(string displayIdentity, CancellationToken ct)
+    {
+        await using var conn = await _db.OpenAsync(ct);
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            UPDATE pull_requests
+            SET tracking_reason = 'assigned'
+            WHERE pr_identity = $id AND tracking_reason = 'previously_assigned';
+            """;
+        cmd.Parameters.AddWithValue("$id", displayIdentity);
+        await cmd.ExecuteNonQueryAsync(ct);
+    }
+
+    /// <summary>
     /// Mark a PR as inaccessible (e.g. 404 / 403 after access change). Status only.
     /// </summary>
     public async Task MarkInaccessibleAsync(string displayIdentity, CancellationToken ct)

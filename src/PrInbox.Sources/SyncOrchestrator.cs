@@ -535,12 +535,15 @@ public sealed class SyncOrchestrator
             }
         }
 
-        // Clear stale disappeared_at for PRs that reappeared in this fast
-        // pass. (If a row was previously stamped, but it now shows up in
-        // the list again, the user is once more a requested reviewer.)
+        // PRs that reappeared in this fast pass: the user is once more a
+        // requested reviewer, so (a) clear any stale disappeared_at stamp and
+        // (b) reactivate the reviewer lifecycle if it had been demoted to
+        // previously_assigned. ReactivateAssignedAsync is a no-op for any other
+        // tracking_reason (manually_added / archived / not_reviewer).
         foreach (var url in seen)
         {
             try { await _pullRequests.SetDisappearedAtAsync(url, null, ct); } catch { }
+            try { await _pullRequests.ReactivateAssignedAsync(url, ct); } catch { }
         }
     }
 }
