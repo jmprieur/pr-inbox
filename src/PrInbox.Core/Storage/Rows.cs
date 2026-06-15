@@ -51,7 +51,8 @@ public sealed record PrSnapshotRow(
     string? RawMetadataJson,
     string? MergeableState = null,
     string? CiStatus = null,
-    IReadOnlyList<SnapshotFileChange>? Files = null);
+    IReadOnlyList<SnapshotFileChange>? Files = null,
+    string? ReviewDecision = null);
 
 /// <summary>
 /// One changed file persisted in a snapshot's <c>files_json</c> column.

@@ -58,7 +58,10 @@ public sealed record InboxRow(
     IReadOnlyList<TagRow>? Tags = null,
     IReadOnlyList<string>? TouchedPaths = null,
     TouchedPathState TouchedPathState = TouchedPathState.Unknown,
-    MyRole MyRole = MyRole.Reviewer)
+    MyRole MyRole = MyRole.Reviewer,
+    string? CiStatus = null,
+    string? MergeableState = null,
+    string? ReviewDecision = null)
 {
     /// <summary>
     /// True when the user has flagged this PR as "of interest." Flag is
@@ -116,7 +119,10 @@ public sealed record InboxRow(
         DriftInfo? drift = null,
         int likelyDone = 0,
         IReadOnlyList<TagRow>? tags = null,
-        IReadOnlyList<SnapshotFileChange>? snapshotFiles = null)
+        IReadOnlyList<SnapshotFileChange>? snapshotFiles = null,
+        string? ciStatus = null,
+        string? mergeableState = null,
+        string? reviewDecision = null)
     {
         drift ??= DriftInfo.Unknown;
         var (touchedPaths, touchedState) = ClassifyTouchedPaths(row.EnrichState, snapshotFiles);
@@ -149,7 +155,10 @@ public sealed record InboxRow(
             tags,
             touchedPaths,
             touchedState,
-            row.MyRole);
+            row.MyRole,
+            ciStatus,
+            mergeableState,
+            reviewDecision);
     }
 
     /// <summary>

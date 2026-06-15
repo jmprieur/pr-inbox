@@ -19,10 +19,25 @@
     </button>
 </div>
 
+@if (SourceChips.Count > 1)
+{
+    <div class="source-chips" role="group" aria-label="Source filter">
+        @foreach (var chip in SourceChips)
+        {
+            <label class="chip @chip.Class @(IsSourceEnabled(chip.Class) ? "on" : "off")">
+                <input type="checkbox"
+                       checked="@IsSourceEnabled(chip.Class)"
+                       @onchange="@(e => OnSourceChipToggle(chip.Class, (bool)e.Value!))" />
+                @chip.Label
+            </label>
+        }
+    </div>
+}
+
 @if (_rows.Count == 0)
 {
     <p class="empty">
-        No open pull requests you authored. These are fetched with
+        No open pull requests you authored@(SourceChips.Count > 1 ? " match the current source filter" : ""). These are fetched with
         <code>author:@@me</code> on each sync — if you just opened one, hit Refresh.
     </p>
 }
@@ -35,6 +50,9 @@ else
                 <th>Repo / PR</th>
                 <th>Title</th>
                 <th>State</th>
+                <th>CI</th>
+                <th>Review</th>
+                <th>Mergeable</th>
                 <th>Age</th>
                 <th>Last sync</th>
             </tr>
@@ -51,6 +69,27 @@ else
                     </td>
                     <td>@row.Title</td>
                     <td><span class="badge @StatusClass(row.Status)">@StatusLabel(row.Status)</span></td>
+                    <td>
+                        @if (CiLabel(row.CiStatus) is { } ci)
+                        {
+                            <span class="badge @CiClass(row.CiStatus)" title="@($"CI: {row.CiStatus}")">@ci</span>
+                        }
+                        else { <span class="muted">@(row.EnrichState == EnrichState.Enriched ? "–" : "…")</span> }
+                    </td>
+                    <td>
+                        @if (ReviewLabel(row.ReviewDecision) is { } rv)
+                        {
+                            <span class="badge @ReviewClass(row.ReviewDecision)">@rv</span>
+                        }
+                        else { <span class="muted">@(row.EnrichState == EnrichState.Enriched ? "–" : "…")</span> }
+                    </td>
+                    <td>
+                        @if (MergeableLabel(row.MergeableState) is { } mg)
+                        {
+                            <span class="badge @MergeableClass(row.MergeableState)" title="@($"Mergeable: {row.MergeableState}")">@mg</span>
+                        }
+                        else { <span class="muted">@(row.EnrichState == EnrichState.Enriched ? "–" : "…")</span> }
+                    </td>
                     <td title="@AgeTooltip(row.UpstreamCreatedAt)">@AgeLabel(row.UpstreamCreatedAt)</td>
                     <td>@RelativeTime(row.LastSyncedAt)</td>
                 </tr>
@@ -60,8 +99,12 @@ else
 }
 
 @code {
+    private IReadOnlyList<InboxRow> _allAuthored = Array.Empty<InboxRow>();
     private IReadOnlyList<InboxRow> _rows = Array.Empty<InboxRow>();
+    private readonly HashSet<string> _disabledSources = new(StringComparer.OrdinalIgnoreCase);
     private bool _refreshing;
+
+    private record SourceChip(string Class, string Label);
 
     protected override void OnInitialized()
     {
@@ -79,11 +122,45 @@ else
     {
         // The authored counterpart to the reviewer inbox: PRs the user opened
         // (MyRole.Author or Both). Newest-opened first.
-        _rows = State.CurrentRows
+        _allAuthored = State.CurrentRows
             .Where(r => r.MyRole is MyRole.Author or MyRole.Both)
             .OrderByDescending(r => r.UpstreamCreatedAt ?? DateTimeOffset.MinValue)
             .ToArray();
+
+        _rows = _allAuthored.Where(SourcePasses).ToArray();
     }
+
+    // ---- Source filter chips -------------------------------------------
+
+    /// Chips shown = the source classes actually present among authored PRs,
+    /// in a stable order. Hidden entirely when there's only one source.
+    private IReadOnlyList<SourceChip> SourceChips
+    {
+        get
+        {
+            var present = _allAuthored.Select(SourceClass).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var order = new[]
+            {
+                new SourceChip("src-emu", "EMU"),
+                new SourceChip("src-public", "public"),
+                new SourceChip("src-ghe", "proxima"),
+                new SourceChip("src-ado", "ADO"),
+                new SourceChip("src-other", "other"),
+            };
+            return order.Where(c => present.Contains(c.Class)).ToArray();
+        }
+    }
+
+    private bool IsSourceEnabled(string sourceClass) => !_disabledSources.Contains(sourceClass);
+
+    private void OnSourceChipToggle(string sourceClass, bool enabled)
+    {
+        if (enabled) _disabledSources.Remove(sourceClass);
+        else _disabledSources.Add(sourceClass);
+        _rows = _allAuthored.Where(SourcePasses).ToArray();
+    }
+
+    private bool SourcePasses(InboxRow row) => !_disabledSources.Contains(SourceClass(row));
 
     private string RowCountLabel =>
         _rows.Count == 1 ? "1 PR" : $"{_rows.Count} PRs";
@@ -174,6 +251,56 @@ else
         PullRequestStatus.Merged       => "status-merged",
         PullRequestStatus.Inaccessible => "status-inaccessible",
         _                              => "status-other",
+    };
+
+    // ---- CI / review / mergeable badges (authored dossier) -------------
+
+    private static string? CiLabel(string? ci) => ci?.ToLowerInvariant() switch
+    {
+        null => null,
+        "success" => "pass",
+        "failure" or "error" => "fail",
+        "pending" => "pending",
+        var other => other,
+    };
+
+    private static string CiClass(string? ci) => ci?.ToLowerInvariant() switch
+    {
+        "success" => "status-merged",
+        "failure" or "error" => "status-closed",
+        _ => "status-other",
+    };
+
+    private static string? ReviewLabel(string? decision) => decision switch
+    {
+        "approved" => "approved",
+        "changes_requested" => "changes",
+        _ => null,
+    };
+
+    private static string ReviewClass(string? decision) => decision switch
+    {
+        "approved" => "status-merged",
+        "changes_requested" => "status-closed",
+        _ => "status-other",
+    };
+
+    private static string? MergeableLabel(string? state) => state?.ToLowerInvariant() switch
+    {
+        null => null,
+        "clean" => "clean",
+        "dirty" or "conflicts" => "conflicts",
+        "blocked" => "blocked",
+        "behind" => "behind",
+        "unstable" => "unstable",
+        var other => other,
+    };
+
+    private static string MergeableClass(string? state) => state?.ToLowerInvariant() switch
+    {
+        "clean" => "status-merged",
+        "dirty" or "conflicts" or "blocked" => "status-closed",
+        _ => "status-other",
     };
 
     private static string AgeLabel(DateTimeOffset? createdAt)

@@ -297,7 +297,10 @@ public sealed class PullRequestRepository
              AND b.source_id   = $sourceId
              AND b.identity_used = $identityUsed
             WHERE pr.status          = 'open'
-              AND pr.tracking_reason IN ('assigned','manually_added')
+              AND (
+                pr.tracking_reason IN ('assigned','manually_added')
+                OR pr.my_role IN ('author','both')
+              )
               AND pr.is_ignored      = 0
               AND (
                 pr.enrich_state = 'basic'
