@@ -46,21 +46,46 @@ internal sealed class AdoApiClient
     /// user is a reviewer. Pages internally via <c>$skip</c>; returns when
     /// a page returns fewer than <paramref name="pageSize"/> rows.
     /// </summary>
-    public async IAsyncEnumerable<AdoDtos.PullRequest> ListPullRequestsForReviewerAsync(
+    public IAsyncEnumerable<AdoDtos.PullRequest> ListPullRequestsForReviewerAsync(
         string project,
         string reviewerId,
         int pageSize = 100,
-        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(reviewerId);
+        return ListPullRequestsByCriterionAsync(project, "reviewerId", reviewerId, pageSize, ct);
+    }
+
+    /// <summary>
+    /// List active PRs in <paramref name="project"/> that the authenticated
+    /// user <em>created</em> (authored). Same paging as the reviewer query,
+    /// keyed on <c>searchCriteria.creatorId</c>.
+    /// </summary>
+    public IAsyncEnumerable<AdoDtos.PullRequest> ListPullRequestsForCreatorAsync(
+        string project,
+        string creatorId,
+        int pageSize = 100,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(creatorId);
+        return ListPullRequestsByCriterionAsync(project, "creatorId", creatorId, pageSize, ct);
+    }
+
+    private async IAsyncEnumerable<AdoDtos.PullRequest> ListPullRequestsByCriterionAsync(
+        string project,
+        string criterion,
+        string value,
+        int pageSize,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(project);
-        ArgumentException.ThrowIfNullOrWhiteSpace(reviewerId);
 
         var skip = 0;
         while (true)
         {
             ct.ThrowIfCancellationRequested();
             var url = $"https://dev.azure.com/{Uri.EscapeDataString(_org)}/{Uri.EscapeDataString(project)}/_apis/git/pullrequests" +
-                      $"?searchCriteria.reviewerId={Uri.EscapeDataString(reviewerId)}" +
+                      $"?searchCriteria.{criterion}={Uri.EscapeDataString(value)}" +
                       "&searchCriteria.status=active" +
                       $"&$top={pageSize}&$skip={skip}" +
                       $"&api-version={ApiVersion}";

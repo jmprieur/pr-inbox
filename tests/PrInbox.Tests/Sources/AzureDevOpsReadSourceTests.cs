@@ -75,6 +75,49 @@ public class AzureDevOpsReadSourceTests
     }
 
     [Fact]
+    public async Task ListAuthoredFastAsync_Resolves_Profile_Then_Lists_AuthoredPrs()
+    {
+        var handler = new RecordingHandler();
+        handler.Enqueue("""
+            { "id": "11111111-aaaa-bbbb-cccc-222222222222", "displayName": "Jean-Marc",
+              "emailAddress": "jm@example.com", "publicAlias": "33333333-aaaa-bbbb-cccc-444444444444" }
+            """);
+        handler.Enqueue("""
+            { "count": 1, "value": [{
+                "pullRequestId": 77,
+                "title": "My own PR",
+                "status": "active",
+                "creationDate": "2026-05-02T12:00:00Z",
+                "createdBy": { "uniqueName": "jm@example.com", "displayName": "Jean-Marc" },
+                "repository": {
+                    "id": "55555555-aaaa-bbbb-cccc-666666666666",
+                    "name": "MyRepo",
+                    "project": { "id": "77777777-aaaa-bbbb-cccc-888888888888", "name": "Context" }
+                },
+                "reviewers": []
+            }] }
+            """);
+
+        var (source, _) = BuildSource(handler);
+        source.Capabilities.SupportsAuthoredInbox.Should().BeTrue();
+
+        var results = new List<RemotePullRequest>();
+        await foreach (var pr in source.ListAuthoredFastAsync(CancellationToken.None))
+        {
+            results.Add(pr);
+        }
+
+        results.Should().HaveCount(1);
+        results[0].Number.Should().Be(77);
+        results[0].AuthorLogin.Should().Be("jm@example.com");
+
+        handler.Requests[1].RequestUri!.ToString().Should()
+            .Contain("/mseng/Context/_apis/git/pullrequests")
+            .And.Contain("searchCriteria.creatorId=11111111-aaaa-bbbb-cccc-222222222222")
+            .And.Contain("searchCriteria.status=active");
+    }
+
+    [Fact]
     public async Task ListAssignedFastAsync_Pages_Until_Short_Page()
     {
         var handler = new RecordingHandler();

@@ -71,7 +71,8 @@ public sealed class AzureDevOpsReadSource : IPrReadSource
         SupportsBotAuthorClassification: true,
         SupportsReviewRequestTimestamps: false,
         SupportsStableRepoIds: true,
-        SupportsForcePushDetection: false);
+        SupportsForcePushDetection: false,
+        SupportsAuthoredInbox: true);
 
     public async IAsyncEnumerable<RemotePullRequest> ListAssignedFastAsync(
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
@@ -92,12 +93,20 @@ public sealed class AzureDevOpsReadSource : IPrReadSource
     public async IAsyncEnumerable<RemotePullRequest> ListAuthoredFastAsync(
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
     {
-        // ADO authored inbox requires a per-project PR query filtered by
-        // creatorId — not yet implemented. Capabilities.SupportsAuthoredInbox
-        // is false, so the orchestrator never calls this; the empty stream is
-        // a safe contract default.
-        await Task.CompletedTask;
-        yield break;
+        // The creator id is the same VSTS profile id used for the reviewer
+        // query; ADO has no global authored inbox either, so we enumerate the
+        // configured project keyed on searchCriteria.creatorId.
+        var creatorId = await ResolveReviewerIdAsync(ct);
+
+        await foreach (var pr in _client.ListPullRequestsForCreatorAsync(_project, creatorId, pageSize: 100, ct))
+        {
+            ct.ThrowIfCancellationRequested();
+            var mapped = MapListItem(pr);
+            if (mapped is not null)
+            {
+                yield return mapped;
+            }
+        }
     }
 
     public async Task<PrEnrichmentBundle> EnrichAsync(PrIdentity id, CancellationToken ct)
