@@ -27,10 +27,17 @@ namespace PrInbox.Core.Models;
 /// <c>true</c> if the platform exposes enough commit history to detect
 /// when the prior reviewed HEAD is no longer reachable from current HEAD.
 /// </param>
+/// <param name="SupportsAuthoredInbox">
+/// <c>true</c> if the platform can list PRs the authenticated user
+/// <em>authored</em> in a single query (GitHub's <c>author:@me</c>).
+/// <c>false</c> for Azure DevOps until per-project <c>creatorId</c>
+/// enumeration is implemented. Gates the orchestrator's authored pass.
+/// </param>
 public sealed record SourceCapabilities(
     bool SupportsGlobalReviewerInbox,
     bool SupportsThreadResolution,
     bool SupportsBotAuthorClassification,
     bool SupportsReviewRequestTimestamps,
     bool SupportsStableRepoIds,
-    bool SupportsForcePushDetection);
+    bool SupportsForcePushDetection,
+    bool SupportsAuthoredInbox = false);

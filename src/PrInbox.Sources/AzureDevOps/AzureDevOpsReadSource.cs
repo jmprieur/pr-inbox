@@ -89,6 +89,17 @@ public sealed class AzureDevOpsReadSource : IPrReadSource
         }
     }
 
+    public async IAsyncEnumerable<RemotePullRequest> ListAuthoredFastAsync(
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
+    {
+        // ADO authored inbox requires a per-project PR query filtered by
+        // creatorId — not yet implemented. Capabilities.SupportsAuthoredInbox
+        // is false, so the orchestrator never calls this; the empty stream is
+        // a safe contract default.
+        await Task.CompletedTask;
+        yield break;
+    }
+
     public async Task<PrEnrichmentBundle> EnrichAsync(PrIdentity id, CancellationToken ct)
     {
         var (repoId, prId) = ParseAdoUrl(id.Url);

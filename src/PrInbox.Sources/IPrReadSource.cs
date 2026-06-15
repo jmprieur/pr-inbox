@@ -63,6 +63,14 @@ public interface IPrReadSource
     IAsyncEnumerable<RemotePullRequest> ListAssignedFastAsync(CancellationToken ct);
 
     /// <summary>
+    /// Tier-2 fast listing of PRs the authenticated user <em>authored</em>
+    /// (GitHub's <c>author:@me</c>). Backs the "My PRs" view. Only called by
+    /// the orchestrator when <see cref="SourceCapabilities.SupportsAuthoredInbox"/>
+    /// is <c>true</c>; sources that don't support it may return an empty stream.
+    /// </summary>
+    IAsyncEnumerable<RemotePullRequest> ListAuthoredFastAsync(CancellationToken ct);
+
+    /// <summary>
     /// Tier-3 enrichment: returns full detail (head/base SHAs, ordered commits,
     /// reviewer state) plus all observed threads for a single PR, bundled into
     /// a single bundle so the orchestrator can persist them atomically.

@@ -57,7 +57,8 @@ public sealed record InboxRow(
     DateTimeOffset? UpstreamCreatedAt = null,
     IReadOnlyList<TagRow>? Tags = null,
     IReadOnlyList<string>? TouchedPaths = null,
-    TouchedPathState TouchedPathState = TouchedPathState.Unknown)
+    TouchedPathState TouchedPathState = TouchedPathState.Unknown,
+    MyRole MyRole = MyRole.Reviewer)
 {
     /// <summary>
     /// True when the user has flagged this PR as "of interest." Flag is
@@ -147,7 +148,8 @@ public sealed record InboxRow(
             row.UpstreamCreatedAt,
             tags,
             touchedPaths,
-            touchedState);
+            touchedState,
+            row.MyRole);
     }
 
     /// <summary>

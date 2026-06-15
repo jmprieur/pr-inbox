@@ -52,7 +52,8 @@ public sealed class GitHubReadSource : IPrReadSource
         SupportsBotAuthorClassification: true,
         SupportsReviewRequestTimestamps: true,
         SupportsStableRepoIds: true,
-        SupportsForcePushDetection: true);
+        SupportsForcePushDetection: true,
+        SupportsAuthoredInbox: true);
 
     /// <summary>
     /// The two GitHub search qualifiers we union to build the inbox. They
@@ -80,6 +81,16 @@ public sealed class GitHubReadSource : IPrReadSource
         "is:pr is:open reviewed-by:@me",
     };
 
+    /// <summary>
+    /// Search qualifier for the authored ("My PRs") inbox: open PRs the
+    /// authenticated user opened. A single query suffices — unlike the
+    /// reviewer inbox there is no reviewed-by/requested split to union.
+    /// </summary>
+    internal static readonly string[] AuthoredQueries = new[]
+    {
+        "is:pr is:open author:@me",
+    };
+
     public async IAsyncEnumerable<RemotePullRequest> ListAssignedFastAsync(
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
     {
@@ -90,6 +101,25 @@ public sealed class GitHubReadSource : IPrReadSource
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var query in InboxQueries)
+        {
+            ct.ThrowIfCancellationRequested();
+            await foreach (var pr in SearchPrsPagedAsync(client, query, ct))
+            {
+                if (seen.Add(pr.Url))
+                {
+                    yield return pr;
+                }
+            }
+        }
+    }
+
+    public async IAsyncEnumerable<RemotePullRequest> ListAuthoredFastAsync(
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
+    {
+        var client = await CreateClientAsync(ct);
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var query in AuthoredQueries)
         {
             ct.ThrowIfCancellationRequested();
             await foreach (var pr in SearchPrsPagedAsync(client, query, ct))

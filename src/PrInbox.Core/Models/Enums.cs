@@ -30,6 +30,33 @@ public enum TrackingReason
     ManuallyAdded,
     /// <summary>User-archived; ignored by default in <c>list</c>.</summary>
     Archived,
+    /// <summary>
+    /// Reviewer lifecycle does not apply: the row is tracked solely because
+    /// the user <em>authored</em> it (<see cref="MyRole.Author"/>). This is a
+    /// lifecycle sentinel, not a role — role lives in <see cref="MyRole"/>.
+    /// The reviewer disappear-sweep skips these rows because they are never
+    /// <see cref="Assigned"/>.
+    /// </summary>
+    NotReviewer,
+}
+
+/// <summary>
+/// The authenticated user's role on a PR, orthogonal to
+/// <see cref="TrackingReason"/> (reviewer lifecycle) and
+/// <see cref="PullRequestStatus"/>. Drives which view a PR appears in: the
+/// reviewer inbox shows <see cref="Reviewer"/>/<see cref="Both"/>; the
+/// "My PRs" view shows <see cref="Author"/>/<see cref="Both"/>.
+/// </summary>
+public enum MyRole
+{
+    /// <summary>The user is (or was) a reviewer on this PR. Default for every
+    /// row that predates the authored-inbox feature.</summary>
+    Reviewer,
+    /// <summary>The user authored this PR.</summary>
+    Author,
+    /// <summary>The user both authored and reviews this PR (rare; e.g. ADO
+    /// self-add). Appears in both views.</summary>
+    Both,
 }
 
 /// <summary>
