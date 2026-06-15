@@ -141,6 +141,29 @@ public class SyncOrchestratorAuthoredTests : IAsyncLifetime
         candidates.Select(r => r.Url).Should().Contain(authoredId.Url);
     }
 
+    [Fact]
+    public async Task ListAuthored_ExcludesMergedAndClosed_AuthoredPrs()
+    {
+        var openId = new PrIdentity("https://github.com/owner/repo/pull/9", "gh.com:100#9000");
+        var mergedId = new PrIdentity("https://github.com/owner/repo/pull/8", "gh.com:100#8000");
+
+        var source = new FakePrReadSourceBuilder("gh.com:emu", SourceKind.GitHub)
+            .WithAuthoredPullRequest(BasicPr(openId))
+            .WithAuthoredPullRequest(BasicPr(mergedId))
+            .Build();
+        await new SyncOrchestrator(source, _prs, _snaps, _threads, _syncRuns)
+            .RunFastAsync("jmprieur_microsoft", progress: null, CancellationToken.None);
+
+        // One authored PR merges.
+        await _prs.UpdateStatusAsync(mergedId.Url, PullRequestStatus.Merged, CancellationToken.None);
+
+        // The canonical authored list (and the default "My PRs" view, which
+        // mirrors it) shows open PRs only; merged/closed are hidden.
+        var authored = await _prs.ListAuthoredAsync(CancellationToken.None);
+        authored.Select(r => r.Url).Should().Contain(openId.Url);
+        authored.Select(r => r.Url).Should().NotContain(mergedId.Url);
+    }
+
     private static RemotePullRequest BasicPr(PrIdentity id) =>
         new(
             Identity: id,

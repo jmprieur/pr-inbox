@@ -6,6 +6,7 @@
 @inject InboxState State
 @inject InboxSyncHostedService Sync
 @inject PrInboxConfig Config
+@inject UiPreferencesRepository Prefs
 @inject NavigationManager Nav
 @inject ILogger<MyPrs> Log
 
@@ -17,6 +18,11 @@
     <button class="refresh" @onclick="OnRefreshAsync" disabled="@_refreshing">
         @(_refreshing ? "Refreshing..." : "Refresh")
     </button>
+    <label class="show-closed">
+        <input type="checkbox" checked="@_showClosed"
+               @onchange="@(e => OnShowClosedToggleAsync((bool)e.Value!))" />
+        Show closed / merged
+    </label>
 </div>
 
 @if (SourceChips.Count > 1)
@@ -37,7 +43,7 @@
 @if (_rows.Count == 0)
 {
     <p class="empty">
-        No open pull requests you authored@(SourceChips.Count > 1 ? " match the current source filter" : ""). These are fetched with
+        No @(_showClosed ? "" : "open ")pull requests you authored@(SourceChips.Count > 1 ? " match the current source filter" : ""). These are fetched with
         <code>author:@@me</code> on each sync — if you just opened one, hit Refresh.
     </p>
 }
@@ -99,15 +105,19 @@ else
 }
 
 @code {
+    private const string PrefShowClosed = "myprs.show_closed";
+
     private IReadOnlyList<InboxRow> _allAuthored = Array.Empty<InboxRow>();
     private IReadOnlyList<InboxRow> _rows = Array.Empty<InboxRow>();
     private readonly HashSet<string> _disabledSources = new(StringComparer.OrdinalIgnoreCase);
     private bool _refreshing;
+    private bool _showClosed;
 
     private record SourceChip(string Class, string Label);
 
-    protected override void OnInitialized()
+    protected override async Task OnInitializedAsync()
     {
+        _showClosed = await Prefs.GetBoolAsync(PrefShowClosed, defaultValue: false);
         State.Changed += OnStateChanged;
         SnapshotAll();
     }
@@ -121,13 +131,24 @@ else
     private void SnapshotAll()
     {
         // The authored counterpart to the reviewer inbox: PRs the user opened
-        // (MyRole.Author or Both). Newest-opened first.
+        // (MyRole.Author or Both). Open-only by default — merged/closed are
+        // hidden behind the "Show closed / merged" toggle, mirroring the Inbox.
+        // Newest-opened first.
         _allAuthored = State.CurrentRows
             .Where(r => r.MyRole is MyRole.Author or MyRole.Both)
+            .Where(r => _showClosed || r.Status == PullRequestStatus.Open)
             .OrderByDescending(r => r.UpstreamCreatedAt ?? DateTimeOffset.MinValue)
             .ToArray();
 
         _rows = _allAuthored.Where(SourcePasses).ToArray();
+    }
+
+    private async Task OnShowClosedToggleAsync(bool value)
+    {
+        _showClosed = value;
+        SnapshotAll();
+        try { await Prefs.SetBoolAsync(PrefShowClosed, value); }
+        catch (Exception ex) { Log.LogDebug(ex, "Persist {Key} failed.", PrefShowClosed); }
     }
 
     // ---- Source filter chips -------------------------------------------
