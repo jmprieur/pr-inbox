@@ -82,7 +82,7 @@ public sealed class ReviewLauncher : IReviewLauncher, IAsyncDisposable
             {
                 var shortSha = brief.HeadSha.Length >= 7 ? brief.HeadSha[..7] : brief.HeadSha;
                 var hhmm = DateTimeOffset.Now.ToString("HH:mm");
-                tabTitle = $"{row.DisplayRepo} #{row.Number} @{shortSha} {hhmm}";
+                tabTitle = BuildTabTitle(row.AuthorLogin, row.DisplayRepo, row.Number, shortSha, hhmm);
             }
         }
         catch (Exception ex)
@@ -94,6 +94,63 @@ public sealed class ReviewLauncher : IReviewLauncher, IAsyncDisposable
         SpawnConsole(brief.RunDirectory, tabTitle, brief.RunId);
 
         return $"Review run #{brief.RunId} opened in a new window. Findings will land in {brief.RunDirectory}\\findings.yaml.";
+    }
+
+    /// <summary>
+    /// Builds the wt tab / agent-session title for a review window in the form
+    /// <c>&lt;author&gt; &lt;repo&gt; #&lt;number&gt; @&lt;short-sha&gt; &lt;HH:mm&gt;</c>,
+    /// e.g. <c>alice playground #8114 @ff2dcab 15:46</c>. Leading with the PR
+    /// author and just the repo name (not <c>owner/repo</c>) makes a wall of
+    /// review tabs easy to scan. Falls back to the repo-first form when the
+    /// author is unknown.
+    /// </summary>
+    internal static string BuildTabTitle(string? authorLogin, string displayRepo, int number, string shortSha, string hhmm)
+    {
+        var author = ShortAuthor(authorLogin);
+        var repo = ShortRepo(displayRepo);
+        return string.IsNullOrEmpty(author)
+            ? $"{repo} #{number} @{shortSha} {hhmm}"
+            : $"{author} {repo} #{number} @{shortSha} {hhmm}";
+    }
+
+    /// <summary>
+    /// Short author handle for the tab title: the email local part's first
+    /// segment (<c>jean-marc.prieur@ms.com → jean-marc</c>), or, for a bare
+    /// login, the alias itself (<c>octocat → octocat</c>). EMU / proxima
+    /// logins carry an <c>_&lt;org&gt;</c> suffix
+    /// (<c>jmprieur_microsoft → jmprieur</c>); the <c>_microsoft</c> suffix is
+    /// dropped so the tab shows just the alias.
+    /// </summary>
+    internal static string ShortAuthor(string? login)
+    {
+        if (string.IsNullOrWhiteSpace(login)) return string.Empty;
+        var s = login.Trim();
+        var at = s.IndexOf('@');
+        if (at > 0) s = s[..at];          // strip email domain
+
+        // EMU / proxima (Microsoft) logins are "<alias>_microsoft".
+        const string emuSuffix = "_microsoft";
+        if (s.Length > emuSuffix.Length && s.EndsWith(emuSuffix, StringComparison.OrdinalIgnoreCase))
+        {
+            s = s[..^emuSuffix.Length];
+        }
+
+        var dot = s.IndexOf('.');
+        if (dot > 0) s = s[..dot];        // firstname.lastname -> firstname
+        return s;
+    }
+
+    /// <summary>
+    /// Repo name only — drops the <c>owner/</c> (GitHub) or <c>project/</c>
+    /// (ADO) prefix: <c>agency-microsoft/playground → playground</c>.
+    /// </summary>
+    internal static string ShortRepo(string? displayRepo)
+    {
+        if (string.IsNullOrWhiteSpace(displayRepo)) return displayRepo ?? string.Empty;
+        var slash = displayRepo.LastIndexOf('/');
+        return slash >= 0 && slash < displayRepo.Length - 1
+            ? displayRepo[(slash + 1)..]
+            : displayRepo;
     }
 
     /// <summary>
