@@ -197,7 +197,8 @@ public sealed class AzureDevOpsReadSource : IPrReadSource
             Url: canonicalUrl,
             Status: MapStatus(pr.Status),
             LastUpdated: pr.CreationDate, // ADO list endpoint doesn't return lastUpdated; CreationDate is best available.
-            CreatedAt: pr.CreationDate);
+            CreatedAt: pr.CreationDate,
+            IsDraft: pr.IsDraft);
     }
 
     private RemotePullRequestDetail MapDetail(PrIdentity id, AdoDtos.PullRequest pr, IReadOnlyList<AdoDtos.Commit> commits)
@@ -244,7 +245,8 @@ public sealed class AzureDevOpsReadSource : IPrReadSource
             MergeableState: mergeable,
             // ADO has no single combined CI status; policy evaluations + build
             // results are separate calls. Deferred for v0.2.
-            CiStatus: null);
+            CiStatus: null,
+            IsDraft: pr.IsDraft);
     }
 
     private IReadOnlyList<RemoteThread> MapThreads(IReadOnlyList<AdoDtos.Thread> threads)

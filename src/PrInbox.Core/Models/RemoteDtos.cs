@@ -15,7 +15,8 @@ public sealed record RemotePullRequest(
     string Url,
     PullRequestStatus Status,
     DateTimeOffset LastUpdated,
-    DateTimeOffset? CreatedAt = null);
+    DateTimeOffset? CreatedAt = null,
+    bool IsDraft = false);
 
 /// <summary>
 /// Full detail for a single PR, fetched once per sync. Carries enough state
@@ -34,7 +35,8 @@ public sealed record RemotePullRequestDetail(
     IReadOnlyList<RemoteFileChange>? Files = null,
     string? MergeableState = null,
     string? CiStatus = null,
-    string? ReviewDecision = null);
+    string? ReviewDecision = null,
+    bool IsDraft = false);
 
 /// <summary>
 /// One file changed in a PR. Populated when the source adapter supports a

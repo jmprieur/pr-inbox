@@ -416,7 +416,8 @@ public sealed class SyncOrchestrator
             // column. May be null on adapters/paths that don't supply it; the
             // repository COALESCEs on upsert so a null never wipes a known value.
             UpstreamCreatedAt: pr.CreatedAt,
-            MyRole: myRole);
+            MyRole: myRole,
+            IsDraft: pr.IsDraft);
 
         await _pullRequests.UpsertAsync(row, ct);
     }
@@ -520,6 +521,10 @@ public sealed class SyncOrchestrator
         {
             await _pullRequests.UpdateStatusAsync(row.Identity.Url, bundle.Detail.Status, ct);
         }
+
+        // Refresh the draft flag from the authoritative detail (GitHub exposes
+        // it only here; ADO confirms it). Cheap and idempotent.
+        await _pullRequests.UpdateIsDraftAsync(row.Identity.Url, bundle.Detail.IsDraft, ct);
     }
 
     private async Task ReconcileMissingPrsAsync(string sourceId, HashSet<string> seen, CancellationToken ct)
