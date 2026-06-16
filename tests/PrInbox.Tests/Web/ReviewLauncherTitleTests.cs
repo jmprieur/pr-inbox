@@ -32,7 +32,9 @@ public class ReviewLauncherTitleTests
     [InlineData("octocat", "octocat")]
     [InlineData("alice@example.com", "alice")]
     [InlineData("jean-marc.prieur@ms.com", "jean-marc")]
-    [InlineData("jmprieur_microsoft", "jmprieur_microsoft")]
+    [InlineData("jmprieur_microsoft", "jmprieur")]
+    [InlineData("jmprieur_microsoft@northeurope.com", "jmprieur")]
+    [InlineData("_microsoft", "_microsoft")]
     [InlineData(null, "")]
     public void ShortAuthor_DerivesFirstNameOrAlias(string? login, string expected)
     {

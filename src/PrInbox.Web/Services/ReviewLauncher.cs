@@ -115,8 +115,11 @@ public sealed class ReviewLauncher : IReviewLauncher, IAsyncDisposable
 
     /// <summary>
     /// Short author handle for the tab title: the email local part's first
-    /// segment (<c>jean-marc.prieur@ms.com → jean-marc</c>) or, for a bare
-    /// login, the alias itself (<c>octocat → octocat</c>).
+    /// segment (<c>jean-marc.prieur@ms.com → jean-marc</c>), or, for a bare
+    /// login, the alias itself (<c>octocat → octocat</c>). EMU / proxima
+    /// logins carry an <c>_&lt;org&gt;</c> suffix
+    /// (<c>jmprieur_microsoft → jmprieur</c>); the <c>_microsoft</c> suffix is
+    /// dropped so the tab shows just the alias.
     /// </summary>
     internal static string ShortAuthor(string? login)
     {
@@ -124,6 +127,14 @@ public sealed class ReviewLauncher : IReviewLauncher, IAsyncDisposable
         var s = login.Trim();
         var at = s.IndexOf('@');
         if (at > 0) s = s[..at];          // strip email domain
+
+        // EMU / proxima (Microsoft) logins are "<alias>_microsoft".
+        const string emuSuffix = "_microsoft";
+        if (s.Length > emuSuffix.Length && s.EndsWith(emuSuffix, StringComparison.OrdinalIgnoreCase))
+        {
+            s = s[..^emuSuffix.Length];
+        }
+
         var dot = s.IndexOf('.');
         if (dot > 0) s = s[..dot];        // firstname.lastname -> firstname
         return s;
