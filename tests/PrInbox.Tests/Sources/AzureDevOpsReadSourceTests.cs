@@ -118,6 +118,39 @@ public class AzureDevOpsReadSourceTests
     }
 
     [Fact]
+    public async Task ListFast_Maps_IsDraft_From_AdoListTier()
+    {
+        var handler = new RecordingHandler();
+        handler.Enqueue("""{ "id": "self-id" }""");
+        handler.Enqueue("""
+            { "count": 2, "value": [
+                { "pullRequestId": 1, "title": "Draft one", "status": "active", "isDraft": true,
+                  "creationDate": "2026-05-01T12:00:00Z",
+                  "createdBy": { "uniqueName": "jm@example.com" },
+                  "repository": { "id": "55555555-aaaa-bbbb-cccc-666666666666", "name": "MyRepo",
+                                  "project": { "id": "77777777-aaaa-bbbb-cccc-888888888888", "name": "Context" } },
+                  "reviewers": [] },
+                { "pullRequestId": 2, "title": "Ready two", "status": "active", "isDraft": false,
+                  "creationDate": "2026-05-01T12:00:00Z",
+                  "createdBy": { "uniqueName": "jm@example.com" },
+                  "repository": { "id": "55555555-aaaa-bbbb-cccc-666666666666", "name": "MyRepo",
+                                  "project": { "id": "77777777-aaaa-bbbb-cccc-888888888888", "name": "Context" } },
+                  "reviewers": [] }
+            ] }
+            """);
+
+        var (source, _) = BuildSource(handler);
+        var results = new List<RemotePullRequest>();
+        await foreach (var pr in source.ListAssignedFastAsync(CancellationToken.None))
+        {
+            results.Add(pr);
+        }
+
+        results.Single(r => r.Number == 1).IsDraft.Should().BeTrue();
+        results.Single(r => r.Number == 2).IsDraft.Should().BeFalse();
+    }
+
+    [Fact]
     public async Task ListAssignedFastAsync_Pages_Until_Short_Page()
     {
         var handler = new RecordingHandler();

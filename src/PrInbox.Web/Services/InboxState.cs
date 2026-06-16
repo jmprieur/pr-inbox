@@ -61,7 +61,8 @@ public sealed record InboxRow(
     MyRole MyRole = MyRole.Reviewer,
     string? CiStatus = null,
     string? MergeableState = null,
-    string? ReviewDecision = null)
+    string? ReviewDecision = null,
+    bool IsDraft = false)
 {
     /// <summary>
     /// True when the user has flagged this PR as "of interest." Flag is
@@ -158,7 +159,8 @@ public sealed record InboxRow(
             row.MyRole,
             ciStatus,
             mergeableState,
-            reviewDecision);
+            reviewDecision,
+            row.IsDraft);
     }
 
     /// <summary>

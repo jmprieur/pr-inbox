@@ -597,7 +597,7 @@ button.link-like.done-bulk {
     accent-color: var(--accent);
 }
 
-.show-ignored, .show-closed {
+.show-ignored, .show-closed, .hide-drafts {
     display: inline-flex;
     align-items: center;
     gap: 0.3rem;
@@ -821,6 +821,19 @@ tr.row-just-returned > td { animation: returnPulse 2.2s ease-out; }
 
 tr.row-hidden { opacity: 0.55; }
 tr.row-hidden td.title { font-style: italic; }
+
+/* Draft PRs: a small muted "draft" marker + italic title. Full opacity, so
+   they stay distinct from the opacity-dimmed disappeared / hidden rows; the
+   marker is the unambiguous signal. */
+.pr-draft-title { font-style: italic; }
+.draft-tag {
+    color: var(--muted);
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    margin-right: 0.4rem;
+    white-space: nowrap;
+}
 
 /* Disappeared rows (you're no longer a requested reviewer, but the PR is
    still open upstream). Slightly demoted but kept legible — the user may

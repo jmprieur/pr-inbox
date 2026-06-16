@@ -192,6 +192,11 @@
                @onchange="@(e => OnShowDoneToggleAsync((bool)e.Value!))" />
         Show done@(HiddenDoneCount > 0 ? $" ({HiddenDoneCount})" : "")
     </label>
+    <label class="hide-drafts" title="Hide draft pull requests (work in progress).">
+        <input type="checkbox" checked="@_hideDrafts"
+               @onchange="@(e => OnHideDraftsToggleAsync((bool)e.Value!))" />
+        Hide drafts@(HiddenDraftCount > 0 ? $" ({HiddenDraftCount})" : "")
+    </label>
     @if (_pathScopeByRepo is { Count: > 0 })
     {
         <label class="show-out-of-scope" title="Repos with a monorepo path filter only show PRs that touch the configured folders. Turn this on to also reveal the out-of-scope PRs.">
@@ -388,7 +393,13 @@ else
                             </div>
                         }
                     </td>
-                    <td class="title">@(row.Title ?? "")</td>
+                    <td class="title">
+                        @if (row.IsDraft)
+                        {
+                            <span class="draft-tag" title="Draft pull request (work in progress).">draft</span>
+                        }
+                        <span class="@(row.IsDraft ? "pr-draft-title" : null)">@(row.Title ?? "")</span>
+                    </td>
                     <td>@(row.AuthorLogin ?? "")</td>
                     <td>
                         @if (row.OpenThreadCount == 0)
@@ -572,6 +583,7 @@ else
     private const string PrefShowClosed   = "inbox.show_closed";
     private const string PrefShowIgnored  = "inbox.show_ignored";
     private const string PrefShowDone     = "inbox.show_done";
+    private const string PrefHideDrafts   = "inbox.hide_drafts";
     private const string PrefOnlyFlagged  = "inbox.only_flagged";
     private const string PrefShowOutOfScope = "inbox.show_out_of_scope";
     private const string PrefSourceFilter = "inbox.source_filter";
@@ -605,6 +617,7 @@ else
     private string? _lastLaunchMessage;
     private bool _showClosed;
     private bool _showIgnored;
+    private bool _hideDrafts;
     private bool _showDone;
     private bool _onlyFlagged;
     private bool _showOutOfScope;
@@ -738,7 +751,24 @@ else
         get
         {
             var filters = CurrentFilters;
-            return _rows.Where(filters.ShouldShow).ToArray();
+            return _rows.Where(filters.ShouldShow)
+                        .Where(r => !_hideDrafts || !r.IsDraft)
+                        .ToArray();
+        }
+    }
+
+    /// <summary>
+    /// Count of rows currently hidden ONLY because they're drafts (i.e. would
+    /// be visible if "Hide drafts" were off). Drives the "Hide drafts (N)"
+    /// label so the user can see how many WIP PRs are tucked away.
+    /// </summary>
+    private int HiddenDraftCount
+    {
+        get
+        {
+            if (!_hideDrafts) return 0;
+            var filters = CurrentFilters;
+            return _rows.Count(r => r.IsDraft && filters.ShouldShow(r));
         }
     }
 
@@ -850,6 +880,7 @@ else
             _showClosed  = await Prefs.GetBoolAsync(PrefShowClosed, defaultValue: false);
             _showIgnored = await Prefs.GetBoolAsync(PrefShowIgnored, defaultValue: false);
             _showDone    = await Prefs.GetBoolAsync(PrefShowDone, defaultValue: false);
+            _hideDrafts  = await Prefs.GetBoolAsync(PrefHideDrafts, defaultValue: false);
             _onlyFlagged = await Prefs.GetBoolAsync(PrefOnlyFlagged, defaultValue: false);
             _showOutOfScope = await Prefs.GetBoolAsync(PrefShowOutOfScope, defaultValue: false);
             var gbRaw = await Prefs.GetAsync(PrefGroupBy);
@@ -1006,6 +1037,13 @@ else
         _showClosed = value;
         try { await Prefs.SetBoolAsync(PrefShowClosed, value); }
         catch (Exception ex) { Log.LogDebug(ex, "Persist {Key} failed.", PrefShowClosed); }
+    }
+
+    private async Task OnHideDraftsToggleAsync(bool value)
+    {
+        _hideDrafts = value;
+        try { await Prefs.SetBoolAsync(PrefHideDrafts, value); }
+        catch (Exception ex) { Log.LogDebug(ex, "Persist {Key} failed.", PrefHideDrafts); }
     }
 
     private async Task OnShowIgnoredToggleAsync(bool value)

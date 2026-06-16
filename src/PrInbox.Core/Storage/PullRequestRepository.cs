@@ -32,14 +32,14 @@ public sealed class PullRequestRepository
               status, tracking_reason, identity_used,
               first_seen_at, last_synced_at, enrich_state,
               last_briefed_head_sha, last_review_run_head_sha, last_posted_review_head_sha,
-              body, last_upstream_updated_at, upstream_created_at, my_role
+              body, last_upstream_updated_at, upstream_created_at, my_role, is_draft
             ) VALUES (
               $prId, $stableId, $sourceId, $sourceKind,
               $displayRepo, $number, $title, $author, $url,
               $status, $tracking, $identityUsed,
               $firstSeen, $lastSynced, $enrichState,
               $lastBriefed, $lastReviewRun, $lastPosted,
-              $body, $lastUpstreamUpdated, $upstreamCreated, $myRole
+              $body, $lastUpstreamUpdated, $upstreamCreated, $myRole, $isDraft
             )
             ON CONFLICT(stable_identity) DO UPDATE SET
               pr_identity   = excluded.pr_identity,
@@ -88,6 +88,7 @@ public sealed class PullRequestRepository
         cmd.Parameters.AddWithValue("$status", row.Status.ToString().ToLowerInvariant());
         cmd.Parameters.AddWithValue("$tracking", TrackingReasonToDb(row.TrackingReason));
         cmd.Parameters.AddWithValue("$myRole", MyRoleToDb(row.MyRole));
+        cmd.Parameters.AddWithValue("$isDraft", row.IsDraft ? 1 : 0);
         cmd.Parameters.AddWithValue("$identityUsed", row.IdentityUsed);
         cmd.Parameters.AddWithValue("$firstSeen", FormatTimestamp(row.FirstSeenAt));
         cmd.Parameters.AddWithValue("$lastSynced", FormatTimestamp(row.LastSyncedAt));
@@ -468,6 +469,23 @@ public sealed class PullRequestRepository
     }
 
     /// <summary>
+    /// Update the draft flag. Called by the enrich pass once the authoritative
+    /// draft state is known (GitHub exposes it only at the detail tier; ADO
+    /// also confirms it here). The fast pass sets it on INSERT but never
+    /// overwrites it on conflict, so a stale list-tier value can't clobber a
+    /// known one between enrich passes.
+    /// </summary>
+    public async Task UpdateIsDraftAsync(string url, bool isDraft, CancellationToken ct)
+    {
+        await using var conn = await _db.OpenAsync(ct);
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = "UPDATE pull_requests SET is_draft = $d WHERE pr_identity = $id;";
+        cmd.Parameters.AddWithValue("$d", isDraft ? 1 : 0);
+        cmd.Parameters.AddWithValue("$id", url);
+        await cmd.ExecuteNonQueryAsync(ct);
+    }
+
+    /// <summary>
     /// Set or clear <c>disappeared_at</c>. The disappeared-diff sweep
     /// stamps this when a PR drops out of the fast-sync result list yet
     /// the per-PR re-enrich reports <c>status='open'</c> — i.e. the user
@@ -607,7 +625,9 @@ public sealed class PullRequestRepository
             UpstreamCreatedAt: ParseOptionalTimestamp(reader, "upstream_created_at"),
             MyRole: HasColumn(reader, "my_role")
                 ? ParseMyRole(reader.GetString(reader.GetOrdinal("my_role")))
-                : MyRole.Reviewer);
+                : MyRole.Reviewer,
+            IsDraft: HasColumn(reader, "is_draft")
+                && reader.GetInt64(reader.GetOrdinal("is_draft")) != 0);
     }
 
     private static bool HasColumn(SqliteDataReader reader, string name)

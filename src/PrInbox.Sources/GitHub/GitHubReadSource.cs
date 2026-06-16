@@ -278,7 +278,8 @@ public sealed class GitHubReadSource : IPrReadSource
             Files: files,
             MergeableState: mergeable,
             CiStatus: ciStatus,
-            ReviewDecision: reviewDecision);
+            ReviewDecision: reviewDecision,
+            IsDraft: pr.Draft);
     }
 
     private static readonly HttpClient s_graphqlHttp = new()
