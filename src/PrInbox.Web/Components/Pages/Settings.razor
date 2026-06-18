@@ -354,7 +354,7 @@ else
         <h2>Review launcher</h2>
         <p class="muted">
             How the Review button drives the dual-model-review agent.
-            Both flags take effect immediately on the <em>next</em> review you launch — running consoles are unaffected.
+            These settings take effect immediately on the <em>next</em> review you launch — running consoles are unaffected.
         </p>
         <div class="settings-toggle">
             <label>
@@ -406,6 +406,24 @@ else
                 </span>
             </label>
         </div>
+        <div class="settings-toggle">
+            <label>
+                <input type="checkbox"
+                       checked="@_tabPerReview"
+                       @onchange="@(e => OnTabPerReviewChanged((bool)e.Value!))"
+                       disabled="@_busy" />
+                <strong>One tab per review (experimental)</strong>
+                <span class="muted">
+                    On: each review opens as a new <em>tab</em> in one shared Windows Terminal
+                    window (<code>pr-inbox-reviews</code>) instead of its own window — less
+                    desktop and taskbar clutter when several reviews run at once.
+                    Trade-off: because the tabs share a single window, the Inbox's per-review
+                    minimize / restore / show controls are unavailable in this mode (use the
+                    terminal's own tab bar or Ctrl+Tab instead).
+                    Off (default): one window per review.
+                </span>
+            </label>
+        </div>
     </section>
 
     <p class="muted">
@@ -420,6 +438,7 @@ else
     private string _pathFiltersText = string.Empty;
     private bool _autoSend = true;
     private bool _yolo;
+    private bool _tabPerReview;
     private string _tabColor = string.Empty;
 
     private bool _showGheForm;
@@ -529,6 +548,7 @@ else
         _pathFiltersText = FormatPathFilters(_cfg.RepoPathFilters);
         _autoSend = _cfg.ReviewLauncher.AutoSend;
         _yolo = _cfg.ReviewLauncher.Yolo;
+        _tabPerReview = _cfg.ReviewLauncher.TabPerReview;
         _tabColor = _cfg.ReviewLauncher.TabColor;
     }
 
@@ -875,6 +895,16 @@ else
     {
         _yolo = value;
         return PersistLauncherFlagsAsync($"Yolo {(value ? "ON" : "OFF")}.");
+    }
+
+    private Task OnTabPerReviewChanged(bool value)
+    {
+        _tabPerReview = value;
+        return WrapAsync(async () =>
+        {
+            await ConfigSvc.SetReviewLauncherTabPerReviewAsync(_tabPerReview);
+            SetMessage($"One tab per review {(value ? "ON" : "OFF")}.");
+        });
     }
 
     // Value bound to the native colour picker, which only accepts a

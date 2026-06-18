@@ -286,25 +286,28 @@ public sealed class ReviewLauncher : IReviewLauncher, IAsyncDisposable
             : "";
 
         var wt = ResolveOnPath("wt.exe");
+        var tabPerReview = rl.TabPerReview;
         try
         {
             if (wt is not null)
             {
-                // -w new gives each review its own Windows Terminal window
-                // so the inbox UI can minimize / restore one without
-                // affecting the others.
-                // --suppressApplicationTitle keeps OUR --title authoritative:
-                // agency copilot emits OSC title sequences at runtime that
-                // would otherwise overwrite the tab title AND erase the
-                // run-id token the registry polls for during discovery.
-                var args = $"-w new nt --title \"{safeTitle}\" --suppressApplicationTitle{tabColorArg} -d \"{runDir}\" pwsh -NoExit -File \"{ps1}\" {launcherArgs}";
+                var args = BuildWtArguments(tabPerReview, safeTitle, tabColorArg, runDir, ps1, launcherArgs);
                 Process.Start(new ProcessStartInfo
                 {
                     FileName = wt,
                     Arguments = args,
                     UseShellExecute = true,
                 });
-                _consoles.RegisterInBackground(runId, humanTitle);
+                // The console registry tracks one OS window per review so the
+                // Inbox can minimize / restore / focus each independently. In
+                // tab mode every review shares a single window (HWND), so that
+                // per-review targeting is impossible — skip registration and
+                // let the Inbox panel degrade to an explanatory note instead
+                // of controls that would act on every review at once.
+                if (!tabPerReview)
+                {
+                    _consoles.RegisterInBackground(runId, humanTitle);
+                }
                 return;
             }
 
@@ -323,6 +326,30 @@ public sealed class ReviewLauncher : IReviewLauncher, IAsyncDisposable
         {
             _log.LogError(ex, "Failed to spawn review console for {RunDir}", runDir);
         }
+    }
+
+    /// <summary>
+    /// Builds the <c>wt.exe</c> argument string for a review window.
+    /// <paramref name="tabPerReview"/> selects the window target:
+    /// <list type="bullet">
+    ///   <item><c>false</c> → <c>-w new</c>: each review gets its own
+    ///   Windows Terminal window, which the console registry can track and
+    ///   the Inbox can minimize / restore individually.</item>
+    ///   <item><c>true</c> → <c>-w &lt;ReviewWindowName&gt;</c>: every review
+    ///   is routed into one shared, named window as a new tab. Less desktop
+    ///   sprawl, but all tabs share a single HWND so per-review window
+    ///   controls no longer apply.</item>
+    /// </list>
+    /// <c>--suppressApplicationTitle</c> keeps OUR <c>--title</c>
+    /// authoritative: agency copilot emits OSC title sequences at runtime
+    /// that would otherwise overwrite the tab title AND erase the run-id
+    /// token the registry polls for during discovery.
+    /// </summary>
+    internal static string BuildWtArguments(bool tabPerReview, string safeTitle, string tabColorArg,
+        string runDir, string ps1, string launcherArgs)
+    {
+        var window = tabPerReview ? ReviewLauncherSettings.ReviewWindowName : "new";
+        return $"-w {window} nt --title \"{safeTitle}\" --suppressApplicationTitle{tabColorArg} -d \"{runDir}\" pwsh -NoExit -File \"{ps1}\" {launcherArgs}";
     }
 
     private static string? FindLauncherScript()

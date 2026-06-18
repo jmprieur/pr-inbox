@@ -225,8 +225,19 @@
 
 @{
     var consoles = Consoles.List();
+    var tabPerReview = Config.ReviewLauncher.TabPerReview;
 }
-@if (consoles.Count > 0)
+@if (tabPerReview)
+{
+    <div class="toolbar console-strip" role="group" aria-label="Review consoles">
+        <span class="muted">
+            Reviews open as tabs in one Windows Terminal window (<code>pr-inbox-reviews</code>).
+            Switch between them with the terminal tab bar or Ctrl+Tab — per-review
+            minimize / restore isn't available in tab mode.
+        </span>
+    </div>
+}
+else if (consoles.Count > 0)
 {
     <div class="toolbar console-strip" role="group" aria-label="Review consoles">
         <span class="muted">@consoles.Count review console@(consoles.Count == 1 ? "" : "s") open:</span>

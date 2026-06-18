@@ -233,6 +233,14 @@ public sealed class ConfigService : IConfigService
     }
 
     /// <inheritdoc />
+    public async Task SetReviewLauncherTabPerReviewAsync(bool tabPerReview, CancellationToken ct = default)
+    {
+        var cfg = await PrInboxConfig.LoadAsync(_configPath, ct);
+        cfg.ReviewLauncher.TabPerReview = tabPerReview;
+        await SaveAndRefreshAsync(cfg, ct);
+    }
+
+    /// <inheritdoc />
     public async Task<BindIdentityResult> BindGitHubSourceToIdentityAsync(
         string sourceId,
         string identity,
@@ -385,6 +393,7 @@ public sealed class ConfigService : IConfigService
         _singleton.ReviewLauncher.AutoSend = cfg.ReviewLauncher.AutoSend;
         _singleton.ReviewLauncher.Yolo = cfg.ReviewLauncher.Yolo;
         _singleton.ReviewLauncher.TabColor = cfg.ReviewLauncher.TabColor;
+        _singleton.ReviewLauncher.TabPerReview = cfg.ReviewLauncher.TabPerReview;
     }
 
     private static string DefaultIdFor(SourceConfigKind kind, string host) => kind switch
