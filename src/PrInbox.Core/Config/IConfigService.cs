@@ -102,6 +102,15 @@ public interface IConfigService
     Task SetReviewLauncherTabColorAsync(string tabColor, CancellationToken ct = default);
 
     /// <summary>
+    /// Sets the experimental "one tab per review" launcher mode
+    /// (<see cref="ReviewLauncherSettings.TabPerReview"/>) and mirrors it
+    /// onto the DI singleton so the next review launch picks it up without a
+    /// process restart. When on, reviews open as tabs in a single shared
+    /// Windows Terminal window instead of one window each.
+    /// </summary>
+    Task SetReviewLauncherTabPerReviewAsync(bool tabPerReview, CancellationToken ct = default);
+
+    /// <summary>
     /// Replaces the entire <see cref="PrInboxConfig.RepoPathFilters"/> map
     /// (monorepo path scoping) and mirrors it onto the DI singleton so the
     /// inbox picks it up without a restart. Repos with an empty pattern

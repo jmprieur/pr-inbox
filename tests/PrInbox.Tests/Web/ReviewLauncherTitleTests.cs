@@ -1,3 +1,4 @@
+using PrInbox.Core.Credentials;
 using PrInbox.Web.Services;
 
 namespace PrInbox.Tests.Web;
@@ -48,5 +49,27 @@ public class ReviewLauncherTitleTests
     public void ShortRepo_DropsOwnerPrefix(string displayRepo, string expected)
     {
         ReviewLauncher.ShortRepo(displayRepo).Should().Be(expected);
+    }
+
+    [Fact]
+    public void BuildWtArguments_WindowMode_UsesNewWindow()
+    {
+        var args = ReviewLauncher.BuildWtArguments(
+            tabPerReview: false, "octocat playground #1 [pr-inbox:run-7]", " --tabColor \"#5da4ff\"",
+            @"C:\runs\7", @"C:\tools\launch-review.ps1", "-RunDirectory \"C:\\runs\\7\"");
+
+        args.Should().StartWith("-w new nt ");
+        args.Should().NotContain(ReviewLauncherSettings.ReviewWindowName);
+    }
+
+    [Fact]
+    public void BuildWtArguments_TabMode_RoutesToSharedNamedWindow()
+    {
+        var args = ReviewLauncher.BuildWtArguments(
+            tabPerReview: true, "octocat playground #1 [pr-inbox:run-7]", " --tabColor \"#5da4ff\"",
+            @"C:\runs\7", @"C:\tools\launch-review.ps1", "-RunDirectory \"C:\\runs\\7\"");
+
+        args.Should().StartWith($"-w {ReviewLauncherSettings.ReviewWindowName} nt ");
+        args.Should().NotContain("-w new ");
     }
 }

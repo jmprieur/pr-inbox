@@ -302,6 +302,26 @@ public sealed class ConfigServiceTests : IDisposable
         singleton.ReviewLauncher.TabColor.Should().BeEmpty();
     }
 
+    [Fact]
+    public async Task SetReviewLauncherTabPerReviewAsync_Persists_And_Mirrors_Singleton()
+    {
+        var singleton = new PrInboxConfig();
+        var svc = new ConfigService(singleton, _path);
+        singleton.ReviewLauncher.TabPerReview.Should().BeFalse(); // baseline default
+
+        await svc.SetReviewLauncherTabPerReviewAsync(true);
+
+        // Singleton mirrored in-place (same instance — ReviewLauncher reads this).
+        singleton.ReviewLauncher.TabPerReview.Should().BeTrue();
+        // And persisted to disk.
+        (await svc.GetAsync()).ReviewLauncher.TabPerReview.Should().BeTrue();
+
+        // Round-trip back to off.
+        await svc.SetReviewLauncherTabPerReviewAsync(false);
+        singleton.ReviewLauncher.TabPerReview.Should().BeFalse();
+        (await svc.GetAsync()).ReviewLauncher.TabPerReview.Should().BeFalse();
+    }
+
     [Theory]
     [InlineData("#5da4ff", "#5da4ff")]
     [InlineData("  #ABC  ", "#ABC")]

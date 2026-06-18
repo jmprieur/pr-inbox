@@ -253,4 +253,30 @@ public sealed class ReviewLauncherSettings
     /// picks it up without a process restart.
     /// </remarks>
     public bool Yolo { get; set; } = false;
+
+    /// <summary>
+    /// Windows Terminal window name used to group review tabs into one
+    /// shared window when <see cref="TabPerReview"/> is on. Passed to
+    /// <c>wt -w &lt;name&gt;</c>; the first launch creates the window, every
+    /// later launch adds a tab to it.
+    /// </summary>
+    public const string ReviewWindowName = "pr-inbox-reviews";
+
+    /// <summary>
+    /// Experimental. When true, each review opens as a new <em>tab</em>
+    /// inside a single shared Windows Terminal window
+    /// (<see cref="ReviewWindowName"/>) instead of its own window —
+    /// trading desktop / taskbar sprawl for the ability to control review
+    /// windows individually. Because all tabs share one OS window (HWND),
+    /// the Inbox's per-review minimize / restore / focus controls cannot
+    /// target a single review in this mode, so they are suppressed while it
+    /// is on. Default <c>false</c>: one window per review. Ignored by the
+    /// non-<c>wt</c> fallback launcher, which can only open separate windows.
+    /// </summary>
+    /// <remarks>
+    /// Mutable (<c>set</c> not <c>init</c>) so the Settings page can toggle
+    /// it on the live DI singleton and the next review launch picks it up
+    /// without a process restart.
+    /// </remarks>
+    public bool TabPerReview { get; set; } = false;
 }
