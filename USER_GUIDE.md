@@ -115,10 +115,11 @@ status line shows `Last sync: …`. PRs appear as they're discovered.
 
 ### 5. Click Review on something
 
-Pick any row, hit **Review**. A new Windows Terminal tab opens titled
-`<repo> #<N>`, runs `agency copilot` against the generated brief, and
-starts the dual-model-review pass. **You did not type anything in the
-terminal.** That's the point.
+Pick any row, hit **Review**. A new Windows Terminal window opens —
+titled like `alice playground #8114 @ff2dcab 15:46` (author · repo · PR
+number · head SHA · launch time) — runs `agency copilot` against the
+generated brief, and starts the dual-model-review pass. **You did not
+type anything in the terminal.** That's the point.
 
 ---
 
@@ -283,11 +284,28 @@ skipped — the page never crashes over config.
    - The standard dual-model-review invocation block
    - Staleness clause ("verify PR HEAD is still `<sha>` before posting")
 5. Insert `review_runs` row; update `pull_requests.last_briefed_head_sha`.
-6. Spawn a new Windows Terminal tab running `agency copilot …`,
-   titled `<repo> #<N>`.
+6. Spawn a Windows Terminal window running `agency copilot …`, titled
+   `<author> <repo> #<N> @<short-sha> <HH:mm>`. By default each review
+   gets its own window; turn on **One tab per review** (Settings →
+   Review launcher) to route them into one shared window as tabs instead.
 
 A second Review on the same PR **always** creates a new immutable run —
 nothing is mutated in place.
+
+### Managing review windows
+
+Launched reviews keep running in their own terminals. The Inbox shows a
+**review consoles** strip listing every one pr-inbox is tracking, so you
+don't have to dig through Alt-Tab:
+
+- **minimize / show** an individual review window.
+- **Minimize all** / **Show all** to clear or surface every review at once.
+
+The strip acts on one OS window per review, so it's only available in the
+default one-window-per-review mode. With **One tab per review** on, every
+review shares a single window — which can't be minimized or focused
+individually — so the strip is replaced by a short note pointing you at
+the terminal's own tab bar (`Ctrl+Tab`) instead.
 
 ### Reading the Review page
 
@@ -536,12 +554,15 @@ Use for "everything from this team gets hidden by default."
 
 ### Review launcher
 
-Two persisted toggles:
+Persisted settings that take effect on the **next** review you launch
+(running reviews are unaffected):
 
-| Toggle | Effect |
+| Setting | Effect |
 |---|---|
-| **AutoSend** | After spawning the terminal, types the prompt + Enter automatically. When off, the terminal opens at the prompt and waits for you. |
-| **Yolo** | Appends `--yolo` to the `agency copilot` invocation, skipping safety prompts. Use with care. |
+| **AutoSend** | After spawning the terminal, hands the brief to the agent (`-i`) so the run starts hands-free. When off, the brief is copied to the clipboard and the terminal waits for you to paste it (Ctrl+V). |
+| **Yolo** | Appends `--yolo` to the `agency copilot` invocation (`--allow-all-tools --allow-all-paths --allow-all-urls`), skipping every permission prompt. Faster and truly unattended — use only when you trust the agent. |
+| **Tab colour** | Colours the Windows Terminal tab for every review so it stands out from ordinary terminals. Accepts a hex like `#5da4ff`; leave blank to disable. |
+| **One tab per review** *(experimental)* | On: each review opens as a tab in one shared window (`pr-inbox-reviews`) instead of its own window — less desktop clutter when several run at once. Trade-off: the Inbox's per-review window controls don't apply in tab mode, and closing the shared window closes every review tab. Off (default): one window per review. |
 
 If you need fancier overrides (different model, different plugin),
 use the env vars in [§ Review launcher overrides](README.md#review-launcher-overrides).
@@ -672,7 +693,9 @@ from the CLI, the same seven steps run:
    `pull_requests.last_briefed_head_sha`.
 7. Prints the brief path and the recommended `copilot` command (CLI) or
    spawns `wt.exe` running `agency copilot` against the brief (Web UI),
-   in a tab titled `<repo> #<PR-number>`.
+   in a window titled `<author> <repo> #<PR-number> @<short-sha> <HH:mm>`
+   (or a tab in the shared `pr-inbox-reviews` window when **One tab per
+   review** is enabled).
 
 Re-running on the same PR **always** creates a new immutable run —
 nothing is overwritten. The previous run dir stays exactly as it was.
