@@ -355,6 +355,11 @@ Each finding row is editable inline:
 Per-finding idempotency: posting the same finding twice is a no-op.
 If you re-post after editing, the publisher posts the diff.
 
+> **You own what you publish.** A standing notice above the **Post**
+> controls is a reminder that the review is AI-assisted but the comments
+> are yours — read each finding before posting. Posting for real also
+> asks you to confirm you're accountable for the AI-assisted comments.
+
 ---
 
 ## Daily flow 3 — Close the loop
