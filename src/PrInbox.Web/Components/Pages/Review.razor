@@ -205,6 +205,13 @@ else
         <pre class="comment-preview">@BuildReviewBodyPreview()</pre>
     </details>
 
+    <p class="accountability-note" role="note">
+        ⚠ These are <strong>your</strong> review comments. AI assistance doesn't
+        transfer accountability — read each finding before you publish. The
+        review is posted under the identity bound to this PR (shown as
+        <em>Identity used</em> after posting).
+    </p>
+
     <div class="post-row">
         <label><input type="checkbox" @bind="_dryRun" /> <strong>Dry run</strong> (recommended; no network)</label>
         @if (IsGitHubUrl)
@@ -519,8 +526,8 @@ else
                 _ => "Post",
             };
             var suffix = picks.Count == 0
-                ? $"{verb} {Url}? This cannot be undone."
-                : $"{verb} {Url} with {picks.Count} finding(s)? This cannot be undone.";
+                ? $"{verb} {Url}? You are accountable for this AI-assisted review. This cannot be undone."
+                : $"{verb} {Url} with {picks.Count} finding(s)? You are accountable for these AI-assisted comments. This cannot be undone.";
             var ok = await Js.InvokeAsync<bool>("confirm", suffix);
             if (!ok) return;
         }
