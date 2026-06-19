@@ -110,8 +110,10 @@ trusts when repos/projects rename.
 work: refresh that one PR's snapshot, compute what's new since the
 last brief, write an **immutable** run directory containing `brief.md`
 + `metadata.json`, then hand it to a Copilot session. Re-reviewing
-appends a new run dir — nothing is ever overwritten. Step-by-step
-walkthrough lives in [USER_GUIDE.md § What "Review" actually does](USER_GUIDE.md#what-review-actually-does).
+appends a new run dir — nothing is ever overwritten. In the Web UI each
+review opens in its own Windows Terminal window by default; the **One
+tab per review** setting groups them as tabs in a single window instead.
+Step-by-step walkthrough lives in [USER_GUIDE.md § What "Review" actually does](USER_GUIDE.md#what-review-actually-does).
 
 ---
 
