@@ -128,7 +128,7 @@ Step-by-step walkthrough lives in [USER_GUIDE.md § What "Review" actually does]
 ### Required to click "Review" (launcher tab)
 
 - [PowerShell 7+](https://learn.microsoft.com/powershell/scripting/install/installing-powershell-on-windows) (`pwsh`) — `tools/launch-review.ps1` runs under it
-- [Windows Terminal](https://aka.ms/terminal) (`wt.exe`) — each Review opens in a new tab
+- [Windows Terminal](https://aka.ms/terminal) (`wt.exe`) — each Review opens in its own window by default (or as a tab, with **One tab per review**)
 - `agency` CLI on `PATH`, authenticated to your model providers — the launcher invokes `agency copilot …`
 - Read access to the plugin source. Default is the Microsoft-internal `1ES-microsoft/ai-plugins` repo on github.com. If you can't reach it, point `PRINBOX_REVIEW_PLUGIN` at a local clone or a different plugin (see [Review launcher overrides](#review-launcher-overrides))
 
@@ -189,8 +189,8 @@ dotnet run --project src/PrInbox.Web
 pr-inbox config init
 
 # 2. Add the sources you want to track
-pr-inbox config add-source github.com
-pr-inbox config add-source ghe.<your-host>          # optional
+pr-inbox config add-source github github.com
+pr-inbox config add-source github-enterprise <your-host>   # optional
 pr-inbox config add-ado-project mseng Context       # one per ADO project
 
 # 3. Verify auth is working
@@ -203,7 +203,7 @@ pr-inbox sync
 pr-inbox list
 
 # 6. Start a review session on a specific PR
-pr-inbox review gh.com:agency-microsoft/playground#4248
+pr-inbox review https://github.com/agency-microsoft/playground/pull/4248
 # Prints: brief path + recommended `copilot` invocation
 ```
 
