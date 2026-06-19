@@ -168,12 +168,12 @@ all PRs
   → drop sources not in your chip set
   → drop repos in your repo denylist
   → drop authors in your author denylist
-  → drop ignored / disappeared unless "Show ignored"
+  → drop ignored unless "Show ignored"   (disappeared PRs stay visible)
   → drop marked-done (where the author hasn't pushed since) unless "Show done"
   → drop unflagged rows when "Show only flagged" is on
 ```
 
-All four filters persist per-user in SQLite (`ui_preferences` table).
+These toggles persist per-user in SQLite (`ui_preferences` table).
 
 **Repo filter** (the **Repos** pill): click it, search-as-you-type,
 check/uncheck. Default: every repo visible. Excluded repos still appear
@@ -205,8 +205,9 @@ that platform.
 
 **Show closed / Show ignored**: hidden by default to keep the inbox
 focused on actionable PRs. Closed = PR is merged/closed upstream.
-Ignored = you (or an `IgnoredRepos` regex) said "hide this," or the PR
-was reported as disappeared by the sweep.
+Ignored = you (or an `IgnoredRepos` regex) said "hide this." (Disappeared
+PRs are *not* ignored — they stay visible with a `no longer assigned`
+chip; see [§ Disappeared PRs](#disappeared-prs).)
 
 **Show done**: per-PR snooze. Hit the **Done** button on a row after
 you've reviewed and published comments — the row hides until the
@@ -228,8 +229,17 @@ those rows. Flag is *orthogonal* to Done/Ignore/Closed: flagging a
 PR does **not** bypass the other filters. A PR that's both flagged
 and done stays hidden until you turn on Show done (or Show only
 flagged). Use Flag when you want to keep tabs on a PR you don't need
-to review — to see how it lands, wait for an author reply, or follow
-a teammate's work.
+to review and don't need to act on — to see how it lands, wait for an
+author reply, or follow a teammate's work.
+
+**Other toolbar controls:**
+
+- **Hide drafts (N)** — collapse draft (work-in-progress) PRs.
+- **Show out-of-scope** — reveal PRs hidden by a repo's monorepo path
+  filter (when you've scoped a repo to specific folders).
+- **Group by Tag** — group rows into collapsible sections by the tags
+  you've attached.
+- **Age** column header — sort oldest-first / newest-first / off.
 
 ### Disappeared PRs
 
@@ -240,7 +250,8 @@ Instead it stamps `disappeared_at` and:
 
 - The row stays in the table, but is rendered muted with a
   **`no longer assigned`** chip next to the title.
-- The **Show ignored** toggle controls visibility (off by default).
+- It stays **visible by default** — `Show ignored` does not gate it.
+  Only an explicit Ignore (per-PR or regex) removes it from the queue.
 - The PR can still be opened, reviewed, and un-ignored manually — the
   data is intact, just demoted from your active queue.
 
@@ -332,10 +343,14 @@ Each finding row is editable inline:
   deleting the record).
 - Edit the comment body. The publisher uses your edited copy, not the
   original.
-- The publisher posts the curated set when you hit **Post**. Default is
-  **dry-run** (publisher tells you what it would post, doesn't actually
-  do it). Flip dry-run off in `findings.yaml` (or the page toggle, where
-  exposed) to post for real.
+- The publisher posts the curated set when you hit **Post**. The
+  **Dry run** checkbox on the Review page is on by default — the
+  publisher tells you what it *would* post without making any network
+  calls; uncheck it to post for real. You can also pick a GitHub review
+  verdict (**Comment** / **Approve** / **Request changes**).
+- **Open findings.yaml** edits the raw run file in your default editor;
+  saving refreshes the page. **✓ Mark done & back** posts nothing but
+  snoozes the PR and returns you to the Inbox.
 
 Per-finding idempotency: posting the same finding twice is a no-op.
 If you re-post after editing, the publisher posts the diff.
@@ -357,21 +372,26 @@ the Threads column:
 12 open · 3 bot   [✓ 2 ready]   ← anchor; click to jump to /threads
 ```
 
-"Ready" means: among threads where you have a comment, the **latest**
-reply matches a conservative "done/fixed/+1" pattern. Click the pill
-to open the Threads page filtered to that PR.
+"Ready" means: an open thread's **latest** reply matches a conservative
+"done / fixed / addressed / +1" pattern. Click the pill to open the
+Threads page filtered to that PR.
 
 ### The Threads page
 
-`/threads?identity=<pr-identity>` shows every open review thread on the
+`/threads?url=<pr-url>` shows every open review thread on the
 PR, one row per thread, with:
 
 | Column | |
 |---|---|
-| Path | File path + line range |
-| Body | Last comment (yours or theirs); markdown-rendered |
-| State | `open · Xd ago` and (when applicable) `✓ done` badge |
-| Resolve | Per-row checkbox |
+| ☐ | Per-row checkbox to pick threads to resolve |
+| Author | Who started the thread |
+| Anchor | File path + line (e.g. `src/foo.cs:42`) |
+| Excerpt | Last comment body |
+| State | `open · Xd ago` and (when applicable) a `✓ done` badge |
+
+Bulk selectors at the top — **Copilot**, **All bots**, **All**, **Clear** —
+pick threads fast, and a **Refresh thread ids** button backfills any
+missing GraphQL node ids.
 
 When the "done" heuristic fires on the latest reply, you'll see a
 **✓ Done replies (N)** bulk button at the top — one click resolves
@@ -444,18 +464,18 @@ On the Inbox findings cell:
 
 | Badge | Meaning |
 |---|---|
-| (hidden) | Both findings sets are empty — `✓ clean` shows instead |
-| ⇆ converged (green) | Both models flagged the same set within tolerance |
-| ⚠ asymmetric (amber) | One model found materially more than the other; worth a second look |
+| (hidden) | Zero findings — `✓ clean` shows instead; or only one reviewer ran |
+| `✓✓` converged (green) | Both reviewers flagged **every** finding — highest confidence |
+| `⚠` asymmetric (amber) | At least one finding came from a single reviewer; worth a second look |
 
 Tooltip shows the count delta and the names of the models involved.
 
 ### `✓ clean` vs no findings at all
 
-`✓ clean` only appears when the review **ran** and produced an empty
-findings set (both models agreed there was nothing to flag). An
-unreviewed PR shows no findings cell content at all. Don't read missing
-content as "clean."
+`✓ clean` appears when a review **ran** and produced zero findings. An
+unreviewed PR shows no findings cell content at all — don't read missing
+content as "clean." When two reviewers both came back empty, the pill's
+tooltip says so (e.g. "2 reviewers agree").
 
 ### Bot-comment count
 
@@ -469,9 +489,9 @@ in config. Useful for distinguishing "5 open threads I started" from
 A muted row with this chip means the upstream sync has stopped returning
 the PR (you got removed from reviewers, the PR was deleted, you're no
 longer assigned, etc.). The data is still there — `pr-inbox` never
-hard-deletes — and **Show ignored** brings it back into view. Click
-through to verify on the platform; if it really is gone, hit **Ignore**
-to demote it permanently.
+hard-deletes — and the row **stays visible** so you don't lose track of
+it. Click through to verify on the platform; if it really is gone, hit
+**Ignore** to demote it permanently.
 
 This is the safety net for "wait, where did that PR go?" — a question
 that used to require searching the platform manually.
@@ -594,16 +614,19 @@ The CLI is feature-equivalent to the Web UI for everything except the
 
 ```powershell
 pr-inbox config init                           # one-time
-pr-inbox config add-source github.com
+pr-inbox config add-source github github.com
 pr-inbox config add-ado-project mseng Context
 pr-inbox config doctor
 pr-inbox sync
 pr-inbox list
-pr-inbox review gh.com:owner/repo#1234
+pr-inbox review https://github.com/owner/repo/pull/1234
 ```
 
-Identity format: `<source>:<owner-or-project>/<repo>#<N>`. The display
-ids the Web UI shows are accepted by `pr-inbox review`.
+`pr-inbox review` takes a full PR **URL** (e.g.
+`https://github.com/owner/repo/pull/1234`, or an Azure DevOps PR URL),
+not the short display id the Inbox shows. Add `--refresh` to re-sync the
+PR first. Other handy flags: `sync --fast` / `--enrich` / `--source <id>`
+and `list --all` / `--source <id>`.
 
 ---
 
@@ -632,7 +655,7 @@ the upstream platform and re-syncs.
 
 ### Tokens
 
-Never stored. Per source:
+Never stored by `pr-inbox` — fetched on demand from `gh` / `az`. Per source:
 
 | Source | How a token shows up |
 |---|---|
@@ -651,7 +674,7 @@ independently.
 
 ```
 Inbox sync (background)
-  every ~30s
+  every 5 min (default; set PrInbox:SyncIntervalSeconds to change)
     └── fast pass — pull each enabled source's "PRs assigned to me"
                     diff against pull_requests; upsert; emit changes
     └── enrich   — for PRs that need it: fetch threads, bot comments,
