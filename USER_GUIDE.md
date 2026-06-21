@@ -293,6 +293,10 @@ skipped — the page never crashes over config.
    - Your open threads
    - Recent bot comments (Copilot review, Copilot coding agent)
    - The standard dual-model-review invocation block
+   - A Phase-2 instruction to triage the existing bot threads after
+     findings are written — reply / react / resolve the ones that are
+     settled *and* verified (author fixed it and the agent confirmed, or
+     author rejected with evidence the agent agrees with)
    - Staleness clause ("verify PR HEAD is still `<sha>` before posting")
 5. Insert `review_runs` row; update `pull_requests.last_briefed_head_sha`.
 6. Spawn a Windows Terminal window running `agency copilot …`, titled

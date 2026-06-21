@@ -406,7 +406,19 @@ public sealed class BriefService
         sb.AppendLine();
         sb.AppendLine($"Before writing, verify PR HEAD is still `{snapshot.HeadSha}`. If not, re-run `pr-inbox review {pr.Identity.Url}`.");
         sb.AppendLine();
-        sb.AppendLine("**Do not post.** The pr-inbox companion reads `findings.yaml` and posts after I curate.");
+        sb.AppendLine("**Do not post your findings.** The pr-inbox companion reads `findings.yaml` and posts after I curate.");
+        sb.AppendLine();
+        sb.AppendLine("### Then: triage the existing review threads");
+        sb.AppendLine();
+        sb.AppendLine("After `findings.yaml` is written, adjudicate the unresolved threads under **Open threads** above — all reviewers, including bots like Copilot. Do your own findings first; don't let these comments shape them.");
+        sb.AppendLine();
+        sb.AppendLine("Verify each thread against the current HEAD (read the post-change file, run the relevant check — don't trust a \"fixed\" claim), then act **live**. Unlike findings, these actions are verification-gated, so post them directly:");
+        sb.AppendLine();
+        sb.AppendLine("- **Reply** to each thread with your judgment, collaboratively, with concrete evidence.");
+        sb.AppendLine("- **Thumbs-up (+1 reaction)** the comments that are correct.");
+        sb.AppendLine("- **Resolve** a thread only when it is *settled AND you verified it*: the author addressed it and you confirmed the fix at HEAD, or the author rejected it with evidence and you agree. Leave open anything unaddressed, contested, or that you couldn't verify — never resolve a real issue just to clear the list. For a human reviewer's thread, when in doubt reply and leave it for them to close.");
+        sb.AppendLine();
+        sb.AppendLine("See the `triage-existing-review-comments` skill (plugins/dual-review) for the full policy, reply templates, the idempotency marker, and the Windows `gh api` UTF-8 handling.");
 
         return sb.ToString();
     }
