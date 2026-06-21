@@ -12,6 +12,10 @@
 
     <!-- Storage -->
     <PackageVersion Include="Microsoft.Data.Sqlite" Version="10.0.0" />
+    <!-- Transitive pin: Microsoft.Data.Sqlite 10.0.x still resolves the vulnerable native
+         SQLitePCLRaw.lib.e_sqlite3 2.1.11 (GHSA-2m69-gcr7-jv3q / CVE-2025-6965, SQLite < 3.50.2).
+         3.50.3 ships patched SQLite with the same native asset layout and no managed deps. -->
+    <PackageVersion Include="SQLitePCLRaw.lib.e_sqlite3" Version="3.50.3" />
 
     <!-- Source adapters -->
     <PackageVersion Include="Octokit" Version="14.0.0" />
