@@ -33,14 +33,20 @@
 .PARAMETER Plugin
     --plugin argument. Defaults to
     market:dual-review@jmprieur/pr-inbox
-    (fetched once and cached by agency).
+    (fetched once and cached by the CLI).
 
 .PARAMETER Model
     --model argument. Defaults to claude-opus-4.8.
 
 .PARAMETER Mcps
-    Comma-separated list of MCP servers to enable. Defaults to
-    'workiq,teams'. Each entry becomes one --mcp flag.
+    Comma-separated list of MCP servers to enable. Defaults to empty
+    (no MCP servers). Each entry becomes one --mcp flag.
+
+.PARAMETER Cli
+    The CLI that runs the review. Defaults to `copilot` (the public
+    GitHub Copilot CLI). Microsoft users can set
+    PRINBOX_REVIEW_CLI='agency copilot' to drive the same engine
+    through the internal agency wrapper.
 
 .PARAMETER SessionName
     Optional human-readable name for the underlying copilot session.
@@ -65,15 +71,18 @@ param(
     [string] $Plugin      = $env:PRINBOX_REVIEW_PLUGIN,
     [string] $Model       = $env:PRINBOX_REVIEW_MODEL,
     [string] $Mcps        = $env:PRINBOX_REVIEW_MCPS,
+    [string] $Cli         = $env:PRINBOX_REVIEW_CLI,
     [string] $SessionName = '',
     [switch] $NoAutoSend,
     [switch] $Yolo
 )
 
+if (-not $Cli)    { $Cli    = 'copilot' }
 if (-not $Agent)  { $Agent  = 'dual-review:dual-model-review' }
 if (-not $Plugin) { $Plugin = 'market:dual-review@jmprieur/pr-inbox' }
 if (-not $Model)  { $Model  = 'claude-opus-4.8' }
-if (-not $Mcps)   { $Mcps   = 'workiq,teams' }
+# No MCP servers by default. Set PRINBOX_REVIEW_MCPS (comma-separated) to
+# enable them; Microsoft users, for example, may use 'workiq,teams'.
 
 $ErrorActionPreference = 'Stop'
 
@@ -104,7 +113,7 @@ if (-not $autoSend) {
 }
 
 # Expand the MCP list into a flat array of --mcp / <name> tokens
-# so agency receives them as repeated flags.
+# so the CLI receives them as repeated flags.
 $mcpArgs = @()
 foreach ($m in ($Mcps -split ',')) {
     $m = $m.Trim()
@@ -156,7 +165,7 @@ foreach ($name in $inherited) {
     Remove-Item -Path "env:$name" -ErrorAction SilentlyContinue
 }
 
-# Build the agency invocation.
+# Build the CLI invocation.
 #
 # About session names: `agency copilot` *always* drives the underlying
 # copilot CLI with `--resume <fresh-uuid>` — that's how agency manages
@@ -172,7 +181,15 @@ foreach ($name in $inherited) {
 # not the copilot session name. SessionName is still accepted as a
 # parameter and surfaced in the banner above for diagnostics, but it
 # is intentionally NOT forwarded to agency.
-$agencyArgs = @('copilot') + $mcpArgs + @(
+
+# Split the launch command into tokens. Default 'copilot' (the public
+# GitHub Copilot CLI). Microsoft users set PRINBOX_REVIEW_CLI='agency copilot'
+# to drive the same engine through the agency wrapper instead.
+$cliTokens = @($Cli -split '\s+' | Where-Object { $_ })
+$cliExe    = $cliTokens[0]
+$cliLead   = if ($cliTokens.Count -gt 1) { $cliTokens[1..($cliTokens.Count - 1)] } else { @() }
+
+$launchArgs = $cliLead + $mcpArgs + @(
     '--plugin', $Plugin,
     '--model',  $Model,
     '--agent',  $Agent
@@ -198,5 +215,5 @@ if ($Yolo) {
     $passThrough += '--yolo'
 }
 
-& agency @agencyArgs @passThrough
+& $cliExe @launchArgs @passThrough
 

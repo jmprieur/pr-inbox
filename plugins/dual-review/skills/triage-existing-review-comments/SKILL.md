@@ -9,7 +9,7 @@ description: >-
   agree. Leaves genuinely open or contested threads alone. Dry-run by
   default; mutates only on an explicit execute signal.
 metadata:
-  author: 1ES AI Native Engineering
+  author: pr-inbox maintainers
   version: "0.1.0"
   category: review
   severity: medium

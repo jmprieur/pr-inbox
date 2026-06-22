@@ -129,8 +129,8 @@ Step-by-step walkthrough lives in [USER_GUIDE.md § What "Review" actually does]
 
 - [PowerShell 7+](https://learn.microsoft.com/powershell/scripting/install/installing-powershell-on-windows) (`pwsh`) — `tools/launch-review.ps1` runs under it
 - [Windows Terminal](https://aka.ms/terminal) (`wt.exe`) — each Review opens in its own window by default (or as a tab, with **One tab per review**)
-- `agency` CLI on `PATH`, authenticated to your model providers — the launcher invokes `agency copilot …`
-- Read access to the plugin source. Default is the Microsoft-internal `1ES-microsoft/ai-plugins` repo on github.com. If you can't reach it, point `PRINBOX_REVIEW_PLUGIN` at a local clone or a different plugin (see [Review launcher overrides](#review-launcher-overrides))
+- GitHub Copilot CLI (`copilot`) on `PATH`, authenticated to your model provider — the launcher invokes it. **Microsoft users:** set `PRINBOX_REVIEW_CLI="agency copilot"` to drive it through the internal `agency` wrapper.
+- Read access to the plugin source. Default is the `dual-review` plugin published from this repo (`market:dual-review@jmprieur/pr-inbox`). To use a local clone or a different plugin, point `PRINBOX_REVIEW_PLUGIN` at it (see [Review launcher overrides](#review-launcher-overrides))
 
 From source (until published to NuGet):
 
@@ -213,15 +213,16 @@ Both surfaces read/write the same `%APPDATA%\PrInbox\config.json`. Use whichever
 
 ## Review launcher overrides
 
-`tools/launch-review.ps1` reads four env vars. Defaults shown — set any of them
+`tools/launch-review.ps1` reads five env vars. Defaults shown — set any of them
 before launching the web UI to change what the Review tab spins up:
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `PRINBOX_REVIEW_AGENT` | `dual-review:dual-model-review` | Agency agent id |
+| `PRINBOX_REVIEW_CLI` | `copilot` | Launch command. Microsoft users: `agency copilot` |
+| `PRINBOX_REVIEW_AGENT` | `dual-review:dual-model-review` | Agent id |
 | `PRINBOX_REVIEW_PLUGIN` | `market:dual-review@jmprieur/pr-inbox` | Plugin source (use a `local:<path>` spec for local plugin development) |
-| `PRINBOX_REVIEW_MODEL` | `claude-opus-4.8` | Model id passed to `agency copilot` |
-| `PRINBOX_REVIEW_MCPS` | `workiq,teams` | Comma-separated MCP servers; set to empty string to disable |
+| `PRINBOX_REVIEW_MODEL` | `claude-opus-4.8` | Model id passed to the CLI |
+| `PRINBOX_REVIEW_MCPS` | _(empty)_ | Comma-separated MCP servers; empty means none |
 
 ---
 
@@ -232,9 +233,9 @@ before launching the web UI to change what the Review tab spins up:
 | `config doctor` red on GitHub | Not signed in to `gh` | `gh auth login --hostname github.com` |
 | `config doctor` red on Azure DevOps | `az login` expired, or you don't actually have an ADO source | `az login`, or skip the ADO step |
 | `sync` runs but inbox is empty | `gh` identity differs from the login the PRs are assigned to | `config doctor` prints the identity it's using; compare with PR assignee. If you have multiple `gh` logins, add each as its own source via Settings → **+ Add GitHub.com** |
-| Review tab opens then exits immediately with "agency: command not found" | `agency` CLI not on `PATH` | Install agency, or set `PRINBOX_REVIEW_AGENT` / `PRINBOX_REVIEW_PLUGIN` to point at a tool you do have |
-| Review tab opens but plugin fetch fails | No access to `1ES-microsoft/ai-plugins` | Point `PRINBOX_REVIEW_PLUGIN` at a local clone or a plugin you can reach |
-| Review tab opens but model call fails | `agency` not authenticated to the chosen model | Authenticate `agency` to your providers, or change `PRINBOX_REVIEW_MODEL` |
+| Review tab opens then exits immediately with "copilot: command not found" | Review CLI not on `PATH` | Install the GitHub Copilot CLI, or set `PRINBOX_REVIEW_CLI` to a CLI you have (Microsoft: `agency copilot`) |
+| Review tab opens but plugin fetch fails | No access to the configured plugin source | Point `PRINBOX_REVIEW_PLUGIN` at a local clone or a plugin you can reach |
+| Review tab opens but model call fails | Review CLI not authenticated to the chosen model | Authenticate your CLI to its providers, or change `PRINBOX_REVIEW_MODEL` |
 | Web UI says port already in use | Another instance running, or stale Kestrel | `Get-NetTCPConnection -LocalPort 7341 \| Stop-Process -Force` |
 
 ---

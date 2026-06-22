@@ -1,0 +1,44 @@
+name: Bug report
+description: Report a problem with pr-inbox
+labels: ["bug"]
+body:
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: A clear description of the bug, including what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: Minimal steps so we can reproduce it.
+      placeholder: |
+        1. Run `pr-inbox ...`
+        2. ...
+        3. See error
+    validations:
+      required: true
+  - type: input
+    id: source-kind
+    attributes:
+      label: Source kind
+      description: GitHub.com, GitHub Enterprise, or Azure DevOps? (No internal host names needed.)
+    validations:
+      required: false
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, .NET SDK version (`dotnet --version`), and pr-inbox version/commit.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: Paste any error output. Please redact tokens and private repo/identity details.
+      render: shell
+    validations:
+      required: false

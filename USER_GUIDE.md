@@ -60,7 +60,7 @@ You need these on `PATH`:
 | `az` (Azure CLI) | ADO auth — `az login` (skip if no ADO sources) |
 | `pwsh` (PowerShell 7+) | Review launcher runs under this |
 | `wt.exe` (Windows Terminal) | Each Review opens in a new tab |
-| `agency` CLI | Used by the launcher to spawn `agency copilot …` |
+| GitHub Copilot CLI (`copilot`) | Used by the launcher to run the review. Microsoft users can set `PRINBOX_REVIEW_CLI="agency copilot"`. |
 
 ### 2. Build & start
 
@@ -117,7 +117,7 @@ status line shows `Last sync: …`. PRs appear as they're discovered.
 
 Pick any row, hit **Review**. A new Windows Terminal window opens —
 titled like `alice playground #8114 @ff2dcab 15:46` (author · repo · PR
-number · head SHA · launch time) — runs `agency copilot` against the
+number · head SHA · launch time) — runs `copilot` against the
 generated brief, and starts the dual-model-review pass. **You did not
 type anything in the terminal.** That's the point.
 
@@ -299,7 +299,8 @@ skipped — the page never crashes over config.
      author rejected with evidence the agent agrees with)
    - Staleness clause ("verify PR HEAD is still `<sha>` before posting")
 5. Insert `review_runs` row; update `pull_requests.last_briefed_head_sha`.
-6. Spawn a Windows Terminal window running `agency copilot …`, titled
+6. Spawn a Windows Terminal window running `copilot …` (or `agency copilot`
+   for Microsoft users), titled
    `<author> <repo> #<N> @<short-sha> <HH:mm>`. By default each review
    gets its own window; turn on **One tab per review** (Settings →
    Review launcher) to route them into one shared window as tabs instead.
@@ -589,7 +590,7 @@ Persisted settings that take effect on the **next** review you launch
 | Setting | Effect |
 |---|---|
 | **AutoSend** | After spawning the terminal, hands the brief to the agent (`-i`) so the run starts hands-free. When off, the brief is copied to the clipboard and the terminal waits for you to paste it (Ctrl+V). |
-| **Yolo** | Appends `--yolo` to the `agency copilot` invocation (`--allow-all-tools --allow-all-paths --allow-all-urls`), skipping every permission prompt. Faster and truly unattended — use only when you trust the agent. |
+| **Yolo** | Appends `--yolo` to the review CLI invocation (`--allow-all-tools --allow-all-paths --allow-all-urls`), skipping every permission prompt. Faster and truly unattended — use only when you trust the agent. |
 | **Tab colour** | Colours the Windows Terminal tab for every review so it stands out from ordinary terminals. Accepts a hex like `#5da4ff`; leave blank to disable. |
 | **One tab per review** *(experimental)* | On: each review opens as a tab in one shared window (`pr-inbox-reviews`) instead of its own window — less desktop clutter when several run at once. Trade-off: the Inbox's per-review window controls don't apply in tab mode, and closing the shared window closes every review tab. Off (default): one window per review. |
 
@@ -724,7 +725,7 @@ from the CLI, the same seven steps run:
 6. Inserts a `review_runs` row and updates
    `pull_requests.last_briefed_head_sha`.
 7. Prints the brief path and the recommended `copilot` command (CLI) or
-   spawns `wt.exe` running `agency copilot` against the brief (Web UI),
+   spawns `wt.exe` running `copilot` (or `agency copilot`) against the brief (Web UI),
    in a window titled `<author> <repo> #<PR-number> @<short-sha> <HH:mm>`
    (or a tab in the shared `pr-inbox-reviews` window when **One tab per
    review** is enabled).
@@ -758,9 +759,9 @@ appends a new subdir; nothing is overwritten.
 | `config doctor` red on ADO | `az` token expired, or no ADO sources configured | `az login`, or just skip the ADO step |
 | Sync runs but inbox empty | `gh` identity ≠ PR assignee | Compare what Doctor prints with the assignee on a known PR |
 | Inbox row missing for a PR you expect | Hidden by an `IgnoredRepos` regex, repo denylist, author denylist, or source chip | Toggle **Show ignored** + check each filter pill's status line |
-| Review tab opens then exits ("agency: command not found") | `agency` CLI not on `PATH` | Install agency, or override `PRINBOX_REVIEW_AGENT` |
-| Review tab opens but plugin fetch fails | No access to `1ES-microsoft/ai-plugins` | Set `PRINBOX_REVIEW_PLUGIN=local:<path>` (see [README § overrides](README.md#review-launcher-overrides)) |
-| Review tab opens but model call fails | `agency` not authenticated to the chosen model | Authenticate it, or change `PRINBOX_REVIEW_MODEL` |
+| Review tab opens then exits ("copilot: command not found") | Review CLI not on `PATH` | Install the GitHub Copilot CLI, or set `PRINBOX_REVIEW_CLI` (Microsoft: `agency copilot`) |
+| Review tab opens but plugin fetch fails | No access to the configured plugin source | Set `PRINBOX_REVIEW_PLUGIN=local:<path>` (see [README § overrides](README.md#review-launcher-overrides)) |
+| Review tab opens but model call fails | Review CLI not authenticated to the chosen model | Authenticate it, or change `PRINBOX_REVIEW_MODEL` |
 | Web says "port already in use" | Stale Kestrel still listening | `Get-NetTCPConnection -LocalPort 7341 \| %{ Stop-Process -Id $_.OwningProcess -Force }` |
 | Build fails with `MSB3027`/`MSB3021` (dll locked) | The running Web UI holds the dll lock | Stop it first: find PID on port 7341, `Stop-Process -Id <pid> -Force`, then rebuild |
 | "✓ N ready" pill on a PR but Threads page shows no done badge | The thread's latest reply just dropped in — caches are eventually consistent; **Refresh now** reconciles | |

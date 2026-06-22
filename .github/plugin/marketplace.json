@@ -6,7 +6,7 @@
   },
   "owner": {
     "name": "pr-inbox maintainers",
-    "email": "jmprieur@microsoft.com"
+    "email": "jmprieur@users.noreply.github.com"
   },
   "plugins": [
     {
@@ -17,7 +17,7 @@
       "description": "Dual-model code review: orchestrate two independent reviewer models over the same change set, then post the cross-referenced verdict as inline GitHub PR comments.",
       "author": {
         "name": "pr-inbox maintainers",
-        "email": "jmprieur@microsoft.com"
+        "email": "jmprieur@users.noreply.github.com"
       },
       "keywords": [
         "code-review",
