@@ -115,7 +115,7 @@ public sealed class ReviewLauncher : IReviewLauncher, IAsyncDisposable
 
     /// <summary>
     /// Short author handle for the tab title: the email local part's first
-    /// segment (<c>jean-marc.prieur@ms.com → jean-marc</c>), or, for a bare
+    /// segment (<c>jean-marc.prieur@example.com → jean-marc</c>), or, for a bare
     /// login, the alias itself (<c>octocat → octocat</c>). EMU / proxima
     /// logins carry an <c>_&lt;org&gt;</c> suffix
     /// (<c>jmprieur_microsoft → jmprieur</c>); the <c>_microsoft</c> suffix is
@@ -142,7 +142,7 @@ public sealed class ReviewLauncher : IReviewLauncher, IAsyncDisposable
 
     /// <summary>
     /// Repo name only — drops the <c>owner/</c> (GitHub) or <c>project/</c>
-    /// (ADO) prefix: <c>agency-microsoft/playground → playground</c>.
+    /// (ADO) prefix: <c>octocat/playground → playground</c>.
     /// </summary>
     internal static string ShortRepo(string? displayRepo)
     {

@@ -66,8 +66,8 @@ public class InboxFiltersTests
     [InlineData("gh.com:work", "src-public")]
     [InlineData("ghe.contoso", "src-ghe")]
     [InlineData("ghe.northwind.com", "src-ghe")]
-    [InlineData("ado:mseng", "src-ado")]
-    [InlineData("ado:msazure/foo", "src-ado")]
+    [InlineData("ado:fabrikam", "src-ado")]
+    [InlineData("ado:contoso/foo", "src-ado")]
     [InlineData("unknown:thing", "src-other")]
     public void SourceClassOf_maps_known_prefixes(string sourceId, string expected)
         => InboxFilters.SourceClassOf(sourceId).Should().Be(expected);
@@ -130,7 +130,7 @@ public class InboxFiltersTests
 
         filters.ShouldShow(MakePr(sourceId: "gh.com:public")).Should().BeTrue();
         filters.ShouldShow(MakePr(sourceId: "gh.com:emu")).Should().BeFalse();
-        filters.ShouldShow(MakePr(sourceId: "ado:mseng")).Should().BeFalse();
+        filters.ShouldShow(MakePr(sourceId: "ado:fabrikam")).Should().BeFalse();
     }
 
     [Fact]
@@ -194,7 +194,7 @@ public class InboxFiltersTests
     public void ClassifyConfig_ado_is_always_src_ado()
         => InboxFilters.ClassifyConfig(new SourceConfig
         {
-            Id = "ado:mseng/foo",
+            Id = "ado:fabrikam/foo",
             Kind = SourceConfigKind.AzureDevOps,
             Host = null,
             Identity = "default",
@@ -206,7 +206,7 @@ public class InboxFiltersTests
         {
             Id = "ghe.microsoft",
             Kind = SourceConfigKind.GitHubEnterprise,
-            Host = "microsoft.ghe.com",
+            Host = "ghe.example.com",
             Identity = "jmprieur_microsoft",
         }).Should().Be("src-ghe");
 

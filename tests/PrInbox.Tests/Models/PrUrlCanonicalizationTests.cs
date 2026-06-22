@@ -33,11 +33,11 @@ public class PrUrlCanonicalizationTests
 
     [Theory]
     [InlineData(
-        "https://microsoft.ghe.com/Azure/azure-sdk-for-net/pull/12345",
-        "https://microsoft.ghe.com/Azure/azure-sdk-for-net/pull/12345")]
+        "https://ghe.example.com/Azure/azure-sdk-for-net/pull/12345",
+        "https://ghe.example.com/Azure/azure-sdk-for-net/pull/12345")]
     [InlineData(
-        "https://MICROSOFT.GHE.COM/Azure/azure-sdk-for-net/pull/12345/",
-        "https://microsoft.ghe.com/Azure/azure-sdk-for-net/pull/12345")]
+        "https://GHE.EXAMPLE.COM/Azure/azure-sdk-for-net/pull/12345/",
+        "https://ghe.example.com/Azure/azure-sdk-for-net/pull/12345")]
     public void Canonicalize_Normalizes_Ghe_Urls(string input, string expected)
     {
         PrUrl.Canonicalize(input).Should().Be(expected);
@@ -45,14 +45,14 @@ public class PrUrlCanonicalizationTests
 
     [Theory]
     [InlineData(
-        "https://dev.azure.com/mseng/Context/_git/Private/pullrequest/1234",
-        "https://dev.azure.com/mseng/Context/_git/Private/pullrequest/1234")]
+        "https://dev.azure.com/fabrikam/Context/_git/Private/pullrequest/1234",
+        "https://dev.azure.com/fabrikam/Context/_git/Private/pullrequest/1234")]
     [InlineData(
         "https://contoso.visualstudio.com/MyProject/_git/MyRepo/pullrequest/42",
         "https://dev.azure.com/contoso/MyProject/_git/MyRepo/pullrequest/42")]
     [InlineData(
-        "https://dev.azure.com/mseng/Context/_git/Private/pullrequest/1234/",
-        "https://dev.azure.com/mseng/Context/_git/Private/pullrequest/1234")]
+        "https://dev.azure.com/fabrikam/Context/_git/Private/pullrequest/1234/",
+        "https://dev.azure.com/fabrikam/Context/_git/Private/pullrequest/1234")]
     public void Canonicalize_Normalizes_Ado_Urls(string input, string expected)
     {
         PrUrl.Canonicalize(input).Should().Be(expected);
@@ -91,22 +91,22 @@ public class PrUrlCanonicalizationTests
     [Fact]
     public void Parse_Returns_Components_For_GitHub_Url()
     {
-        var parsed = PrUrl.Parse("https://github.com/agency-microsoft/playground/pull/4248");
+        var parsed = PrUrl.Parse("https://github.com/octocat/playground/pull/4248");
         parsed.Platform.Should().Be(PrPlatform.GitHub);
         parsed.Host.Should().Be("github.com");
-        parsed.Owner.Should().Be("agency-microsoft");
+        parsed.Owner.Should().Be("octocat");
         parsed.Project.Should().BeNull();
         parsed.Repo.Should().Be("playground");
         parsed.Number.Should().Be(4248);
-        parsed.Canonical.Should().Be("https://github.com/agency-microsoft/playground/pull/4248");
+        parsed.Canonical.Should().Be("https://github.com/octocat/playground/pull/4248");
     }
 
     [Fact]
     public void Parse_Returns_Components_For_Ghe_Url()
     {
-        var parsed = PrUrl.Parse("https://microsoft.ghe.com/Azure/azure-sdk-for-net/pull/12345");
+        var parsed = PrUrl.Parse("https://ghe.example.com/Azure/azure-sdk-for-net/pull/12345");
         parsed.Platform.Should().Be(PrPlatform.GitHubEnterprise);
-        parsed.Host.Should().Be("microsoft.ghe.com");
+        parsed.Host.Should().Be("ghe.example.com");
         parsed.Owner.Should().Be("Azure");
         parsed.Repo.Should().Be("azure-sdk-for-net");
         parsed.Number.Should().Be(12345);
@@ -115,10 +115,10 @@ public class PrUrlCanonicalizationTests
     [Fact]
     public void Parse_Returns_Components_For_Ado_Url()
     {
-        var parsed = PrUrl.Parse("https://dev.azure.com/mseng/Context/_git/Private/pullrequest/1234");
+        var parsed = PrUrl.Parse("https://dev.azure.com/fabrikam/Context/_git/Private/pullrequest/1234");
         parsed.Platform.Should().Be(PrPlatform.AzureDevOps);
         parsed.Host.Should().Be("dev.azure.com");
-        parsed.Owner.Should().Be("mseng");
+        parsed.Owner.Should().Be("fabrikam");
         parsed.Project.Should().Be("Context");
         parsed.Repo.Should().Be("Private");
         parsed.Number.Should().Be(1234);

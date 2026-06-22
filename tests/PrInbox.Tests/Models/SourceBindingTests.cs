@@ -14,15 +14,15 @@ public class SourceBindingTests
     [Fact]
     public void SourceId_Combines_Host_And_Identity_For_Ghe()
     {
-        var sb = new SourceBinding(SourceKind.GitHubEnterprise, "microsoft.ghe.com", "jean-marc-prieur");
-        sb.SourceId.Should().Be("microsoft.ghe.com:jean-marc-prieur");
+        var sb = new SourceBinding(SourceKind.GitHubEnterprise, "ghe.example.com", "jean-marc-prieur");
+        sb.SourceId.Should().Be("ghe.example.com:jean-marc-prieur");
     }
 
     [Fact]
     public void SourceId_Uses_Org_As_Identity_For_Ado()
     {
-        var sb = new SourceBinding(SourceKind.AzureDevOps, "dev.azure.com", "mseng");
-        sb.SourceId.Should().Be("dev.azure.com:mseng");
+        var sb = new SourceBinding(SourceKind.AzureDevOps, "dev.azure.com", "fabrikam");
+        sb.SourceId.Should().Be("dev.azure.com:fabrikam");
     }
 
     [Fact]

@@ -116,7 +116,7 @@ public sealed class GitHubReviewPublisherTests
         var handler = new RecordingHandler(req =>
         {
             req.RequestUri!.ToString().Should().Be(
-                "https://microsoft.ghe.com/api/v3/repos/bic/IOM-Libs/pulls/585/reviews");
+                "https://ghe.example.com/api/v3/repos/octocat/hello-world/pulls/585/reviews");
             return new HttpResponseMessage(HttpStatusCode.Created)
             {
                 Content = new StringContent(@"{""id"":1,""html_url"":""url""}", System.Text.Encoding.UTF8, "application/json"),
@@ -126,12 +126,12 @@ public sealed class GitHubReviewPublisherTests
         var token = new FakeTokenProvider(_ => "tk");
 
         var publisher = new GitHubReviewPublisher(
-            token, http, isEnterprise: true, host: "microsoft.ghe.com",
+            token, http, isEnterprise: true, host: "ghe.example.com",
             identityUsed: "jean-marc-prieur",
             log: NullLogger<GitHubReviewPublisher>.Instance);
 
         var req = MakeRequest(
-            url: "https://microsoft.ghe.com/bic/IOM-Libs/pull/585",
+            url: "https://ghe.example.com/octocat/hello-world/pull/585",
             findings: new[] { Finding("f01") });
 
         var result = await publisher.PublishAsync(req, CancellationToken.None);
@@ -420,18 +420,18 @@ public sealed class GitHubReviewPublisherTests
         var token = new FakeTokenProvider(_ => "tk");
 
         var publisher = new GitHubReviewPublisher(
-            token, http, isEnterprise: true, host: "microsoft.ghe.com",
+            token, http, isEnterprise: true, host: "ghe.example.com",
             identityUsed: "jmprieur_microsoft",
             log: NullLogger<GitHubReviewPublisher>.Instance);
 
         await publisher.ResolveThreadsAsync(
             new ThreadResolveRequest(
-                PrUrl: "https://microsoft.ghe.com/owner/repo/pull/42",
+                PrUrl: "https://ghe.example.com/owner/repo/pull/42",
                 ThreadNodeIds: new[] { "PRRT_one" },
                 DryRun: false),
             CancellationToken.None);
 
-        observed.Should().Be("https://microsoft.ghe.com/api/graphql");
+        observed.Should().Be("https://ghe.example.com/api/graphql");
     }
 
     [Fact]

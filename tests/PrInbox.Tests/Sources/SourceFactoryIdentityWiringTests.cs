@@ -122,9 +122,9 @@ public sealed class SourceFactoryIdentityWiringTests
         var config = new PrInboxConfig();
         config.Sources.Add(new SourceConfig
         {
-            Id = "ghe.microsoft.ghe.com:jean-marc-prieur",
+            Id = "ghe.ghe.example.com:jean-marc-prieur",
             Kind = SourceConfigKind.GitHubEnterprise,
-            Host = "microsoft.ghe.com",
+            Host = "ghe.example.com",
             Identity = "jean-marc-prieur",
             Enabled = true,
         });

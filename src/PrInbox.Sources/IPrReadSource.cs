@@ -35,7 +35,7 @@ public interface IPrReadSource
 {
     /// <summary>
     /// Stable identifier for this source instance (e.g. <c>gh.com:emu</c>,
-    /// <c>ghe.proxima</c>, <c>ado:mseng</c>).
+    /// <c>ghe.proxima</c>, <c>ado:fabrikam</c>).
     /// </summary>
     string SourceId { get; }
 

@@ -13,7 +13,7 @@ namespace PrInbox.Core.Models;
 /// For GitHub.com and GHE, <see cref="Identity"/> is the <c>gh</c> CLI user
 /// login (e.g. <c>jmprieur_microsoft</c>). For Azure DevOps, <see cref="Host"/>
 /// is fixed to <c>dev.azure.com</c> and <see cref="Identity"/> is the org name
-/// (e.g. <c>mseng</c>) since ADO PR discovery is org-scoped.
+/// (e.g. <c>fabrikam</c>) since ADO PR discovery is org-scoped.
 /// </para>
 /// </remarks>
 /// <param name="Kind">Source kind.</param>
@@ -24,8 +24,8 @@ public sealed record SourceBinding(SourceKind Kind, string Host, string Identity
     /// <summary>
     /// Computed source id: <c>{host}:{identity}</c>. Examples:
     /// <c>github.com:jmprieur_microsoft</c>,
-    /// <c>microsoft.ghe.com:jean-marc-prieur</c>,
-    /// <c>dev.azure.com:mseng</c>.
+    /// <c>ghe.example.com:jean-marc-prieur</c>,
+    /// <c>dev.azure.com:fabrikam</c>.
     /// </summary>
     public string SourceId => $"{Host}:{Identity}";
 

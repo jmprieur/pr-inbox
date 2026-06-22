@@ -119,12 +119,12 @@ public sealed class ConfigServiceTests : IDisposable
     {
         var svc = new ConfigService(_path);
 
-        var added = await svc.AddAdoProjectAsync("mseng", "Context");
+        var added = await svc.AddAdoProjectAsync("fabrikam", "Context");
 
         added.Should().BeTrue();
         var cfg = await svc.GetAsync();
         cfg.Ado.Projects.Should().HaveCount(1);
-        cfg.Ado.Projects[0].Org.Should().Be("mseng");
+        cfg.Ado.Projects[0].Org.Should().Be("fabrikam");
         cfg.Ado.Projects[0].Project.Should().Be("Context");
     }
 
@@ -132,9 +132,9 @@ public sealed class ConfigServiceTests : IDisposable
     public async Task AddAdoProjectAsync_Duplicate_Returns_False_CaseInsensitive()
     {
         var svc = new ConfigService(_path);
-        await svc.AddAdoProjectAsync("mseng", "Context");
+        await svc.AddAdoProjectAsync("fabrikam", "Context");
 
-        var second = await svc.AddAdoProjectAsync("MSENG", "context");
+        var second = await svc.AddAdoProjectAsync("FABRIKAM", "context");
 
         second.Should().BeFalse();
         (await svc.GetAsync()).Ado.Projects.Should().HaveCount(1);
@@ -164,9 +164,9 @@ public sealed class ConfigServiceTests : IDisposable
     public async Task RemoveAdoProjectAsync_Removes_Entry()
     {
         var svc = new ConfigService(_path);
-        await svc.AddAdoProjectAsync("mseng", "Context");
+        await svc.AddAdoProjectAsync("fabrikam", "Context");
 
-        var removed = await svc.RemoveAdoProjectAsync("mseng", "Context");
+        var removed = await svc.RemoveAdoProjectAsync("fabrikam", "Context");
 
         removed.Should().BeTrue();
         (await svc.GetAsync()).Ado.Projects.Should().BeEmpty();
@@ -177,10 +177,10 @@ public sealed class ConfigServiceTests : IDisposable
     {
         var svc = new ConfigService(_path);
 
-        await svc.SetIgnoredReposAsync(new[] { "1ES/Spmi", "  ", "", "  contoso/foo  " });
+        await svc.SetIgnoredReposAsync(new[] { "contoso/widgets", "  ", "", "  contoso/foo  " });
 
         var cfg = await svc.GetAsync();
-        cfg.IgnoredRepos.Should().BeEquivalentTo(new[] { "1ES/Spmi", "contoso/foo" });
+        cfg.IgnoredRepos.Should().BeEquivalentTo(new[] { "contoso/widgets", "contoso/foo" });
     }
 
     [Fact]
@@ -233,12 +233,12 @@ public sealed class ConfigServiceTests : IDisposable
         var svc = new ConfigService(singleton, _path);
 
         await svc.AddGitHubSourceAsync(SourceConfigKind.GitHub, "github.com");
-        await svc.AddAdoProjectAsync("mseng", "Context");
+        await svc.AddAdoProjectAsync("fabrikam", "Context");
         await svc.SetIgnoredReposAsync(new[] { "skip/me" });
 
         singleton.Sources.Should().HaveCount(1);
         singleton.Sources[0].Id.Should().Be("gh.com");
-        singleton.Ado.Projects.Should().ContainSingle(p => p.Org == "mseng" && p.Project == "Context");
+        singleton.Ado.Projects.Should().ContainSingle(p => p.Org == "fabrikam" && p.Project == "Context");
         singleton.IgnoredRepos.Should().ContainSingle(s => s == "skip/me");
     }
 
@@ -382,11 +382,11 @@ public sealed class ConfigServiceTests : IDisposable
     {
         var svc = new ConfigService(_path);
 
-        await svc.AddGitHubSourceWithIdentityAsync(SourceConfigKind.GitHubEnterprise, "microsoft.ghe.com", "jean-marc-prieur");
+        await svc.AddGitHubSourceWithIdentityAsync(SourceConfigKind.GitHubEnterprise, "ghe.example.com", "jean-marc-prieur");
 
         var cfg = await svc.GetAsync();
-        cfg.Sources[0].Id.Should().Be("ghe.microsoft.ghe.com:jean-marc-prieur");
-        cfg.Sources[0].Host.Should().Be("microsoft.ghe.com");
+        cfg.Sources[0].Id.Should().Be("ghe.ghe.example.com:jean-marc-prieur");
+        cfg.Sources[0].Host.Should().Be("ghe.example.com");
         cfg.Sources[0].Identity.Should().Be("jean-marc-prieur");
     }
 
@@ -547,15 +547,15 @@ public sealed class ConfigServiceTests : IDisposable
     public async Task BindGitHubSourceToIdentityAsync_Works_For_Ghe()
     {
         var svc = new ConfigService(_path);
-        await svc.AddGitHubSourceAsync(SourceConfigKind.GitHubEnterprise, "microsoft.ghe.com", id: "ghe.microsoft.ghe.com");
+        await svc.AddGitHubSourceAsync(SourceConfigKind.GitHubEnterprise, "ghe.example.com", id: "ghe.ghe.example.com");
 
-        var result = await svc.BindGitHubSourceToIdentityAsync("ghe.microsoft.ghe.com", "jean-marc");
+        var result = await svc.BindGitHubSourceToIdentityAsync("ghe.ghe.example.com", "jean-marc");
 
         result.Should().Be(BindIdentityResult.Migrated);
         var cfg = await svc.GetAsync();
         cfg.Sources.Should().ContainSingle();
         cfg.Sources[0].Kind.Should().Be(SourceConfigKind.GitHubEnterprise);
-        cfg.Sources[0].Host.Should().Be("microsoft.ghe.com");
+        cfg.Sources[0].Host.Should().Be("ghe.example.com");
         cfg.Sources[0].Identity.Should().Be("jean-marc");
     }
 }

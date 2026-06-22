@@ -28,7 +28,7 @@ public sealed class PrInboxConfig
 
     /// <summary>
     /// Regex patterns. Any PR whose display repo (e.g.
-    /// <c>1ES/Spmi</c>) fully matches one of these is hidden from the
+    /// <c>contoso/widgets</c>) fully matches one of these is hidden from the
     /// inbox by default. Toggle "Show ignored" in the UI to reveal.
     /// Data is still synced; this is a UI-level filter.
     /// </summary>
@@ -108,7 +108,7 @@ public sealed class PrInboxConfig
 /// </summary>
 public sealed class SourceConfig
 {
-    /// <summary>Stable id, e.g. <c>gh.com</c>, <c>ghe.contoso.com</c>, <c>ado:mseng</c>.</summary>
+    /// <summary>Stable id, e.g. <c>gh.com</c>, <c>ghe.contoso.com</c>, <c>ado:fabrikam</c>.</summary>
     public required string Id { get; init; }
 
     /// <summary>The kind of platform.</summary>
@@ -177,7 +177,7 @@ public sealed class ReviewLauncherSettings
     /// <list type="bullet">
     ///   <item><c>market:dual-review@jmprieur/pr-inbox</c></item>
     ///   <item><c>github:jmprieur/pr-inbox:plugins/dual-review</c></item>
-    ///   <item><c>local:d:/1es/pr-inbox/plugins/dual-review</c></item>
+    ///   <item><c>local:/path/to/pr-inbox/plugins/dual-review</c></item>
     ///   <item><c>ado-git:&lt;org&gt;/&lt;project&gt;/&lt;repo&gt;:&lt;path&gt;</c></item>
     /// </list>
     /// </summary>

@@ -30,18 +30,18 @@ public class RepositoryRoundTripTests : IAsyncLifetime
     private static PullRequestRow SampleRow(PrIdentity? id = null)
     {
         id ??= new PrIdentity(
-            Url: "https://github.com/agency-microsoft/playground/pull/4248",
+            Url: "https://github.com/octocat/playground/pull/4248",
             Stable: "gh.com:100#4248");
 
         return new PullRequestRow(
             Identity: id.Value,
             SourceKind: SourceKind.GitHub,
             SourceId: "gh.com",
-            DisplayRepo: "agency-microsoft/playground",
+            DisplayRepo: "octocat/playground",
             Number: 4248,
             Title: "Sample PR",
             AuthorLogin: "octocat",
-            Url: "https://github.com/agency-microsoft/playground/pull/4248",
+            Url: "https://github.com/octocat/playground/pull/4248",
             Status: PullRequestStatus.Open,
             TrackingReason: TrackingReason.Assigned,
             IdentityUsed: "jmprieur_public",
@@ -1233,7 +1233,7 @@ public class RepositoryRoundTripTests : IAsyncLifetime
         var tagRepo = new TagRepository(_db);
         var rowA = SampleRow();
         var rowB = SampleRow(new PrIdentity(
-            Url: "https://github.com/agency-microsoft/playground/pull/9999",
+            Url: "https://github.com/octocat/playground/pull/9999",
             Stable: "gh.com:100#9999"));
         await prRepo.UpsertAsync(rowA, CancellationToken.None);
         await prRepo.UpsertAsync(rowB, CancellationToken.None);

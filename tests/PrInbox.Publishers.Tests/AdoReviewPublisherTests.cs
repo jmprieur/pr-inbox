@@ -23,7 +23,7 @@ public sealed class AdoReviewPublisherTests
             log: NullLogger<AdoReviewPublisher>.Instance);
 
         var req = new PublishRequest(
-            PrUrl: "https://dev.azure.com/mseng/Context/_git/Private/pullrequest/100",
+            PrUrl: "https://dev.azure.com/fabrikam/Context/_git/Private/pullrequest/100",
             RunId: 7,
             HeadShaAtAuthoring: "abc123",
             ReviewBodyHeader: "header",
@@ -80,7 +80,7 @@ public sealed class AdoReviewPublisherTests
             log: NullLogger<AdoReviewPublisher>.Instance);
 
         var req = new PublishRequest(
-            PrUrl: "https://dev.azure.com/mseng/Context/_git/Private/pullrequest/100",
+            PrUrl: "https://dev.azure.com/fabrikam/Context/_git/Private/pullrequest/100",
             RunId: 7,
             HeadShaAtAuthoring: "abc123",
             ReviewBodyHeader: "**header**",
@@ -109,7 +109,7 @@ public sealed class AdoReviewPublisherTests
             log: NullLogger<AdoReviewPublisher>.Instance);
 
         var req = new PublishRequest(
-            PrUrl: "https://dev.azure.com/mseng/Context/_git/Private/pullrequest/100",
+            PrUrl: "https://dev.azure.com/fabrikam/Context/_git/Private/pullrequest/100",
             RunId: 7,
             HeadShaAtAuthoring: "abc123",
             ReviewBodyHeader: "header",

@@ -186,7 +186,7 @@ else
         @if (_showAdoForm)
         {
             <div class="settings-inline-form">
-                <label>Org   <input @bind="_adoOrg"     placeholder="mseng" /></label>
+                <label>Org   <input @bind="_adoOrg"     placeholder="fabrikam" /></label>
                 <label>Project <input @bind="_adoProject" placeholder="Context" /></label>
                 <div class="settings-inline-form-actions">
                     <button @onclick="AddAdoAsync" disabled="@_busy">Add</button>
@@ -323,7 +323,7 @@ else
 
     <section class="settings-section">
         <h2>Ignored repos</h2>
-        <p class="muted">One regex per line. PRs whose display repo (e.g. <code>1ES/Spmi</code>) matches one of these are hidden by default in the Inbox.</p>
+        <p class="muted">One regex per line. PRs whose display repo (e.g. <code>contoso/widgets</code>) matches one of these are hidden by default in the Inbox.</p>
         <textarea class="settings-textarea" rows="6" @bind="_ignoredReposText"></textarea>
         <div class="settings-actions">
             <button @onclick="SaveIgnoredReposAsync" disabled="@_busy">Save</button>

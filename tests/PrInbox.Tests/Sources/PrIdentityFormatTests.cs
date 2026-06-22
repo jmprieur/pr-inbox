@@ -12,8 +12,8 @@ public class PrIdentityFormatTests
     [Fact]
     public void GitHub_Url_Has_Expected_Shape()
     {
-        var url = PrIdentity.FormatGitHubUrl("agency-microsoft", "playground", 4248);
-        url.Should().Be("https://github.com/agency-microsoft/playground/pull/4248");
+        var url = PrIdentity.FormatGitHubUrl("octocat", "playground", 4248);
+        url.Should().Be("https://github.com/octocat/playground/pull/4248");
     }
 
     [Fact]
@@ -40,8 +40,8 @@ public class PrIdentityFormatTests
     [Fact]
     public void Ado_Url_Has_Org_Project_Repo_Number()
     {
-        var url = PrIdentity.FormatAdoUrl("mseng", "Context", "Private", 1234);
-        url.Should().Be("https://dev.azure.com/mseng/Context/_git/Private/pullrequest/1234");
+        var url = PrIdentity.FormatAdoUrl("fabrikam", "Context", "Private", 1234);
+        url.Should().Be("https://dev.azure.com/fabrikam/Context/_git/Private/pullrequest/1234");
     }
 
     [Fact]
@@ -49,8 +49,8 @@ public class PrIdentityFormatTests
     {
         var project = Guid.Parse("11111111-1111-1111-1111-111111111111");
         var repo = Guid.Parse("22222222-2222-2222-2222-222222222222");
-        var stable = PrIdentity.FormatAdoStable("mseng", project, repo, 1234);
-        stable.Should().Be("ado:mseng/11111111-1111-1111-1111-111111111111/22222222-2222-2222-2222-222222222222#1234");
+        var stable = PrIdentity.FormatAdoStable("fabrikam", project, repo, 1234);
+        stable.Should().Be("ado:fabrikam/11111111-1111-1111-1111-111111111111/22222222-2222-2222-2222-222222222222#1234");
     }
 
     [Fact]
