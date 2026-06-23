@@ -169,12 +169,15 @@ public sealed class BotConfig
 public sealed class ReviewLauncherSettings
 {
     /// <summary>
-    /// The full command the launcher runs, with <c>{plugin}</c>,
-    /// <c>{model}</c>, and <c>{agent}</c> placeholders substituted from
-    /// <see cref="Plugin"/> / <see cref="Model"/> / <see cref="Agent"/>.
-    /// Defaults to the public GitHub Copilot CLI. Microsoft users point it
-    /// at the <c>agency</c> wrapper and add wrapper-only flags such as
-    /// <c>--mcp</c>, e.g.
+    /// The full command the launcher runs, with <c>{plugindir}</c>,
+    /// <c>{plugin}</c>, <c>{model}</c>, and <c>{agent}</c> placeholders.
+    /// <c>{plugin}</c>/<c>{model}</c>/<c>{agent}</c> come from
+    /// <see cref="Plugin"/> / <see cref="Model"/> / <see cref="Agent"/>;
+    /// <c>{plugindir}</c> is the local path to the bundled dual-review
+    /// plugin, resolved by the launcher at run time. Defaults to the public
+    /// GitHub Copilot CLI, which loads the plugin from a local directory
+    /// (<c>--plugin-dir</c>). Microsoft users point it at the <c>agency</c>
+    /// wrapper, e.g.
     /// <c>agency copilot --mcp workiq --mcp teams --plugin {plugin} --model {model} --agent {agent}</c>.
     /// The template owns the CLI and its flag syntax, so no flag name is
     /// hardcoded in the launcher.
@@ -185,14 +188,17 @@ public sealed class ReviewLauncherSettings
     /// without a process restart.
     /// </remarks>
     public string LaunchCommand { get; set; } =
-        "copilot --plugin {plugin} --model {model} --agent {agent}";
+        "copilot --plugin-dir {plugindir} --model {model} --agent {agent}";
 
     /// <summary>
-    /// Returns <see cref="LaunchCommand"/> with the <c>{plugin}</c>,
-    /// <c>{model}</c>, and <c>{agent}</c> placeholders substituted.
+    /// Returns <see cref="LaunchCommand"/> with the <c>{plugindir}</c>,
+    /// <c>{plugin}</c>, <c>{model}</c>, and <c>{agent}</c> placeholders
+    /// substituted. <paramref name="pluginDir"/> is the resolved local path
+    /// to the bundled plugin (empty when unavailable).
     /// </summary>
-    public string ResolveLaunchCommand() =>
+    public string ResolveLaunchCommand(string? pluginDir = null) =>
         LaunchCommand
+            .Replace("{plugindir}", pluginDir ?? string.Empty)
             .Replace("{plugin}", Plugin)
             .Replace("{model}", Model)
             .Replace("{agent}", Agent);

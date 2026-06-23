@@ -249,10 +249,12 @@ public sealed class ReviewLauncher : IReviewLauncher, IAsyncDisposable
         }
 
         var rl = _config.ReviewLauncher;
-        // The launch command (with {plugin}/{model}/{agent} substituted) owns
-        // the CLI and its flag syntax, so the launcher hardcodes no flag names.
-        // Strip embedded quotes so the value survives the wt/pwsh command line.
-        var launchCommand = rl.ResolveLaunchCommand().Replace("\"", "");
+        // The launch command (with {plugindir}/{plugin}/{model}/{agent}
+        // substituted) owns the CLI and its flag syntax, so the launcher
+        // hardcodes no flag names. Strip embedded quotes so the value survives
+        // the wt/pwsh command line.
+        var pluginDir = FindPluginDir();
+        var launchCommand = rl.ResolveLaunchCommand(pluginDir).Replace("\"", "");
         // Quote values defensively in case a user puts spaces in them. The
         // tab title is also re-used as the underlying agent's session name
         // (--name) so each review claims its own copilot session and the
@@ -367,6 +369,28 @@ public sealed class ReviewLauncher : IReviewLauncher, IAsyncDisposable
             dir = Path.GetDirectoryName(dir);
         }
         return null;
+    }
+
+    /// <summary>
+    /// Resolves the local path to the bundled dual-review plugin for the
+    /// <c>{plugindir}</c> placeholder (used by the public Copilot CLI
+    /// <c>--plugin-dir</c> flag). Honours <c>PRINBOX_PLUGIN_DIR</c>, else walks
+    /// up from the current binary towards <c>plugins/dual-review</c>. Returns
+    /// an empty string when not found so the placeholder resolves to nothing.
+    /// </summary>
+    private static string FindPluginDir()
+    {
+        var envPath = Environment.GetEnvironmentVariable("PRINBOX_PLUGIN_DIR");
+        if (!string.IsNullOrEmpty(envPath) && Directory.Exists(envPath)) return envPath;
+
+        var dir = AppContext.BaseDirectory;
+        for (var i = 0; i < 8 && dir is not null; i++)
+        {
+            var candidate = Path.Combine(dir, "plugins", "dual-review");
+            if (Directory.Exists(candidate)) return candidate;
+            dir = Path.GetDirectoryName(dir);
+        }
+        return string.Empty;
     }
 
     private static string? ResolveOnPath(string exe)

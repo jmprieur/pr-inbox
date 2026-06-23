@@ -28,9 +28,10 @@
     Absolute path to the run directory. Required.
 
 .PARAMETER LaunchCommand
-    The full command that runs the review, with {plugin} / {model} /
-    {agent} placeholders. Defaults to the public GitHub Copilot CLI:
-    `copilot --plugin {plugin} --model {model} --agent {agent}`.
+    The full command that runs the review, with {plugindir} / {plugin} /
+    {model} / {agent} placeholders. Defaults to the public GitHub Copilot
+    CLI, which loads the plugin from a local directory:
+    `copilot --plugin-dir {plugindir} --model {model} --agent {agent}`.
     Microsoft users set PRINBOX_REVIEW_COMMAND (or the Settings field)
     to e.g. `agency copilot --mcp workiq --mcp teams --plugin {plugin}
     --model {model} --agent {agent}`.
@@ -78,16 +79,25 @@ param(
 if (-not $Agent)  { $Agent  = 'dual-review:dual-model-review' }
 if (-not $Plugin) { $Plugin = 'market:dual-review@jmprieur/pr-inbox' }
 if (-not $Model)  { $Model  = 'claude-opus-4.8' }
-# Default launch command targets the public GitHub Copilot CLI. Microsoft
-# users set PRINBOX_REVIEW_COMMAND (or the Settings field) to e.g.
+# Default launch command targets the public GitHub Copilot CLI, which loads
+# the plugin from a local directory. Microsoft users set PRINBOX_REVIEW_COMMAND
+# (or the Settings field) to e.g.
 # 'agency copilot --mcp workiq --mcp teams --plugin {plugin} --model {model} --agent {agent}'.
 if (-not $LaunchCommand) {
-    $LaunchCommand = 'copilot --plugin {plugin} --model {model} --agent {agent}'
+    $LaunchCommand = 'copilot --plugin-dir {plugindir} --model {model} --agent {agent}'
 }
+
+# Resolve the bundled plugin path for the {plugindir} placeholder (the public
+# copilot --plugin-dir flag). The web launcher usually substitutes this
+# already; resolving here keeps standalone runs working.
+$pluginDir = ''
+$bundledPlugin = Join-Path $PSScriptRoot '..\plugins\dual-review'
+if (Test-Path $bundledPlugin) { $pluginDir = (Resolve-Path $bundledPlugin).Path }
 
 # Resolve placeholders. Idempotent: when the web launcher already substituted
 # them, no placeholders remain and these replacements are no-ops.
 $resolvedCommand = $LaunchCommand.
+    Replace('{plugindir}', $pluginDir).
     Replace('{plugin}', $Plugin).
     Replace('{model}',  $Model).
     Replace('{agent}',  $Agent)

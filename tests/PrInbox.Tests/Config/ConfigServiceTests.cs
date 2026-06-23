@@ -328,7 +328,7 @@ public sealed class ConfigServiceTests : IDisposable
         var singleton = new PrInboxConfig();
         var svc = new ConfigService(singleton, _path);
         singleton.ReviewLauncher.LaunchCommand
-            .Should().Be("copilot --plugin {plugin} --model {model} --agent {agent}"); // default
+            .Should().Be("copilot --plugin-dir {plugindir} --model {model} --agent {agent}"); // default
 
         var custom = "agency copilot --mcp workiq --plugin {plugin} --model {model} --agent {agent}";
         await svc.SetReviewLauncherCommandAsync(custom);
@@ -339,7 +339,7 @@ public sealed class ConfigServiceTests : IDisposable
         // Blank restores the default.
         await svc.SetReviewLauncherCommandAsync("   ");
         singleton.ReviewLauncher.LaunchCommand
-            .Should().Be("copilot --plugin {plugin} --model {model} --agent {agent}");
+            .Should().Be("copilot --plugin-dir {plugindir} --model {model} --agent {agent}");
     }
 
     [Fact]
@@ -347,15 +347,15 @@ public sealed class ConfigServiceTests : IDisposable
     {
         var rl = new ReviewLauncherSettings
         {
-            LaunchCommand = "agency copilot --mcp teams --plugin {plugin} --model {model} --agent {agent}",
+            LaunchCommand = "x {plugindir} {plugin} {model} {agent}",
             Plugin = "market:dual-review@jmprieur/pr-inbox",
             Model = "claude-opus-4.8",
             Agent = "dual-review:dual-model-review",
         };
 
-        rl.ResolveLaunchCommand().Should().Be(
-            "agency copilot --mcp teams --plugin market:dual-review@jmprieur/pr-inbox " +
-            "--model claude-opus-4.8 --agent dual-review:dual-model-review");
+        rl.ResolveLaunchCommand("C:/repo/plugins/dual-review").Should().Be(
+            "x C:/repo/plugins/dual-review market:dual-review@jmprieur/pr-inbox " +
+            "claude-opus-4.8 dual-review:dual-model-review");
     }
 
     [Theory]

@@ -215,14 +215,16 @@ Both surfaces read/write the same `%APPDATA%\PrInbox\config.json`. Use whichever
 
 The review **launch command** is configurable in the web UI under
 **Settings → Review launcher → Launch command**. It defaults to the public
-GitHub Copilot CLI and uses `{plugin}` / `{model}` / `{agent}` placeholders:
+GitHub Copilot CLI, which loads the dual-review plugin from a local directory
+(`--plugin-dir`) and selects its agent by id. Placeholders: `{plugindir}` (the
+bundled plugin path, resolved automatically), `{plugin}`, `{model}`, `{agent}`:
 
 ```
-copilot --plugin {plugin} --model {model} --agent {agent}
+copilot --plugin-dir {plugindir} --model {model} --agent {agent}
 ```
 
-**Microsoft users** point it at the `agency` wrapper and add wrapper-only flags
-such as `--mcp`:
+**Microsoft users** point it at the `agency` wrapper, which uses the marketplace
+plugin spec and wrapper-only flags such as `--mcp`:
 
 ```
 agency copilot --mcp workiq --mcp teams --plugin {plugin} --model {model} --agent {agent}
@@ -233,10 +235,11 @@ when launching from the web UI):
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `PRINBOX_REVIEW_COMMAND` | `copilot --plugin {plugin} --model {model} --agent {agent}` | Launch command template (owns the CLI + flag syntax) |
+| `PRINBOX_REVIEW_COMMAND` | `copilot --plugin-dir {plugindir} --model {model} --agent {agent}` | Launch command template (owns the CLI + flag syntax) |
 | `PRINBOX_REVIEW_AGENT` | `dual-review:dual-model-review` | Value for the `{agent}` placeholder |
-| `PRINBOX_REVIEW_PLUGIN` | `market:dual-review@jmprieur/pr-inbox` | Value for the `{plugin}` placeholder (use a `local:<path>` spec for local plugin development) |
+| `PRINBOX_REVIEW_PLUGIN` | `market:dual-review@jmprieur/pr-inbox` | Value for the `{plugin}` placeholder (agency marketplace spec) |
 | `PRINBOX_REVIEW_MODEL` | `claude-opus-4.8` | Value for the `{model}` placeholder |
+| `PRINBOX_PLUGIN_DIR` | _(auto-resolved)_ | Overrides the `{plugindir}` path (bundled `plugins/dual-review`) |
 
 ---
 
