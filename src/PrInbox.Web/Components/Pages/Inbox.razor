@@ -583,13 +583,28 @@ else
     // SourceClass(row). The persisted source_filter pref is a JSON array of
     // these class strings.
     private record SourceChip(string Class, string Label);
-    private static readonly SourceChip[] SourceChips = new[]
+
+    // Ordered template of known chip classes + labels. The visible chip set is
+    // derived from this, filtered to the classes actually present among the
+    // current rows — so a clean/public install never shows the Microsoft-
+    // specific "EMU"/"proxima" chips (those appear only when an EMU/Proxima
+    // identity class is configured AND such PRs are present).
+    private static readonly SourceChip[] KnownChips = new[]
     {
         new SourceChip("src-emu",    "EMU"),
         new SourceChip("src-public", "public"),
         new SourceChip("src-ghe",    "proxima"),
         new SourceChip("src-ado",    "ADO"),
     };
+
+    private IReadOnlyList<SourceChip> SourceChips
+    {
+        get
+        {
+            var present = _rows.Select(SourceClass).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            return KnownChips.Where(c => present.Contains(c.Class)).ToArray();
+        }
+    }
 
     private const string PrefShowClosed   = "inbox.show_closed";
     private const string PrefShowIgnored  = "inbox.show_ignored";
@@ -652,7 +667,7 @@ else
     // Source classes that are currently enabled. Default = all known
     // chips on; loaded from prefs in OnInitializedAsync.
     private HashSet<string> _enabledSources =
-        new(SourceChips.Select(c => c.Class), StringComparer.OrdinalIgnoreCase);
+        new(KnownChips.Select(c => c.Class), StringComparer.OrdinalIgnoreCase);
 
     // Per-repo denylist (DisplayRepo strings). Empty = no filter; default
     // for unknown repos is "visible" so a freshly opened PR in a new repo
@@ -1359,7 +1374,7 @@ else
             var src = _rows.AsEnumerable();
             if (!_showClosed)
                 src = src.Where(r => r.Status == PullRequestStatus.Open);
-            if (_enabledSources.Count < SourceChips.Length)
+            if (SourceChips.Any(c => !_enabledSources.Contains(c.Class)))
                 src = src.Where(r => ChipFilterPasses(r));
             if (!_showIgnored)
                 src = src.Where(r => !RowIsHidden(r));
@@ -1521,7 +1536,7 @@ else
             var src = _rows.AsEnumerable();
             if (!_showClosed)
                 src = src.Where(r => r.Status == PullRequestStatus.Open);
-            if (_enabledSources.Count < SourceChips.Length)
+            if (SourceChips.Any(c => !_enabledSources.Contains(c.Class)))
                 src = src.Where(r => ChipFilterPasses(r));
             if (_excludedRepos.Count > 0)
                 src = src.Where(r => !_excludedRepos.Contains(r.DisplayRepo));
@@ -1767,7 +1782,7 @@ else
         {
             if (string.Equals(sc.Id, row.SourceId, StringComparison.OrdinalIgnoreCase))
             {
-                return InboxFilters.LabelForClass(InboxFilters.ClassifyConfig(sc), sc.Id);
+                return InboxFilters.LabelForClass(InboxFilters.ClassifyConfig(sc, Config.IdentityClasses), sc.Id);
             }
         }
         return SourceLabelFromId(row.SourceId);
@@ -1795,7 +1810,7 @@ else
         {
             if (string.Equals(sc.Id, row.SourceId, StringComparison.OrdinalIgnoreCase))
             {
-                return InboxFilters.ClassifyConfig(sc);
+                return InboxFilters.ClassifyConfig(sc, Config.IdentityClasses);
             }
         }
         return InboxFilters.SourceClassOf(row.SourceId);

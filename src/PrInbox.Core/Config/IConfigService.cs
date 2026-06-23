@@ -91,6 +91,15 @@ public interface IConfigService
     Task SetReviewLauncherFlagsAsync(bool autoSend, bool yolo, CancellationToken ct = default);
 
     /// <summary>
+    /// Sets the Review-launcher command template
+    /// (<see cref="ReviewLauncherSettings.LaunchCommand"/>) and mirrors it
+    /// onto the DI singleton so the next review launch picks it up without a
+    /// process restart. A blank value restores the default
+    /// (<c>copilot --plugin-dir {plugindir} --model {model} --agent {agent}</c>).
+    /// </summary>
+    Task SetReviewLauncherCommandAsync(string launchCommand, CancellationToken ct = default);
+
+    /// <summary>
     /// Sets the Review-launcher tab colour
     /// (<see cref="ReviewLauncherSettings.TabColor"/>) and mirrors it onto
     /// the DI singleton so the next review launch picks it up without a

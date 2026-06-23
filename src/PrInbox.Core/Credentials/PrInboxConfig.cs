@@ -19,8 +19,8 @@ public sealed class PrInboxConfig
     public BotConfig Bots { get; init; } = new();
 
     /// <summary>
-    /// Defaults for the in-app Review launcher (which spawns
-    /// <c>agency copilot</c> in a new Windows Terminal tab). Each field
+    /// Defaults for the in-app Review launcher (which spawns the configured
+    /// review CLI in a new Windows Terminal tab). Each field
     /// has a sensible built-in default; absent / null fields fall
     /// through to those defaults.
     /// </summary>
@@ -28,7 +28,7 @@ public sealed class PrInboxConfig
 
     /// <summary>
     /// Regex patterns. Any PR whose display repo (e.g.
-    /// <c>1ES/Spmi</c>) fully matches one of these is hidden from the
+    /// <c>contoso/widgets</c>) fully matches one of these is hidden from the
     /// inbox by default. Toggle "Show ignored" in the UI to reveal.
     /// Data is still synced; this is a UI-level filter.
     /// </summary>
@@ -47,6 +47,19 @@ public sealed class PrInboxConfig
     /// (GitHub/GHE); ADO PRs are left unclassified and always shown.
     /// </summary>
     public Dictionary<string, List<string>> RepoPathFilters { get; init; } = new();
+
+    /// <summary>
+    /// Configurable identity taxonomy. A login is classified by the first
+    /// matching rule (host + alias suffix) — see <see cref="IdentityClass"/> /
+    /// <see cref="IdentityClassifier"/>. Drives the Inbox chips, the review
+    /// tab-title alias, and the default-identity preference. Ships generic
+    /// (just <c>Public</c> on github.com); the Microsoft profile adds EMU and
+    /// Proxima.
+    /// </summary>
+    public List<IdentityClass> IdentityClasses { get; init; } = new()
+    {
+        new IdentityClass { Name = "Public", Host = "github.com", AliasSuffix = "" },
+    };
 
     /// <summary>
     /// Returns the path used by <see cref="LoadOrCreateAsync"/> when no
@@ -108,7 +121,7 @@ public sealed class PrInboxConfig
 /// </summary>
 public sealed class SourceConfig
 {
-    /// <summary>Stable id, e.g. <c>gh.com</c>, <c>ghe.contoso.com</c>, <c>ado:mseng</c>.</summary>
+    /// <summary>Stable id, e.g. <c>gh.com</c>, <c>ghe.contoso.com</c>, <c>ado:fabrikam</c>.</summary>
     public required string Id { get; init; }
 
     /// <summary>The kind of platform.</summary>
@@ -169,24 +182,60 @@ public sealed class BotConfig
 public sealed class ReviewLauncherSettings
 {
     /// <summary>
-    /// Plugin spec passed to <c>agency copilot --plugin &lt;...&gt;</c>.
-    /// Defaults to the <c>dual-review</c> plugin published from this
-    /// repo's marketplace (<c>.github/plugin/marketplace.json</c>). For
-    /// local development against an unpublished working tree, use a
-    /// <c>local:</c> spec. Examples:
+    /// The full command the launcher runs, with <c>{plugindir}</c>,
+    /// <c>{plugin}</c>, <c>{model}</c>, and <c>{agent}</c> placeholders.
+    /// <c>{plugin}</c>/<c>{model}</c>/<c>{agent}</c> come from
+    /// <see cref="Plugin"/> / <see cref="Model"/> / <see cref="Agent"/>;
+    /// <c>{plugindir}</c> is the local path to the bundled dual-review
+    /// plugin, resolved by the launcher at run time. Defaults to the public
+    /// GitHub Copilot CLI, which loads the plugin from a local directory
+    /// (<c>--plugin-dir</c>). Microsoft users point it at the <c>agency</c>
+    /// wrapper, e.g.
+    /// <c>agency copilot --mcp workiq --mcp teams --plugin {plugin} --model {model} --agent {agent}</c>.
+    /// The template owns the CLI and its flag syntax, so no flag name is
+    /// hardcoded in the launcher.
+    /// </summary>
+    /// <remarks>
+    /// Mutable (<c>set</c> not <c>init</c>) so the Settings page can update
+    /// it on the live DI singleton and the next review launch picks it up
+    /// without a process restart.
+    /// </remarks>
+    public string LaunchCommand { get; set; } =
+        "copilot --plugin-dir {plugindir} --model {model} --agent {agent}";
+
+    /// <summary>
+    /// Returns <see cref="LaunchCommand"/> with the <c>{plugindir}</c>,
+    /// <c>{plugin}</c>, <c>{model}</c>, and <c>{agent}</c> placeholders
+    /// substituted. <paramref name="pluginDir"/> is the resolved local path
+    /// to the bundled plugin (empty when unavailable).
+    /// </summary>
+    public string ResolveLaunchCommand(string? pluginDir = null) =>
+        LaunchCommand
+            .Replace("{plugindir}", pluginDir ?? string.Empty)
+            .Replace("{plugin}", Plugin)
+            .Replace("{model}", Model)
+            .Replace("{agent}", Agent);
+
+    /// <summary>
+    /// Plugin spec substituted into the <c>{plugin}</c> placeholder of
+    /// <see cref="LaunchCommand"/>. Defaults to the <c>dual-review</c>
+    /// plugin published from this repo's marketplace
+    /// (<c>.github/plugin/marketplace.json</c>). For local development
+    /// against an unpublished working tree, use a <c>local:</c> spec.
+    /// Examples:
     /// <list type="bullet">
     ///   <item><c>market:dual-review@jmprieur/pr-inbox</c></item>
     ///   <item><c>github:jmprieur/pr-inbox:plugins/dual-review</c></item>
-    ///   <item><c>local:d:/1es/pr-inbox/plugins/dual-review</c></item>
+    ///   <item><c>local:/path/to/pr-inbox/plugins/dual-review</c></item>
     ///   <item><c>ado-git:&lt;org&gt;/&lt;project&gt;/&lt;repo&gt;:&lt;path&gt;</c></item>
     /// </list>
     /// </summary>
     public string Plugin { get; init; } = "market:dual-review@jmprieur/pr-inbox";
 
-    /// <summary>Model id passed to <c>agency copilot --model</c>.</summary>
-    public string Model { get; init; } = "claude-opus-4.8";
+    /// <summary>Model id substituted into the <c>{model}</c> placeholder.</summary>
+    public string Model { get; set; } = "claude-opus-4.8";
 
-    /// <summary>Agent id passed to <c>agency copilot --agent</c>.</summary>
+    /// <summary>Agent id substituted into the <c>{agent}</c> placeholder.</summary>
     public string Agent { get; init; } = "dual-review:dual-model-review";
 
     /// <summary>
@@ -222,9 +271,6 @@ public sealed class ReviewLauncherSettings
 
     private static readonly Regex TabColorPattern =
         new("^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$", RegexOptions.Compiled);
-
-    /// <summary>MCP servers to enable (each becomes one <c>--mcp</c> flag).</summary>
-    public List<string> AdditionalMcps { get; init; } = new() { "workiq", "teams" };
 
     /// <summary>
     /// When true (default), the launcher sends a short bootstrap prompt

@@ -108,7 +108,7 @@ public class IPrReadSourceContractTests
     [Fact]
     public void Capabilities_For_AzureDevOps_Default_Has_No_Global_Inbox()
     {
-        var source = new FakePrReadSourceBuilder("ado:mseng", SourceKind.AzureDevOps).Build();
+        var source = new FakePrReadSourceBuilder("ado:fabrikam", SourceKind.AzureDevOps).Build();
         source.Capabilities.SupportsGlobalReviewerInbox.Should().BeFalse();
     }
 

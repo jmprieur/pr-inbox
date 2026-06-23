@@ -57,7 +57,7 @@ agent, when to invoke it, and provenance.
 | `{{CHANGE}}` | **Required.** What's being reviewed. One of: a git ref range (e.g. `main..bridge/feature`), a PR URL, a working-tree path, or an inline diff. |
 | `{{CONTEXT}}` | **Required.** Short statement of what the change is for and what trust boundary it sits at (e.g. "validator that gates which reviewer-reply artifacts are allowed to be posted as PR comments"). |
 | `{{ROUND}}` | **Required.** 1-based round number. Round 1 = "find issues"; round N>1 = caller passes a summary of what was fixed and what classes were searched in earlier rounds. |
-| `{{REVIEWER_A_MODEL}}` | Default: `claude-opus-4.7`. The "exhaustive enumeration" reviewer. |
+| `{{REVIEWER_A_MODEL}}` | Default: `claude-opus-4.8`. The "exhaustive enumeration" reviewer. |
 | `{{REVIEWER_B_MODEL}}` | Default: `gpt-5.5` (or the strongest available GPT family model). The "lateral pattern matching" reviewer. |
 | `{{PRIOR_FINDINGS}}` | Optional. For round N>1: a **de-attributed, non-verbatim** structured summary of issue *classes* found and fixed in earlier rounds (e.g. "round 1 fixed: prompt template missing {{CHANGE}}; verdict cascade gap; tool-output kind not fail-closed"). Must NOT include reviewer attribution ("Reviewer A said …"), verbatim reviewer reports, or per-reviewer ruled-out lists — those would leak one reviewer's frame into the other reviewer's next-round prompt and break the independence property. Used to steer this round away from already-covered ground. |
 | `{{KNOWN_INVARIANTS}}` | Optional. Hard invariants the change must preserve (e.g. "must implement CommonMark §4.5 fence parsing exactly"). Passed to both reviewers verbatim. |

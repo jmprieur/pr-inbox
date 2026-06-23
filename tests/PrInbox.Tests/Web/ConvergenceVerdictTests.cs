@@ -37,7 +37,7 @@ public class ConvergenceVerdictTests
         // anything about them so the inbox row keeps a single green badge.
         var doc = MakeDoc(
             findingsCount: 0,
-            models: new[] { "claude-opus-4.7", "gpt-5.5" },
+            models: new[] { "claude-opus-4.8", "gpt-5.5" },
             asymmetry: new AsymmetryStats { BothFound = 3, OpusOnly = 0, GptOnly = 0 });
 
         var badge = ConvergenceVerdict.Compute(doc);
@@ -50,7 +50,7 @@ public class ConvergenceVerdictTests
     {
         var doc = MakeDoc(
             findingsCount: 2,
-            models: new[] { "claude-opus-4.7" },
+            models: new[] { "claude-opus-4.8" },
             asymmetry: new AsymmetryStats { BothFound = 0, OpusOnly = 2, GptOnly = 0 });
 
         var badge = ConvergenceVerdict.Compute(doc);
@@ -65,7 +65,7 @@ public class ConvergenceVerdictTests
         // even if there are 2 models declared.
         var doc = MakeDoc(
             findingsCount: 2,
-            models: new[] { "claude-opus-4.7", "gpt-5.5" },
+            models: new[] { "claude-opus-4.8", "gpt-5.5" },
             asymmetry: null);
 
         var badge = ConvergenceVerdict.Compute(doc);
@@ -81,7 +81,7 @@ public class ConvergenceVerdictTests
         // misleading green badge.
         var doc = MakeDoc(
             findingsCount: 2,
-            models: new[] { "claude-opus-4.7", "gpt-5.5" },
+            models: new[] { "claude-opus-4.8", "gpt-5.5" },
             asymmetry: new AsymmetryStats { BothFound = 0, OpusOnly = 0, GptOnly = 0 });
 
         var badge = ConvergenceVerdict.Compute(doc);
@@ -94,7 +94,7 @@ public class ConvergenceVerdictTests
     {
         var doc = MakeDoc(
             findingsCount: 3,
-            models: new[] { "claude-opus-4.7", "gpt-5.5" },
+            models: new[] { "claude-opus-4.8", "gpt-5.5" },
             asymmetry: new AsymmetryStats { BothFound = 3, OpusOnly = 0, GptOnly = 0 });
 
         var badge = ConvergenceVerdict.Compute(doc);
@@ -104,7 +104,7 @@ public class ConvergenceVerdictTests
         Assert.Equal("converged", badge.CssClass);
         Assert.Contains("Both reviewers flagged every finding", badge.Tooltip);
         Assert.Contains("3 agreed", badge.Tooltip);
-        Assert.Contains("claude-opus-4.7", badge.Tooltip);
+        Assert.Contains("claude-opus-4.8", badge.Tooltip);
         Assert.Contains("gpt-5.5", badge.Tooltip);
     }
 
@@ -116,7 +116,7 @@ public class ConvergenceVerdictTests
         // converged.
         var doc = MakeDoc(
             findingsCount: 1,
-            models: new[] { "claude-opus-4.7", "gpt-5.5" },
+            models: new[] { "claude-opus-4.8", "gpt-5.5" },
             asymmetry: new AsymmetryStats { BothFound = 1, OpusOnly = null, GptOnly = null });
 
         var badge = ConvergenceVerdict.Compute(doc);
@@ -129,7 +129,7 @@ public class ConvergenceVerdictTests
     {
         var doc = MakeDoc(
             findingsCount: 2,
-            models: new[] { "claude-opus-4.7", "gpt-5.5" },
+            models: new[] { "claude-opus-4.8", "gpt-5.5" },
             asymmetry: new AsymmetryStats { BothFound = 1, OpusOnly = 1, GptOnly = 0 });
 
         var badge = ConvergenceVerdict.Compute(doc);
@@ -138,7 +138,7 @@ public class ConvergenceVerdictTests
         Assert.Equal("⚠", badge.Glyph);
         Assert.Equal("asymmetric", badge.CssClass);
         Assert.Contains("both: 1", badge.Tooltip);
-        Assert.Contains("claude-opus-4.7 only: 1", badge.Tooltip);
+        Assert.Contains("claude-opus-4.8 only: 1", badge.Tooltip);
         Assert.Contains("gpt-5.5 only: 0", badge.Tooltip);
     }
 
@@ -147,7 +147,7 @@ public class ConvergenceVerdictTests
     {
         var doc = MakeDoc(
             findingsCount: 3,
-            models: new[] { "claude-opus-4.7", "gpt-5.5" },
+            models: new[] { "claude-opus-4.8", "gpt-5.5" },
             asymmetry: new AsymmetryStats { BothFound = 1, OpusOnly = 0, GptOnly = 2 });
 
         var badge = ConvergenceVerdict.Compute(doc);
@@ -163,7 +163,7 @@ public class ConvergenceVerdictTests
         // agreed. The strongest "be careful" signal.
         var doc = MakeDoc(
             findingsCount: 4,
-            models: new[] { "claude-opus-4.7", "gpt-5.5" },
+            models: new[] { "claude-opus-4.8", "gpt-5.5" },
             asymmetry: new AsymmetryStats { BothFound = 0, OpusOnly = 2, GptOnly = 2 });
 
         var badge = ConvergenceVerdict.Compute(doc);
@@ -179,7 +179,7 @@ public class ConvergenceVerdictTests
         // "gpt_only", so fall back to generic labels rather than guess.
         var doc = MakeDoc(
             findingsCount: 2,
-            models: new[] { "claude-opus-4.7", "gpt-5.5", "gemini-2.0" },
+            models: new[] { "claude-opus-4.8", "gpt-5.5", "gemini-2.0" },
             asymmetry: new AsymmetryStats { BothFound = 1, OpusOnly = 1, GptOnly = 0 });
 
         var badge = ConvergenceVerdict.Compute(doc);

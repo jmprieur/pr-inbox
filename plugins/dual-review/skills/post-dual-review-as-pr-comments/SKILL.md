@@ -7,7 +7,7 @@ description: >-
   non-anchorable findings to the review body. Chooses the review
   event from the verdict.
 metadata:
-  author: 1ES AI Native Engineering
+  author: pr-inbox maintainers
   version: "0.1.0"
   category: review
   severity: medium

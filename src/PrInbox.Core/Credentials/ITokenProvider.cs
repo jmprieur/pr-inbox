@@ -18,7 +18,7 @@ public interface ITokenProvider
 {
     /// <summary>
     /// A short identifier for the source this provider serves
-    /// (e.g. <c>gh.com</c>, <c>ghe.contoso.com</c>, <c>ado:mseng</c>).
+    /// (e.g. <c>gh.com</c>, <c>ghe.contoso.com</c>, <c>ado:fabrikam</c>).
     /// </summary>
     string SourceId { get; }
 

@@ -94,7 +94,7 @@ public class BotDetectorTests
 public class GitHubReadSourceParseTests
 {
     [Theory]
-    [InlineData("https://github.com/agency-microsoft/playground/pull/4248", "agency-microsoft", "playground", 4248)]
+    [InlineData("https://github.com/octocat/playground/pull/4248", "octocat", "playground", 4248)]
     [InlineData("https://ghe.contoso.com/org/repo-name/pull/12", "org", "repo-name", 12)]
     public void ParseUrl_Splits_Correctly(string url, string owner, string repo, int number)
     {
@@ -118,7 +118,7 @@ public class GitHubReadSourceParseTests
     [Fact]
     public void ParseUrl_Throws_For_AzureDevOps_Url()
     {
-        var act = () => GitHubReadSource.ParseUrl("https://dev.azure.com/mseng/Context/_git/Private/pullrequest/1234");
+        var act = () => GitHubReadSource.ParseUrl("https://dev.azure.com/fabrikam/Context/_git/Private/pullrequest/1234");
         act.Should().Throw<FormatException>();
     }
 

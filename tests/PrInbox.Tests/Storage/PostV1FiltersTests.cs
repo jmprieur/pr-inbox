@@ -39,7 +39,7 @@ public class PostV1FiltersTests : IAsyncLifetime
             Identity: new PrIdentity(url, $"stable:{url.GetHashCode():X}"),
             SourceKind: SourceKind.GitHub,
             SourceId: sourceId,
-            DisplayRepo: "1ES/sample",
+            DisplayRepo: "contoso/sample",
             Number: 1,
             Title: "Sample",
             AuthorLogin: "octocat",

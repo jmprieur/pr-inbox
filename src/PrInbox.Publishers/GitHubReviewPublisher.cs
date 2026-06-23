@@ -40,7 +40,7 @@ public sealed class GitHubReviewPublisher : IPrReviewPublisher
     /// Construct with a caller-supplied <see cref="HttpClient"/> (tests
     /// inject a mock handler; production code passes a singleton).
     /// </summary>
-    /// <param name="host">e.g. <c>github.com</c> or <c>microsoft.ghe.com</c>.</param>
+    /// <param name="host">e.g. <c>github.com</c> or <c>ghe.example.com</c>.</param>
     /// <param name="identityUsed">Logical identity name (jmprieur, jmprieur_microsoft, …).</param>
     public GitHubReviewPublisher(
         ITokenProvider tokens,

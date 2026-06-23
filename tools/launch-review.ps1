@@ -27,20 +27,26 @@
 .PARAMETER RunDirectory
     Absolute path to the run directory. Required.
 
+.PARAMETER LaunchCommand
+    The full command that runs the review, with {plugindir} / {plugin} /
+    {model} / {agent} placeholders. Defaults to the public GitHub Copilot
+    CLI, which loads the plugin from a local directory:
+    `copilot --plugin-dir {plugindir} --model {model} --agent {agent}`.
+    Microsoft users set PRINBOX_REVIEW_COMMAND (or the Settings field)
+    to e.g. `agency copilot --mcp workiq --mcp teams --plugin {plugin}
+    --model {model} --agent {agent}`.
+
 .PARAMETER Agent
-    Agent id. Defaults to dual-review:dual-model-review.
+    Value substituted into the {agent} placeholder. Defaults to
+    dual-review:dual-model-review.
 
 .PARAMETER Plugin
-    --plugin argument. Defaults to
-    market:dual-review@jmprieur/pr-inbox
-    (fetched once and cached by agency).
+    Value substituted into the {plugin} placeholder. Defaults to
+    market:dual-review@jmprieur/pr-inbox.
 
 .PARAMETER Model
-    --model argument. Defaults to claude-opus-4.8.
-
-.PARAMETER Mcps
-    Comma-separated list of MCP servers to enable. Defaults to
-    'workiq,teams'. Each entry becomes one --mcp flag.
+    Value substituted into the {model} placeholder. Defaults to
+    claude-opus-4.8.
 
 .PARAMETER SessionName
     Optional human-readable name for the underlying copilot session.
@@ -64,7 +70,7 @@ param(
     [string] $Agent       = $env:PRINBOX_REVIEW_AGENT,
     [string] $Plugin      = $env:PRINBOX_REVIEW_PLUGIN,
     [string] $Model       = $env:PRINBOX_REVIEW_MODEL,
-    [string] $Mcps        = $env:PRINBOX_REVIEW_MCPS,
+    [string] $LaunchCommand = $env:PRINBOX_REVIEW_COMMAND,
     [string] $SessionName = '',
     [switch] $NoAutoSend,
     [switch] $Yolo
@@ -73,7 +79,28 @@ param(
 if (-not $Agent)  { $Agent  = 'dual-review:dual-model-review' }
 if (-not $Plugin) { $Plugin = 'market:dual-review@jmprieur/pr-inbox' }
 if (-not $Model)  { $Model  = 'claude-opus-4.8' }
-if (-not $Mcps)   { $Mcps   = 'workiq,teams' }
+# Default launch command targets the public GitHub Copilot CLI, which loads
+# the plugin from a local directory. Microsoft users set PRINBOX_REVIEW_COMMAND
+# (or the Settings field) to e.g.
+# 'agency copilot --mcp workiq --mcp teams --plugin {plugin} --model {model} --agent {agent}'.
+if (-not $LaunchCommand) {
+    $LaunchCommand = 'copilot --plugin-dir {plugindir} --model {model} --agent {agent}'
+}
+
+# Resolve the bundled plugin path for the {plugindir} placeholder (the public
+# copilot --plugin-dir flag). The web launcher usually substitutes this
+# already; resolving here keeps standalone runs working.
+$pluginDir = ''
+$bundledPlugin = Join-Path $PSScriptRoot '..\plugins\dual-review'
+if (Test-Path $bundledPlugin) { $pluginDir = (Resolve-Path $bundledPlugin).Path }
+
+# Resolve placeholders. Idempotent: when the web launcher already substituted
+# them, no placeholders remain and these replacements are no-ops.
+$resolvedCommand = $LaunchCommand.
+    Replace('{plugindir}', $pluginDir).
+    Replace('{plugin}', $Plugin).
+    Replace('{model}',  $Model).
+    Replace('{agent}',  $Agent)
 
 $ErrorActionPreference = 'Stop'
 
@@ -103,17 +130,6 @@ if (-not $autoSend) {
     }
 }
 
-# Expand the MCP list into a flat array of --mcp / <name> tokens
-# so agency receives them as repeated flags.
-$mcpArgs = @()
-foreach ($m in ($Mcps -split ',')) {
-    $m = $m.Trim()
-    if ($m) {
-        $mcpArgs += '--mcp'
-        $mcpArgs += $m
-    }
-}
-
 Write-Host ''
 Write-Host '------------------------------------------------------------' -ForegroundColor DarkGray
 if ($autoSend) {
@@ -121,16 +137,16 @@ if ($autoSend) {
 } else {
     if ($copied) {
         Write-Host (' Brief copied to clipboard (' + $brief.Length + ' chars).') -ForegroundColor Cyan
-        Write-Host ' Ctrl+V into agency. Edit if needed. Press Enter to send.' -ForegroundColor Cyan
+        Write-Host ' Ctrl+V into the review CLI. Edit if needed. Press Enter to send.' -ForegroundColor Cyan
     } else {
         Write-Host (' Brief at: ' + $briefPath) -ForegroundColor Yellow
         Write-Host ' (Clipboard copy failed -- open the file manually.)' -ForegroundColor Yellow
     }
 }
+Write-Host (' Command:  ' + $resolvedCommand) -ForegroundColor DarkGray
 Write-Host (' Agent:    ' + $Agent)  -ForegroundColor DarkGray
 Write-Host (' Plugin:   ' + $Plugin) -ForegroundColor DarkGray
 Write-Host (' Model:    ' + $Model)  -ForegroundColor DarkGray
-Write-Host (' MCPs:     ' + $Mcps)   -ForegroundColor DarkGray
 if ($SessionName) {
     Write-Host (' Session:  ' + $SessionName) -ForegroundColor DarkGray
 }
@@ -156,7 +172,7 @@ foreach ($name in $inherited) {
     Remove-Item -Path "env:$name" -ErrorAction SilentlyContinue
 }
 
-# Build the agency invocation.
+# Build the CLI invocation.
 #
 # About session names: `agency copilot` *always* drives the underlying
 # copilot CLI with `--resume <fresh-uuid>` — that's how agency manages
@@ -171,12 +187,13 @@ foreach ($name in $inherited) {
 # identifier for each review is the wt tab title (set by ReviewLauncher),
 # not the copilot session name. SessionName is still accepted as a
 # parameter and surfaced in the banner above for diagnostics, but it
-# is intentionally NOT forwarded to agency.
-$agencyArgs = @('copilot') + $mcpArgs + @(
-    '--plugin', $Plugin,
-    '--model',  $Model,
-    '--agent',  $Agent
-)
+# is intentionally NOT forwarded.
+
+# Tokenize the resolved launch command and invoke it. Pass-through flags
+# (-i bootstrap, --yolo) are appended after.
+$cmdTokens = @($resolvedCommand -split '\s+' | Where-Object { $_ })
+$cmdExe    = $cmdTokens[0]
+$cmdArgs   = if ($cmdTokens.Count -gt 1) { $cmdTokens[1..($cmdTokens.Count - 1)] } else { @() }
 
 # Forward unknown flags (-i, --yolo) straight to copilot. Empirical:
 # agency's clap config treats unknown flags as pass-through to the
@@ -198,5 +215,5 @@ if ($Yolo) {
     $passThrough += '--yolo'
 }
 
-& agency @agencyArgs @passThrough
+& $cmdExe @cmdArgs @passThrough
 

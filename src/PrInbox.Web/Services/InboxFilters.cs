@@ -96,7 +96,7 @@ public sealed record InboxFilters(
             excludedRepos,
             excludedAuthors,
             regexes,
-            BuildSourceClassMap(config.Sources),
+            BuildSourceClassMap(config.Sources, config.IdentityClasses),
             showOutOfScope,
             pathScopes);
     }
@@ -117,7 +117,8 @@ public sealed record InboxFilters(
         IReadOnlyList<Regex> ignoredRepoRegexes,
         IEnumerable<SourceConfig>? sourceConfigs = null,
         bool showOutOfScope = false,
-        FrozenDictionary<string, IReadOnlyList<Regex>>? pathScopeByRepo = null)
+        FrozenDictionary<string, IReadOnlyList<Regex>>? pathScopeByRepo = null,
+        IReadOnlyList<IdentityClass>? identityClasses = null)
         => new(
             showClosed,
             showIgnored,
@@ -127,7 +128,7 @@ public sealed record InboxFilters(
             excludedRepos.ToFrozenSet(StringComparer.OrdinalIgnoreCase),
             excludedAuthors.ToFrozenSet(StringComparer.OrdinalIgnoreCase),
             ignoredRepoRegexes,
-            BuildSourceClassMap(sourceConfigs),
+            BuildSourceClassMap(sourceConfigs, identityClasses),
             showOutOfScope,
             pathScopeByRepo);
 
@@ -247,13 +248,36 @@ public sealed record InboxFilters(
     /// still carry the literal <c>default</c> and therefore classify as
     /// public — which matches today's reality.
     /// </summary>
-    public static string ClassifyConfig(SourceConfig sc) => sc.Kind switch
+    public static string ClassifyConfig(SourceConfig sc, IReadOnlyList<IdentityClass>? identityClasses = null)
     {
-        SourceConfigKind.AzureDevOps      => "src-ado",
-        SourceConfigKind.GitHubEnterprise => "src-ghe",
-        SourceConfigKind.GitHub when IsEmuIdentity(sc.Identity) => "src-emu",
-        SourceConfigKind.GitHub           => "src-public",
-        _                                  => "src-other",
+        if (sc.Kind == SourceConfigKind.AzureDevOps) return "src-ado";
+
+        // Rule-driven when a taxonomy is configured; otherwise fall back to the
+        // legacy Kind + "identity has an underscore" heuristic.
+        if (identityClasses is { Count: > 0 })
+        {
+            var name = IdentityClassifier.Classify(sc.Identity, sc.Host, identityClasses);
+            if (name is not null) return ChipForClassName(name);
+            // No rule matched: keep GHE hosts chipped as proxima.
+            return sc.Kind == SourceConfigKind.GitHubEnterprise ? "src-ghe" : "src-public";
+        }
+
+        return sc.Kind switch
+        {
+            SourceConfigKind.GitHubEnterprise => "src-ghe",
+            SourceConfigKind.GitHub when IsEmuIdentity(sc.Identity) => "src-emu",
+            SourceConfigKind.GitHub           => "src-public",
+            _                                  => "src-other",
+        };
+    }
+
+    // Maps a configured IdentityClass name to the existing chip CSS class.
+    private static string ChipForClassName(string name) => name.ToLowerInvariant() switch
+    {
+        "emu"     => "src-emu",
+        "proxima" => "src-ghe",
+        "public"  => "src-public",
+        _         => "src-other",
     };
 
     /// <summary>
@@ -287,14 +311,15 @@ public sealed record InboxFilters(
     }
 
     private static FrozenDictionary<string, string> BuildSourceClassMap(
-        IEnumerable<SourceConfig>? sources)
+        IEnumerable<SourceConfig>? sources,
+        IReadOnlyList<IdentityClass>? identityClasses = null)
     {
         if (sources is null) return FrozenDictionary<string, string>.Empty;
         var pairs = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach (var sc in sources)
         {
             if (string.IsNullOrWhiteSpace(sc.Id)) continue;
-            pairs[sc.Id] = ClassifyConfig(sc);
+            pairs[sc.Id] = ClassifyConfig(sc, identityClasses);
         }
         return pairs.ToFrozenDictionary(StringComparer.OrdinalIgnoreCase);
     }

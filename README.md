@@ -129,8 +129,8 @@ Step-by-step walkthrough lives in [USER_GUIDE.md § What "Review" actually does]
 
 - [PowerShell 7+](https://learn.microsoft.com/powershell/scripting/install/installing-powershell-on-windows) (`pwsh`) — `tools/launch-review.ps1` runs under it
 - [Windows Terminal](https://aka.ms/terminal) (`wt.exe`) — each Review opens in its own window by default (or as a tab, with **One tab per review**)
-- `agency` CLI on `PATH`, authenticated to your model providers — the launcher invokes `agency copilot …`
-- Read access to the plugin source. Default is the Microsoft-internal `1ES-microsoft/ai-plugins` repo on github.com. If you can't reach it, point `PRINBOX_REVIEW_PLUGIN` at a local clone or a different plugin (see [Review launcher overrides](#review-launcher-overrides))
+- GitHub Copilot CLI (`copilot`) on `PATH`, authenticated to your model provider — the launcher invokes it. **Microsoft users:** set the launch command to `agency copilot …` (Settings → Review launcher, or `PRINBOX_REVIEW_COMMAND`) to drive it through the internal `agency` wrapper.
+- Read access to the plugin source. Default is the `dual-review` plugin published from this repo (`market:dual-review@jmprieur/pr-inbox`). To use a local clone or a different plugin, point `PRINBOX_REVIEW_PLUGIN` at it (see [Review launcher overrides](#review-launcher-overrides))
 
 From source (until published to NuGet):
 
@@ -164,6 +164,20 @@ run the browser lands on `/settings`; add a source and you're going.
 Right-click the tray icon for **Open PR Inbox**, **Restart**,
 **View log**, and **Stop & Exit** (which shuts the server down
 gracefully). Double-click the icon to reopen the dashboard.
+
+> **Profiles (clean vs. internal).** The shipped defaults are generic — just a
+> `Public` identity class on github.com and the public `copilot` review command;
+> nothing Microsoft-specific is in the box. To switch modes:
+> - **Microsoft-internal:** run [`Start-internal.bat`](Start-internal.bat) — applies
+>   [`profiles/microsoft.json`](profiles/microsoft.json) (EMU/Proxima identity
+>   classes + the `agency copilot` review command), then starts.
+> - **Back to clean:** run [`Start-public.bat`](Start-public.bat) — applies
+>   [`profiles/public.json`](profiles/public.json), resetting to the public defaults.
+>
+> Both just wrap `pr-inbox config import <file>`, which only ever rewrites the
+> identity classes, review command, and model — your **sources / ADO references
+> are never touched**. Import any org's profile the same way:
+> `pr-inbox config import <file>`.
 
 ### Option A — Web UI, manually
 
@@ -213,15 +227,33 @@ Both surfaces read/write the same `%APPDATA%\PrInbox\config.json`. Use whichever
 
 ## Review launcher overrides
 
-`tools/launch-review.ps1` reads four env vars. Defaults shown — set any of them
-before launching the web UI to change what the Review tab spins up:
+The review **launch command** is configurable in the web UI under
+**Settings → Review launcher → Launch command**. It defaults to the public
+GitHub Copilot CLI, which loads the dual-review plugin from a local directory
+(`--plugin-dir`) and selects its agent by id. Placeholders: `{plugindir}` (the
+bundled plugin path, resolved automatically), `{plugin}`, `{model}`, `{agent}`:
+
+```
+copilot --plugin-dir {plugindir} --model {model} --agent {agent}
+```
+
+**Microsoft users** point it at the `agency` wrapper, which uses the marketplace
+plugin spec and wrapper-only flags such as `--mcp`:
+
+```
+agency copilot --mcp workiq --mcp teams --plugin {plugin} --model {model} --agent {agent}
+```
+
+`tools/launch-review.ps1` also honours these env vars (Settings takes precedence
+when launching from the web UI):
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `PRINBOX_REVIEW_AGENT` | `dual-review:dual-model-review` | Agency agent id |
-| `PRINBOX_REVIEW_PLUGIN` | `market:dual-review@jmprieur/pr-inbox` | Plugin source (use a `local:<path>` spec for local plugin development) |
-| `PRINBOX_REVIEW_MODEL` | `claude-opus-4.8` | Model id passed to `agency copilot` |
-| `PRINBOX_REVIEW_MCPS` | `workiq,teams` | Comma-separated MCP servers; set to empty string to disable |
+| `PRINBOX_REVIEW_COMMAND` | `copilot --plugin-dir {plugindir} --model {model} --agent {agent}` | Launch command template (owns the CLI + flag syntax) |
+| `PRINBOX_REVIEW_AGENT` | `dual-review:dual-model-review` | Value for the `{agent}` placeholder |
+| `PRINBOX_REVIEW_PLUGIN` | `market:dual-review@jmprieur/pr-inbox` | Value for the `{plugin}` placeholder (agency marketplace spec) |
+| `PRINBOX_REVIEW_MODEL` | `claude-opus-4.8` | Value for the `{model}` placeholder |
+| `PRINBOX_PLUGIN_DIR` | _(auto-resolved)_ | Overrides the `{plugindir}` path (bundled `plugins/dual-review`) |
 
 ---
 
@@ -232,9 +264,9 @@ before launching the web UI to change what the Review tab spins up:
 | `config doctor` red on GitHub | Not signed in to `gh` | `gh auth login --hostname github.com` |
 | `config doctor` red on Azure DevOps | `az login` expired, or you don't actually have an ADO source | `az login`, or skip the ADO step |
 | `sync` runs but inbox is empty | `gh` identity differs from the login the PRs are assigned to | `config doctor` prints the identity it's using; compare with PR assignee. If you have multiple `gh` logins, add each as its own source via Settings → **+ Add GitHub.com** |
-| Review tab opens then exits immediately with "agency: command not found" | `agency` CLI not on `PATH` | Install agency, or set `PRINBOX_REVIEW_AGENT` / `PRINBOX_REVIEW_PLUGIN` to point at a tool you do have |
-| Review tab opens but plugin fetch fails | No access to `1ES-microsoft/ai-plugins` | Point `PRINBOX_REVIEW_PLUGIN` at a local clone or a plugin you can reach |
-| Review tab opens but model call fails | `agency` not authenticated to the chosen model | Authenticate `agency` to your providers, or change `PRINBOX_REVIEW_MODEL` |
+| Review tab opens then exits immediately with "copilot: command not found" | Review CLI not on `PATH` | Install the GitHub Copilot CLI, or set the launch command to a CLI you have (Settings → Review launcher; Microsoft: `agency copilot …`) |
+| Review tab opens but plugin fetch fails | No access to the configured plugin source | Point `PRINBOX_REVIEW_PLUGIN` at a local clone or a plugin you can reach |
+| Review tab opens but model call fails | Review CLI not authenticated to the chosen model | Authenticate your CLI to its providers, or change `PRINBOX_REVIEW_MODEL` |
 | Web UI says port already in use | Another instance running, or stale Kestrel | `Get-NetTCPConnection -LocalPort 7341 \| Stop-Process -Force` |
 
 ---

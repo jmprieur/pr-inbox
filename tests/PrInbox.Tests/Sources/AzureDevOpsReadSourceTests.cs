@@ -13,7 +13,7 @@ public class AzureDevOpsReadSourceTests
     public void ParseAdoUrl_Extracts_RepoName_And_Number()
     {
         var (repo, number) = AzureDevOpsReadSource.ParseAdoUrl(
-            "https://dev.azure.com/mseng/Context/_git/Private/pullrequest/1234");
+            "https://dev.azure.com/fabrikam/Context/_git/Private/pullrequest/1234");
         repo.Should().Be("Private");
         number.Should().Be(1234);
     }
@@ -61,15 +61,15 @@ public class AzureDevOpsReadSourceTests
         only.Number.Should().Be(42);
         only.Title.Should().Be("Fix things");
         only.AuthorLogin.Should().Be("alice@example.com");
-        only.Url.Should().Be("https://dev.azure.com/mseng/Context/_git/MyRepo/pullrequest/42");
+        only.Url.Should().Be("https://dev.azure.com/fabrikam/Context/_git/MyRepo/pullrequest/42");
         only.DisplayRepo.Should().Be("Context/MyRepo");
         only.Status.Should().Be(PullRequestStatus.Open);
         only.SourceKind.Should().Be(SourceKind.AzureDevOps);
-        only.SourceId.Should().Be("ado:mseng/Context");
+        only.SourceId.Should().Be("ado:fabrikam/Context");
 
         handler.Requests[0].RequestUri!.ToString().Should().Contain("vssps.dev.azure.com");
         handler.Requests[1].RequestUri!.ToString().Should()
-            .Contain("/mseng/Context/_apis/git/pullrequests")
+            .Contain("/fabrikam/Context/_apis/git/pullrequests")
             .And.Contain("searchCriteria.reviewerId=11111111-aaaa-bbbb-cccc-222222222222")
             .And.Contain("searchCriteria.status=active");
     }
@@ -112,7 +112,7 @@ public class AzureDevOpsReadSourceTests
         results[0].AuthorLogin.Should().Be("jm@example.com");
 
         handler.Requests[1].RequestUri!.ToString().Should()
-            .Contain("/mseng/Context/_apis/git/pullrequests")
+            .Contain("/fabrikam/Context/_apis/git/pullrequests")
             .And.Contain("searchCriteria.creatorId=11111111-aaaa-bbbb-cccc-222222222222")
             .And.Contain("searchCriteria.status=active");
     }
@@ -217,8 +217,8 @@ public class AzureDevOpsReadSourceTests
         await foreach (var _ in source.ListAssignedFastAsync(CancellationToken.None)) { }
 
         var id = new PrIdentity(
-            Url: "https://dev.azure.com/mseng/Context/_git/MyRepo/pullrequest/42",
-            Stable: "ado:mseng/77777777-aaaa-bbbb-cccc-888888888888/55555555-aaaa-bbbb-cccc-666666666666#42");
+            Url: "https://dev.azure.com/fabrikam/Context/_git/MyRepo/pullrequest/42",
+            Stable: "ado:fabrikam/77777777-aaaa-bbbb-cccc-888888888888/55555555-aaaa-bbbb-cccc-666666666666#42");
 
         // Reset handler queue with detail/threads/commits responses (the first
         // listing exhausted the profile + an empty PR-list page). We just
@@ -303,7 +303,7 @@ public class AzureDevOpsReadSourceTests
             handler.Enqueue("""{ "count": 0, "value": [] }""");
 
             var bundle = await source.EnrichAsync(
-                new PrIdentity("https://dev.azure.com/mseng/Context/_git/R/pullrequest/42", "stable"),
+                new PrIdentity("https://dev.azure.com/fabrikam/Context/_git/R/pullrequest/42", "stable"),
                 CancellationToken.None);
             bundle.Detail.ReviewerState.Should().Be(expected, $"vote was {voteJson}");
         }
@@ -346,7 +346,7 @@ public class AzureDevOpsReadSourceTests
         handler.Enqueue("""{ "count": 0, "value": [] }""");
 
         var bundle = await source.EnrichAsync(
-            new PrIdentity("https://dev.azure.com/mseng/Context/_git/R/pullrequest/1", "stable"),
+            new PrIdentity("https://dev.azure.com/fabrikam/Context/_git/R/pullrequest/1", "stable"),
             CancellationToken.None);
 
         bundle.Threads.Should().HaveCount(4);
@@ -384,7 +384,7 @@ public class AzureDevOpsReadSourceTests
         handler.Enqueue("""{ "count": 0, "value": [] }""");
 
         var bundle = await source.EnrichAsync(
-            new PrIdentity("https://dev.azure.com/mseng/Context/_git/R/pullrequest/1", "stable"),
+            new PrIdentity("https://dev.azure.com/fabrikam/Context/_git/R/pullrequest/1", "stable"),
             CancellationToken.None);
 
         bundle.Threads[0].IsBot.Should().BeTrue("isContainer=true means service account / bot");
@@ -393,10 +393,10 @@ public class AzureDevOpsReadSourceTests
 
     private static (AzureDevOpsReadSource Source, RecordingHandler Handler) BuildSource(RecordingHandler handler)
     {
-        var tokenProvider = new FakeTokenProvider("ado:mseng/Context");
+        var tokenProvider = new FakeTokenProvider("ado:fabrikam/Context");
         var http = new HttpClient(handler);
         var source = new AzureDevOpsReadSource(
-            "ado:mseng/Context", "mseng", "Context", tokenProvider, botDetector: null, http: http);
+            "ado:fabrikam/Context", "fabrikam", "Context", tokenProvider, botDetector: null, http: http);
         return (source, handler);
     }
 

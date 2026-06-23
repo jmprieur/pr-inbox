@@ -82,7 +82,7 @@ public sealed class ReviewLauncher : IReviewLauncher, IAsyncDisposable
             {
                 var shortSha = brief.HeadSha.Length >= 7 ? brief.HeadSha[..7] : brief.HeadSha;
                 var hhmm = DateTimeOffset.Now.ToString("HH:mm");
-                tabTitle = BuildTabTitle(row.AuthorLogin, row.DisplayRepo, row.Number, shortSha, hhmm);
+                tabTitle = BuildTabTitle(row.AuthorLogin, row.DisplayRepo, row.Number, shortSha, hhmm, _config.IdentityClasses);
             }
         }
         catch (Exception ex)
@@ -104,9 +104,9 @@ public sealed class ReviewLauncher : IReviewLauncher, IAsyncDisposable
     /// review tabs easy to scan. Falls back to the repo-first form when the
     /// author is unknown.
     /// </summary>
-    internal static string BuildTabTitle(string? authorLogin, string displayRepo, int number, string shortSha, string hhmm)
+    internal static string BuildTabTitle(string? authorLogin, string displayRepo, int number, string shortSha, string hhmm, IReadOnlyList<IdentityClass>? classes)
     {
-        var author = ShortAuthor(authorLogin);
+        var author = ShortAuthor(authorLogin, classes);
         var repo = ShortRepo(displayRepo);
         return string.IsNullOrEmpty(author)
             ? $"{repo} #{number} @{shortSha} {hhmm}"
@@ -115,25 +115,21 @@ public sealed class ReviewLauncher : IReviewLauncher, IAsyncDisposable
 
     /// <summary>
     /// Short author handle for the tab title: the email local part's first
-    /// segment (<c>jean-marc.prieur@ms.com → jean-marc</c>), or, for a bare
-    /// login, the alias itself (<c>octocat → octocat</c>). EMU / proxima
-    /// logins carry an <c>_&lt;org&gt;</c> suffix
-    /// (<c>jmprieur_microsoft → jmprieur</c>); the <c>_microsoft</c> suffix is
+    /// segment (<c>jean-marc.prieur@example.com → jean-marc</c>), or, for a bare
+    /// login, the alias itself (<c>octocat → octocat</c>). EMU-style logins carry
+    /// an <c>_&lt;shortcode&gt;</c> suffix (<c>jmprieur_microsoft → jmprieur</c>);
+    /// a matching <see cref="PrInboxConfig.IdentityClasses"/> alias suffix is
     /// dropped so the tab shows just the alias.
     /// </summary>
-    internal static string ShortAuthor(string? login)
+    internal static string ShortAuthor(string? login, IReadOnlyList<IdentityClass>? classes)
     {
         if (string.IsNullOrWhiteSpace(login)) return string.Empty;
         var s = login.Trim();
         var at = s.IndexOf('@');
         if (at > 0) s = s[..at];          // strip email domain
 
-        // EMU / proxima (Microsoft) logins are "<alias>_microsoft".
-        const string emuSuffix = "_microsoft";
-        if (s.Length > emuSuffix.Length && s.EndsWith(emuSuffix, StringComparison.OrdinalIgnoreCase))
-        {
-            s = s[..^emuSuffix.Length];
-        }
+        // EMU-style logins are "<alias>_<shortcode>"; drop the class suffix for display.
+        s = IdentityClassifier.StripAliasSuffix(s, host: null, classes);
 
         var dot = s.IndexOf('.');
         if (dot > 0) s = s[..dot];        // firstname.lastname -> firstname
@@ -142,7 +138,7 @@ public sealed class ReviewLauncher : IReviewLauncher, IAsyncDisposable
 
     /// <summary>
     /// Repo name only — drops the <c>owner/</c> (GitHub) or <c>project/</c>
-    /// (ADO) prefix: <c>agency-microsoft/playground → playground</c>.
+    /// (ADO) prefix: <c>octocat/playground → playground</c>.
     /// </summary>
     internal static string ShortRepo(string? displayRepo)
     {
@@ -249,7 +245,12 @@ public sealed class ReviewLauncher : IReviewLauncher, IAsyncDisposable
         }
 
         var rl = _config.ReviewLauncher;
-        var mcps = string.Join(",", rl.AdditionalMcps ?? new());
+        // The launch command (with {plugindir}/{plugin}/{model}/{agent}
+        // substituted) owns the CLI and its flag syntax, so the launcher
+        // hardcodes no flag names. Strip embedded quotes so the value survives
+        // the wt/pwsh command line.
+        var pluginDir = FindPluginDir();
+        var launchCommand = rl.ResolveLaunchCommand(pluginDir).Replace("\"", "");
         // Quote values defensively in case a user puts spaces in them. The
         // tab title is also re-used as the underlying agent's session name
         // (--name) so each review claims its own copilot session and the
@@ -259,11 +260,8 @@ public sealed class ReviewLauncher : IReviewLauncher, IAsyncDisposable
             : tabTitle.Replace("\"", "");
         var launcherArgs =
             $"-RunDirectory \"{runDir}\"" +
-            $" -Plugin \"{rl.Plugin}\"" +
-            $" -Model \"{rl.Model}\"" +
-            $" -Agent \"{rl.Agent}\"" +
+            $" -LaunchCommand \"{launchCommand}\"" +
             $" -SessionName \"{safeSessionName}\"" +
-            (string.IsNullOrEmpty(mcps) ? "" : $" -Mcps \"{mcps}\"") +
             (rl.AutoSend ? "" : " -NoAutoSend") +
             (rl.Yolo     ? " -Yolo"       : "");
 
@@ -367,6 +365,28 @@ public sealed class ReviewLauncher : IReviewLauncher, IAsyncDisposable
             dir = Path.GetDirectoryName(dir);
         }
         return null;
+    }
+
+    /// <summary>
+    /// Resolves the local path to the bundled dual-review plugin for the
+    /// <c>{plugindir}</c> placeholder (used by the public Copilot CLI
+    /// <c>--plugin-dir</c> flag). Honours <c>PRINBOX_PLUGIN_DIR</c>, else walks
+    /// up from the current binary towards <c>plugins/dual-review</c>. Returns
+    /// an empty string when not found so the placeholder resolves to nothing.
+    /// </summary>
+    private static string FindPluginDir()
+    {
+        var envPath = Environment.GetEnvironmentVariable("PRINBOX_PLUGIN_DIR");
+        if (!string.IsNullOrEmpty(envPath) && Directory.Exists(envPath)) return envPath;
+
+        var dir = AppContext.BaseDirectory;
+        for (var i = 0; i < 8 && dir is not null; i++)
+        {
+            var candidate = Path.Combine(dir, "plugins", "dual-review");
+            if (Directory.Exists(candidate)) return candidate;
+            dir = Path.GetDirectoryName(dir);
+        }
+        return string.Empty;
     }
 
     private static string? ResolveOnPath(string exe)

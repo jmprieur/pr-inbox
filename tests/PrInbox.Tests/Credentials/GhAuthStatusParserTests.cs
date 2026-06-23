@@ -101,13 +101,13 @@ public sealed class GhAuthStatusParserTests
               ✓ Logged in to github.com account jmprieur (keyring)
               - Active account: true
 
-            microsoft.ghe.com
-              ✓ Logged in to microsoft.ghe.com account jean-marc-prieur (keyring)
+            ghe.example.com
+              ✓ Logged in to ghe.example.com account jean-marc-prieur (keyring)
               - Active account: true
             """;
 
         var gh = GhAuthStatusParser.Parse(output, "github.com");
-        var ghe = GhAuthStatusParser.Parse(output, "microsoft.ghe.com");
+        var ghe = GhAuthStatusParser.Parse(output, "ghe.example.com");
 
         gh.Should().ContainSingle(i => i.Login == "jmprieur");
         ghe.Should().ContainSingle(i => i.Login == "jean-marc-prieur");

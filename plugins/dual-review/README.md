@@ -40,4 +40,4 @@ preserves their independence. All reference the companion pattern doc.
 
 ## Provenance
 
-Adapted from the `security-toolkit` plugin in the 1ES `ai-plugins` marketplace.
+Adapted from an internal code-review plugin, generalized for pr-inbox.

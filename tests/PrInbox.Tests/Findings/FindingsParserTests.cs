@@ -13,7 +13,7 @@ public class FindingsParserTests
         head_sha: deadbeefcafebabe1234567890abcdef12345678
         base_sha: 8a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b
         generated_at_utc: 2026-05-15T21:00:13Z
-        models: [opus-4.7, gpt-5.5]
+        models: [opus-4.8, gpt-5.5]
         asymmetry:
           both_found: 4
           opus_only: 2
@@ -53,7 +53,7 @@ public class FindingsParserTests
         doc.PrUrl.Should().Be("https://github.com/owner/repo/pull/42");
         doc.PrStableIdentity.Should().Be("gh.com:123#456");
         doc.HeadSha.Should().Be("deadbeefcafebabe1234567890abcdef12345678");
-        doc.Models.Should().Equal("opus-4.7", "gpt-5.5");
+        doc.Models.Should().Equal("opus-4.8", "gpt-5.5");
         doc.Asymmetry.Should().NotBeNull();
         doc.Asymmetry!.BothFound.Should().Be(4);
         doc.Asymmetry.OpusOnly.Should().Be(2);

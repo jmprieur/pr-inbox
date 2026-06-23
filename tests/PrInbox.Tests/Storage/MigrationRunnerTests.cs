@@ -119,11 +119,11 @@ public class MigrationRunnerTests
               title, author_login, url, status, tracking_reason, identity_used,
               first_seen_at, last_synced_at
             ) VALUES (
-              'gh.com:agency-microsoft/playground#4248',
+              'gh.com:octocat/playground#4248',
               'gh.com:100#4248',
-              'gh.com', 'github', 'agency-microsoft/playground', 4248,
+              'gh.com', 'github', 'octocat/playground', 4248,
               'Sample PR', 'octocat',
-              'https://github.com/agency-microsoft/playground/pull/4248',
+              'https://github.com/octocat/playground/pull/4248',
               'open', 'assigned', 'jmprieur_public',
               '2026-05-13T20:00:00Z', '2026-05-13T20:30:00Z'
             );
@@ -132,7 +132,7 @@ public class MigrationRunnerTests
             INSERT INTO pr_snapshots (
               pr_identity, synced_at, head_sha, base_sha, ordered_commit_shas, pr_state
             ) VALUES (
-              'gh.com:agency-microsoft/playground#4248',
+              'gh.com:octocat/playground#4248',
               '2026-05-13T20:30:00Z', 'abc', 'base', '["abc"]', 'open'
             );
             """);
@@ -140,7 +140,7 @@ public class MigrationRunnerTests
             INSERT INTO observed_threads (
               pr_identity, platform_thread_id, kind, first_seen_at, last_seen_at
             ) VALUES (
-              'gh.com:agency-microsoft/playground#4248', 't1', 'review_comment',
+              'gh.com:octocat/playground#4248', 't1', 'review_comment',
               '2026-05-13T20:30:00Z', '2026-05-13T20:30:00Z'
             );
             """);
@@ -165,16 +165,16 @@ public class MigrationRunnerTests
         // Parent pr_identity is now the URL.
         var parentId = await ScalarStringAsync(keepAlive,
             "SELECT pr_identity FROM pull_requests WHERE stable_identity = 'gh.com:100#4248';");
-        parentId.Should().Be("https://github.com/agency-microsoft/playground/pull/4248");
+        parentId.Should().Be("https://github.com/octocat/playground/pull/4248");
 
         // Children point at the URL too.
         var childId = await ScalarStringAsync(keepAlive,
             "SELECT pr_identity FROM pr_snapshots LIMIT 1;");
-        childId.Should().Be("https://github.com/agency-microsoft/playground/pull/4248");
+        childId.Should().Be("https://github.com/octocat/playground/pull/4248");
 
         var threadId = await ScalarStringAsync(keepAlive,
             "SELECT pr_identity FROM observed_threads LIMIT 1;");
-        threadId.Should().Be("https://github.com/agency-microsoft/playground/pull/4248");
+        threadId.Should().Be("https://github.com/octocat/playground/pull/4248");
 
         // Junction is seeded with one binding row per PR.
         var bindingCount = await ScalarLongAsync(keepAlive,
@@ -182,7 +182,7 @@ public class MigrationRunnerTests
         bindingCount.Should().Be(1L);
 
         var (bUrl, bSource, bIdentity) = await BindingRowAsync(keepAlive);
-        bUrl.Should().Be("https://github.com/agency-microsoft/playground/pull/4248");
+        bUrl.Should().Be("https://github.com/octocat/playground/pull/4248");
         bSource.Should().Be("gh.com");
         bIdentity.Should().Be("jmprieur_public");
     }

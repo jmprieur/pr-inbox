@@ -21,7 +21,7 @@ public sealed record FindingsDocument
 
     public DateTimeOffset GeneratedAtUtc { get; init; }
 
-    /// <summary>Model identifiers used by the review (e.g. opus-4.7, gpt-5.5).</summary>
+    /// <summary>Model identifiers used by the review (e.g. opus-4.8, gpt-5.5).</summary>
     public IReadOnlyList<string> Models { get; init; } = Array.Empty<string>();
 
     /// <summary>Diagnostic breakdown of model agreement; free-shape map for forward compatibility.</summary>

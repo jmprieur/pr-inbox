@@ -20,7 +20,7 @@ public class ThreadResolveOrchestratorTests : IAsyncLifetime
     private Microsoft.Data.Sqlite.SqliteConnection _keepAlive = null!;
     private PullRequestRepository _prRepo = null!;
     private ObservedThreadRepository _threadRepo = null!;
-    private const string Url = "https://github.com/agency-microsoft/playground/pull/5589";
+    private const string Url = "https://github.com/octocat/playground/pull/5589";
 
     public async Task InitializeAsync()
     {
@@ -202,7 +202,7 @@ public class ThreadResolveOrchestratorTests : IAsyncLifetime
         Identity: SampleIdentity(),
         SourceKind: SourceKind.GitHub,
         SourceId: "gh.com",
-        DisplayRepo: "agency-microsoft/playground",
+        DisplayRepo: "octocat/playground",
         Number: 5589,
         Title: "thread resolve PR",
         AuthorLogin: "octocat",

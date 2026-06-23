@@ -119,7 +119,7 @@ public static class PrUrl
 /// </summary>
 /// <param name="Canonical">The canonical URL string.</param>
 /// <param name="Platform">Which platform this URL is from.</param>
-/// <param name="Host">Lowercased host (e.g. <c>github.com</c>, <c>microsoft.ghe.com</c>,
+/// <param name="Host">Lowercased host (e.g. <c>github.com</c>, <c>ghe.example.com</c>,
 ///   <c>dev.azure.com</c>).</param>
 /// <param name="Owner">GitHub owner / GHE owner / ADO org name.</param>
 /// <param name="Project">ADO project name; <c>null</c> for GitHub and GHE.</param>

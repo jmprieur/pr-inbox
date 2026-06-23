@@ -186,7 +186,7 @@ else
         @if (_showAdoForm)
         {
             <div class="settings-inline-form">
-                <label>Org   <input @bind="_adoOrg"     placeholder="mseng" /></label>
+                <label>Org   <input @bind="_adoOrg"     placeholder="fabrikam" /></label>
                 <label>Project <input @bind="_adoProject" placeholder="Context" /></label>
                 <div class="settings-inline-form-actions">
                     <button @onclick="AddAdoAsync" disabled="@_busy">Add</button>
@@ -323,7 +323,7 @@ else
 
     <section class="settings-section">
         <h2>Ignored repos</h2>
-        <p class="muted">One regex per line. PRs whose display repo (e.g. <code>1ES/Spmi</code>) matches one of these are hidden by default in the Inbox.</p>
+        <p class="muted">One regex per line. PRs whose display repo (e.g. <code>contoso/widgets</code>) matches one of these are hidden by default in the Inbox.</p>
         <textarea class="settings-textarea" rows="6" @bind="_ignoredReposText"></textarea>
         <div class="settings-actions">
             <button @onclick="SaveIgnoredReposAsync" disabled="@_busy">Save</button>
@@ -356,6 +356,26 @@ else
             How the Review button drives the dual-model-review agent.
             These settings take effect immediately on the <em>next</em> review you launch — running consoles are unaffected.
         </p>
+        <div class="settings-toggle">
+            <label>
+                <strong>Launch command</strong>
+                <span class="muted">
+                    The command that runs the review. Use <code>{plugindir}</code>, <code>{plugin}</code>,
+                    <code>{model}</code>, and <code>{agent}</code> placeholders. The default targets the
+                    public GitHub Copilot CLI and loads the plugin from a local directory
+                    (<code>{plugindir}</code> is resolved automatically).
+                    <strong>Microsoft users:</strong> e.g.
+                    <code>agency copilot --mcp workiq --mcp teams --plugin {plugin} --model {model} --agent {agent}</code>.
+                    Leave blank to restore the default.
+                </span>
+                <input type="text"
+                       value="@_launchCommand"
+                       @onchange="OnLaunchCommandChanged"
+                       placeholder="copilot --plugin-dir {plugindir} --model {model} --agent {agent}"
+                       disabled="@_busy"
+                       style="grid-column: 1 / -1; width: 100%; margin-top: .35rem;" />
+            </label>
+        </div>
         <div class="settings-toggle">
             <label>
                 <input type="checkbox"
@@ -440,6 +460,7 @@ else
     private bool _yolo;
     private bool _tabPerReview;
     private string _tabColor = string.Empty;
+    private string _launchCommand = string.Empty;
 
     private bool _showGheForm;
     private string _gheHost = string.Empty;
@@ -550,6 +571,7 @@ else
         _yolo = _cfg.ReviewLauncher.Yolo;
         _tabPerReview = _cfg.ReviewLauncher.TabPerReview;
         _tabColor = _cfg.ReviewLauncher.TabColor;
+        _launchCommand = _cfg.ReviewLauncher.LaunchCommand;
     }
 
     private static string FormatPathFilters(IReadOnlyDictionary<string, List<string>> filters)
@@ -904,6 +926,20 @@ else
         {
             await ConfigSvc.SetReviewLauncherTabPerReviewAsync(_tabPerReview);
             SetMessage($"One tab per review {(value ? "ON" : "OFF")}.");
+        });
+    }
+
+    private Task OnLaunchCommandChanged(ChangeEventArgs e)
+    {
+        var entered = e.Value?.ToString()?.Trim() ?? string.Empty;
+        return WrapAsync(async () =>
+        {
+            await ConfigSvc.SetReviewLauncherCommandAsync(entered);
+            // Blank restores the default; reflect the effective value in the box.
+            _launchCommand = string.IsNullOrEmpty(entered)
+                ? new ReviewLauncherSettings().LaunchCommand
+                : entered;
+            SetMessage("Review launch command updated.");
         });
     }
 

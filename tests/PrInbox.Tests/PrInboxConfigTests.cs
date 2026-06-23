@@ -37,7 +37,7 @@ public class PrInboxConfigTests
                     },
                     new SourceConfig
                     {
-                        Id = "ado:mseng",
+                        Id = "ado:fabrikam",
                         Kind = SourceConfigKind.AzureDevOps,
                         Host = null,
                         Identity = "default",
@@ -46,7 +46,7 @@ public class PrInboxConfigTests
                 },
                 Ado = new AdoConfig
                 {
-                    Projects = { new AdoProjectConfig { Org = "mseng", Project = "Context" } },
+                    Projects = { new AdoProjectConfig { Org = "fabrikam", Project = "Context" } },
                 },
                 Bots = new BotConfig { ExtraLogins = { "Copilot" } },
             };
@@ -57,8 +57,8 @@ public class PrInboxConfigTests
             var loaded = await PrInboxConfig.LoadAsync(path);
             loaded.Sources.Should().HaveCount(2);
             loaded.Sources.Should().Contain(s => s.Id == "gh.com" && s.Kind == SourceConfigKind.GitHub);
-            loaded.Sources.Should().Contain(s => s.Id == "ado:mseng" && s.Kind == SourceConfigKind.AzureDevOps);
-            loaded.Ado.Projects.Should().ContainSingle(p => p.Org == "mseng" && p.Project == "Context");
+            loaded.Sources.Should().Contain(s => s.Id == "ado:fabrikam" && s.Kind == SourceConfigKind.AzureDevOps);
+            loaded.Ado.Projects.Should().ContainSingle(p => p.Org == "fabrikam" && p.Project == "Context");
             loaded.Bots.ExtraLogins.Should().ContainSingle(l => l == "Copilot");
         }
         finally
