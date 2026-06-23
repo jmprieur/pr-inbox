@@ -249,7 +249,10 @@ public sealed class ReviewLauncher : IReviewLauncher, IAsyncDisposable
         }
 
         var rl = _config.ReviewLauncher;
-        var mcps = string.Join(",", rl.AdditionalMcps ?? new());
+        // The launch command (with {plugin}/{model}/{agent} substituted) owns
+        // the CLI and its flag syntax, so the launcher hardcodes no flag names.
+        // Strip embedded quotes so the value survives the wt/pwsh command line.
+        var launchCommand = rl.ResolveLaunchCommand().Replace("\"", "");
         // Quote values defensively in case a user puts spaces in them. The
         // tab title is also re-used as the underlying agent's session name
         // (--name) so each review claims its own copilot session and the
@@ -259,11 +262,8 @@ public sealed class ReviewLauncher : IReviewLauncher, IAsyncDisposable
             : tabTitle.Replace("\"", "");
         var launcherArgs =
             $"-RunDirectory \"{runDir}\"" +
-            $" -Plugin \"{rl.Plugin}\"" +
-            $" -Model \"{rl.Model}\"" +
-            $" -Agent \"{rl.Agent}\"" +
+            $" -LaunchCommand \"{launchCommand}\"" +
             $" -SessionName \"{safeSessionName}\"" +
-            (string.IsNullOrEmpty(mcps) ? "" : $" -Mcps \"{mcps}\"") +
             (rl.AutoSend ? "" : " -NoAutoSend") +
             (rl.Yolo     ? " -Yolo"       : "");
 

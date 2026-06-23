@@ -60,7 +60,7 @@ You need these on `PATH`:
 | `az` (Azure CLI) | ADO auth — `az login` (skip if no ADO sources) |
 | `pwsh` (PowerShell 7+) | Review launcher runs under this |
 | `wt.exe` (Windows Terminal) | Each Review opens in a new tab |
-| GitHub Copilot CLI (`copilot`) | Used by the launcher to run the review. Microsoft users can set `PRINBOX_REVIEW_CLI="agency copilot"`. |
+| GitHub Copilot CLI (`copilot`) | Used by the launcher to run the review. Microsoft users set the launch command to `agency copilot …` (Settings → Review launcher). |
 
 ### 2. Build & start
 
@@ -759,7 +759,7 @@ appends a new subdir; nothing is overwritten.
 | `config doctor` red on ADO | `az` token expired, or no ADO sources configured | `az login`, or just skip the ADO step |
 | Sync runs but inbox empty | `gh` identity ≠ PR assignee | Compare what Doctor prints with the assignee on a known PR |
 | Inbox row missing for a PR you expect | Hidden by an `IgnoredRepos` regex, repo denylist, author denylist, or source chip | Toggle **Show ignored** + check each filter pill's status line |
-| Review tab opens then exits ("copilot: command not found") | Review CLI not on `PATH` | Install the GitHub Copilot CLI, or set `PRINBOX_REVIEW_CLI` (Microsoft: `agency copilot`) |
+| Review tab opens then exits ("copilot: command not found") | Review CLI not on `PATH` | Install the GitHub Copilot CLI, or set the launch command (Settings → Review launcher; Microsoft: `agency copilot …`) |
 | Review tab opens but plugin fetch fails | No access to the configured plugin source | Set `PRINBOX_REVIEW_PLUGIN=local:<path>` (see [README § overrides](README.md#review-launcher-overrides)) |
 | Review tab opens but model call fails | Review CLI not authenticated to the chosen model | Authenticate it, or change `PRINBOX_REVIEW_MODEL` |
 | Web says "port already in use" | Stale Kestrel still listening | `Get-NetTCPConnection -LocalPort 7341 \| %{ Stop-Process -Id $_.OwningProcess -Force }` |

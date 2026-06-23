@@ -169,11 +169,41 @@ public sealed class BotConfig
 public sealed class ReviewLauncherSettings
 {
     /// <summary>
-    /// Plugin spec passed to <c>agency copilot --plugin &lt;...&gt;</c>.
-    /// Defaults to the <c>dual-review</c> plugin published from this
-    /// repo's marketplace (<c>.github/plugin/marketplace.json</c>). For
-    /// local development against an unpublished working tree, use a
-    /// <c>local:</c> spec. Examples:
+    /// The full command the launcher runs, with <c>{plugin}</c>,
+    /// <c>{model}</c>, and <c>{agent}</c> placeholders substituted from
+    /// <see cref="Plugin"/> / <see cref="Model"/> / <see cref="Agent"/>.
+    /// Defaults to the public GitHub Copilot CLI. Microsoft users point it
+    /// at the <c>agency</c> wrapper and add wrapper-only flags such as
+    /// <c>--mcp</c>, e.g.
+    /// <c>agency copilot --mcp workiq --mcp teams --plugin {plugin} --model {model} --agent {agent}</c>.
+    /// The template owns the CLI and its flag syntax, so no flag name is
+    /// hardcoded in the launcher.
+    /// </summary>
+    /// <remarks>
+    /// Mutable (<c>set</c> not <c>init</c>) so the Settings page can update
+    /// it on the live DI singleton and the next review launch picks it up
+    /// without a process restart.
+    /// </remarks>
+    public string LaunchCommand { get; set; } =
+        "copilot --plugin {plugin} --model {model} --agent {agent}";
+
+    /// <summary>
+    /// Returns <see cref="LaunchCommand"/> with the <c>{plugin}</c>,
+    /// <c>{model}</c>, and <c>{agent}</c> placeholders substituted.
+    /// </summary>
+    public string ResolveLaunchCommand() =>
+        LaunchCommand
+            .Replace("{plugin}", Plugin)
+            .Replace("{model}", Model)
+            .Replace("{agent}", Agent);
+
+    /// <summary>
+    /// Plugin spec substituted into the <c>{plugin}</c> placeholder of
+    /// <see cref="LaunchCommand"/>. Defaults to the <c>dual-review</c>
+    /// plugin published from this repo's marketplace
+    /// (<c>.github/plugin/marketplace.json</c>). For local development
+    /// against an unpublished working tree, use a <c>local:</c> spec.
+    /// Examples:
     /// <list type="bullet">
     ///   <item><c>market:dual-review@jmprieur/pr-inbox</c></item>
     ///   <item><c>github:jmprieur/pr-inbox:plugins/dual-review</c></item>
@@ -183,10 +213,10 @@ public sealed class ReviewLauncherSettings
     /// </summary>
     public string Plugin { get; init; } = "market:dual-review@jmprieur/pr-inbox";
 
-    /// <summary>Model id passed to <c>agency copilot --model</c>.</summary>
+    /// <summary>Model id substituted into the <c>{model}</c> placeholder.</summary>
     public string Model { get; init; } = "claude-opus-4.8";
 
-    /// <summary>Agent id passed to <c>agency copilot --agent</c>.</summary>
+    /// <summary>Agent id substituted into the <c>{agent}</c> placeholder.</summary>
     public string Agent { get; init; } = "dual-review:dual-model-review";
 
     /// <summary>
@@ -222,9 +252,6 @@ public sealed class ReviewLauncherSettings
 
     private static readonly Regex TabColorPattern =
         new("^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$", RegexOptions.Compiled);
-
-    /// <summary>MCP servers to enable (each becomes one <c>--mcp</c> flag).</summary>
-    public List<string> AdditionalMcps { get; init; } = new() { "workiq", "teams" };
 
     /// <summary>
     /// When true (default), the launcher sends a short bootstrap prompt

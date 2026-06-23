@@ -358,6 +358,24 @@ else
         </p>
         <div class="settings-toggle">
             <label>
+                <strong>Launch command</strong>
+                <span class="muted">
+                    The command that runs the review. Use <code>{plugin}</code>, <code>{model}</code>,
+                    and <code>{agent}</code> placeholders. The default targets the public GitHub Copilot CLI.
+                    <strong>Microsoft users:</strong> e.g.
+                    <code>agency copilot --mcp workiq --mcp teams --plugin {plugin} --model {model} --agent {agent}</code>.
+                    Leave blank to restore the default.
+                </span>
+                <input type="text"
+                       value="@_launchCommand"
+                       @onchange="OnLaunchCommandChanged"
+                       placeholder="copilot --plugin {plugin} --model {model} --agent {agent}"
+                       disabled="@_busy"
+                       style="width:100%; margin-top:.35rem;" />
+            </label>
+        </div>
+        <div class="settings-toggle">
+            <label>
                 <input type="checkbox"
                        checked="@_autoSend"
                        @onchange="@(e => OnAutoSendChanged((bool)e.Value!))"
@@ -440,6 +458,7 @@ else
     private bool _yolo;
     private bool _tabPerReview;
     private string _tabColor = string.Empty;
+    private string _launchCommand = string.Empty;
 
     private bool _showGheForm;
     private string _gheHost = string.Empty;
@@ -550,6 +569,7 @@ else
         _yolo = _cfg.ReviewLauncher.Yolo;
         _tabPerReview = _cfg.ReviewLauncher.TabPerReview;
         _tabColor = _cfg.ReviewLauncher.TabColor;
+        _launchCommand = _cfg.ReviewLauncher.LaunchCommand;
     }
 
     private static string FormatPathFilters(IReadOnlyDictionary<string, List<string>> filters)
@@ -904,6 +924,20 @@ else
         {
             await ConfigSvc.SetReviewLauncherTabPerReviewAsync(_tabPerReview);
             SetMessage($"One tab per review {(value ? "ON" : "OFF")}.");
+        });
+    }
+
+    private Task OnLaunchCommandChanged(ChangeEventArgs e)
+    {
+        var entered = e.Value?.ToString()?.Trim() ?? string.Empty;
+        return WrapAsync(async () =>
+        {
+            await ConfigSvc.SetReviewLauncherCommandAsync(entered);
+            // Blank restores the default; reflect the effective value in the box.
+            _launchCommand = string.IsNullOrEmpty(entered)
+                ? new ReviewLauncherSettings().LaunchCommand
+                : entered;
+            SetMessage("Review launch command updated.");
         });
     }
 

@@ -201,6 +201,17 @@ public sealed class ConfigService : IConfigService
     }
 
     /// <inheritdoc />
+    public async Task SetReviewLauncherCommandAsync(string launchCommand, CancellationToken ct = default)
+    {
+        var cfg = await PrInboxConfig.LoadAsync(_configPath, ct);
+        var trimmed = launchCommand?.Trim();
+        cfg.ReviewLauncher.LaunchCommand = string.IsNullOrEmpty(trimmed)
+            ? new ReviewLauncherSettings().LaunchCommand   // empty restores the default
+            : trimmed;
+        await SaveAndRefreshAsync(cfg, ct);
+    }
+
+    /// <inheritdoc />
     public async Task SetRepoPathFiltersAsync(
         IReadOnlyDictionary<string, IReadOnlyList<string>> filters,
         CancellationToken ct = default)
@@ -394,6 +405,7 @@ public sealed class ConfigService : IConfigService
         _singleton.ReviewLauncher.Yolo = cfg.ReviewLauncher.Yolo;
         _singleton.ReviewLauncher.TabColor = cfg.ReviewLauncher.TabColor;
         _singleton.ReviewLauncher.TabPerReview = cfg.ReviewLauncher.TabPerReview;
+        _singleton.ReviewLauncher.LaunchCommand = cfg.ReviewLauncher.LaunchCommand;
     }
 
     private static string DefaultIdFor(SourceConfigKind kind, string host) => kind switch

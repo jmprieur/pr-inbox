@@ -322,8 +322,43 @@ public sealed class ConfigServiceTests : IDisposable
         (await svc.GetAsync()).ReviewLauncher.TabPerReview.Should().BeFalse();
     }
 
+    [Fact]
+    public async Task SetReviewLauncherCommandAsync_Persists_And_Mirrors_Singleton()
+    {
+        var singleton = new PrInboxConfig();
+        var svc = new ConfigService(singleton, _path);
+        singleton.ReviewLauncher.LaunchCommand
+            .Should().Be("copilot --plugin {plugin} --model {model} --agent {agent}"); // default
+
+        var custom = "agency copilot --mcp workiq --plugin {plugin} --model {model} --agent {agent}";
+        await svc.SetReviewLauncherCommandAsync(custom);
+
+        singleton.ReviewLauncher.LaunchCommand.Should().Be(custom);          // mirrored in-place
+        (await svc.GetAsync()).ReviewLauncher.LaunchCommand.Should().Be(custom); // persisted
+
+        // Blank restores the default.
+        await svc.SetReviewLauncherCommandAsync("   ");
+        singleton.ReviewLauncher.LaunchCommand
+            .Should().Be("copilot --plugin {plugin} --model {model} --agent {agent}");
+    }
+
+    [Fact]
+    public void ResolveLaunchCommand_Substitutes_Placeholders()
+    {
+        var rl = new ReviewLauncherSettings
+        {
+            LaunchCommand = "agency copilot --mcp teams --plugin {plugin} --model {model} --agent {agent}",
+            Plugin = "market:dual-review@jmprieur/pr-inbox",
+            Model = "claude-opus-4.8",
+            Agent = "dual-review:dual-model-review",
+        };
+
+        rl.ResolveLaunchCommand().Should().Be(
+            "agency copilot --mcp teams --plugin market:dual-review@jmprieur/pr-inbox " +
+            "--model claude-opus-4.8 --agent dual-review:dual-model-review");
+    }
+
     [Theory]
-    [InlineData("#5da4ff", "#5da4ff")]
     [InlineData("  #ABC  ", "#ABC")]
     [InlineData("#FFFFFF", "#FFFFFF")]
     [InlineData("", null)]
