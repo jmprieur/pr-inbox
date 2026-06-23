@@ -1,0 +1,8 @@
+{
+  "identityClasses": [
+    { "name": "Public", "host": "github.com", "aliasSuffix": "" }
+  ],
+  "reviewLauncher": {
+    "launchCommand": "copilot --plugin-dir {plugindir} --model {model} --agent {agent}"
+  }
+}
