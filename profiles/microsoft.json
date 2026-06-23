@@ -5,6 +5,7 @@
     { "name": "Public",  "host": "github.com",        "aliasSuffix": "" }
   ],
   "reviewLauncher": {
-    "launchCommand": "agency copilot --mcp workiq --mcp teams --plugin {plugin} --model {model} --agent {agent}"
+    "launchCommand": "agency copilot --mcp workiq --mcp teams --plugin {plugin} --model {model} --agent {agent}",
+    "model": "claude-opus-4.8"
   }
 }

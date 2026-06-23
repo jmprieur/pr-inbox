@@ -39,7 +39,7 @@
       "type": "array",
       "items": { "type": "string" },
       "minItems": 1,
-      "description": "Model identifiers used by the review (e.g. opus-4.7, gpt-5.5). If only one model was available, list just that one; do not invent a second."
+      "description": "Model identifiers used by the review (e.g. opus-4.8, gpt-5.5). If only one model was available, list just that one; do not invent a second."
     },
     "asymmetry": {
       "type": "object",

@@ -39,6 +39,11 @@ public sealed class ConfigProfile
             config.ReviewLauncher.LaunchCommand = ReviewLauncher!.LaunchCommand!.Trim();
             changes.Add("review launch command");
         }
+        if (!string.IsNullOrWhiteSpace(ReviewLauncher?.Model))
+        {
+            config.ReviewLauncher.Model = ReviewLauncher!.Model!.Trim();
+            changes.Add("review model");
+        }
         return changes;
     }
 }
@@ -48,4 +53,7 @@ public sealed class ReviewLauncherProfile
 {
     /// <summary>Overrides <see cref="ReviewLauncherSettings.LaunchCommand"/> when set.</summary>
     public string? LaunchCommand { get; init; }
+
+    /// <summary>Overrides <see cref="ReviewLauncherSettings.Model"/> when set.</summary>
+    public string? Model { get; init; }
 }

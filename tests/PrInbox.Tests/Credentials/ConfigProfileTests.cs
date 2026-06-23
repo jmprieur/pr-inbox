@@ -20,16 +20,18 @@ public class ConfigProfileTests
             ReviewLauncher = new ReviewLauncherProfile
             {
                 LaunchCommand = "agency copilot --plugin {plugin} --model {model} --agent {agent}",
+                Model = "claude-opus-4.8",
             },
         };
 
         var changes = profile.ApplyTo(config);
 
-        changes.Should().HaveCount(2);
+        changes.Should().HaveCount(3);
         config.IdentityClasses.Should().HaveCount(2);
         config.IdentityClasses[0].Name.Should().Be("EMU");
         config.ReviewLauncher.LaunchCommand
             .Should().Be("agency copilot --plugin {plugin} --model {model} --agent {agent}");
+        config.ReviewLauncher.Model.Should().Be("claude-opus-4.8");
     }
 
     [Fact]
