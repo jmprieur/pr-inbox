@@ -165,12 +165,18 @@ Right-click the tray icon for **Open PR Inbox**, **Restart**,
 **View log**, and **Stop & Exit** (which shuts the server down
 gracefully). Double-click the icon to reopen the dashboard.
 
-> **Microsoft-internal users:** run [`Start-internal.bat`](Start-internal.bat)
-> instead. It applies the Microsoft profile ([`profiles/microsoft.json`](profiles/microsoft.json)) —
-> the EMU/Proxima identity classes and the `agency copilot` review command —
-> via `pr-inbox config import`, then starts normally. The shipped defaults are
-> generic (just a `Public` identity class on github.com); nothing
-> Microsoft-specific is in the box. You can import any org's profile with
+> **Profiles (clean vs. internal).** The shipped defaults are generic — just a
+> `Public` identity class on github.com and the public `copilot` review command;
+> nothing Microsoft-specific is in the box. To switch modes:
+> - **Microsoft-internal:** run [`Start-internal.bat`](Start-internal.bat) — applies
+>   [`profiles/microsoft.json`](profiles/microsoft.json) (EMU/Proxima identity
+>   classes + the `agency copilot` review command), then starts.
+> - **Back to clean:** run [`Start-public.bat`](Start-public.bat) — applies
+>   [`profiles/public.json`](profiles/public.json), resetting to the public defaults.
+>
+> Both just wrap `pr-inbox config import <file>`, which only ever rewrites the
+> identity classes, review command, and model — your **sources / ADO references
+> are never touched**. Import any org's profile the same way:
 > `pr-inbox config import <file>`.
 
 ### Option A — Web UI, manually
