@@ -19,8 +19,8 @@ public sealed class PrInboxConfig
     public BotConfig Bots { get; init; } = new();
 
     /// <summary>
-    /// Defaults for the in-app Review launcher (which spawns
-    /// <c>agency copilot</c> in a new Windows Terminal tab). Each field
+    /// Defaults for the in-app Review launcher (which spawns the configured
+    /// review CLI in a new Windows Terminal tab). Each field
     /// has a sensible built-in default; absent / null fields fall
     /// through to those defaults.
     /// </summary>
@@ -47,6 +47,19 @@ public sealed class PrInboxConfig
     /// (GitHub/GHE); ADO PRs are left unclassified and always shown.
     /// </summary>
     public Dictionary<string, List<string>> RepoPathFilters { get; init; } = new();
+
+    /// <summary>
+    /// Configurable identity taxonomy. A login is classified by the first
+    /// matching rule (host + alias suffix) — see <see cref="IdentityClass"/> /
+    /// <see cref="IdentityClassifier"/>. Drives the Inbox chips, the review
+    /// tab-title alias, and the default-identity preference. Ships generic
+    /// (just <c>Public</c> on github.com); the Microsoft profile adds EMU and
+    /// Proxima.
+    /// </summary>
+    public List<IdentityClass> IdentityClasses { get; init; } = new()
+    {
+        new IdentityClass { Name = "Public", Host = "github.com", AliasSuffix = "" },
+    };
 
     /// <summary>
     /// Returns the path used by <see cref="LoadOrCreateAsync"/> when no

@@ -47,7 +47,7 @@ public static class PublisherWiring
                     byPair[(host, source.Identity)] = publisher;
                     // Default identity per host: prefer EMU/internal if multiple.
                     if (!defaultByHost.TryGetValue(host, out var existing) ||
-                        IsPreferredIdentity(source.Identity, existing))
+                        IsPreferredIdentity(source.Identity, existing, host, config.IdentityClasses))
                     {
                         defaultByHost[host] = source.Identity;
                     }
@@ -78,14 +78,13 @@ public static class PublisherWiring
             logFactory.CreateLogger<ConfigDrivenPublisherSelector>());
     }
 
-    // Preference: identities containing "microsoft" or "msft" (EMU) >
-    // any other named identity > "default".
-    private static bool IsPreferredIdentity(string candidate, string current)
+    // Preference: a managed identity (EMU/Proxima per the configured taxonomy)
+    // > any other named identity > "default".
+    private static bool IsPreferredIdentity(string candidate, string current, string host, IReadOnlyList<IdentityClass>? classes)
     {
         int Rank(string s) => s switch
         {
-            _ when s.Contains("microsoft", StringComparison.OrdinalIgnoreCase) => 3,
-            _ when s.Contains("msft", StringComparison.OrdinalIgnoreCase) => 3,
+            _ when IdentityClassifier.IsManaged(s, host, classes) => 3,
             "default" => 0,
             _ => 1,
         };

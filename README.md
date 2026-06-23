@@ -165,6 +165,14 @@ Right-click the tray icon for **Open PR Inbox**, **Restart**,
 **View log**, and **Stop & Exit** (which shuts the server down
 gracefully). Double-click the icon to reopen the dashboard.
 
+> **Microsoft-internal users:** run [`Start-internal.bat`](Start-internal.bat)
+> instead. It applies the Microsoft profile ([`profiles/microsoft.json`](profiles/microsoft.json)) —
+> the EMU/Proxima identity classes and the `agency copilot` review command —
+> via `pr-inbox config import`, then starts normally. The shipped defaults are
+> generic (just a `Public` identity class on github.com); nothing
+> Microsoft-specific is in the box. You can import any org's profile with
+> `pr-inbox config import <file>`.
+
 ### Option A — Web UI, manually
 
 ```powershell

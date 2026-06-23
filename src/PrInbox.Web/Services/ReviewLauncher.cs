@@ -82,7 +82,7 @@ public sealed class ReviewLauncher : IReviewLauncher, IAsyncDisposable
             {
                 var shortSha = brief.HeadSha.Length >= 7 ? brief.HeadSha[..7] : brief.HeadSha;
                 var hhmm = DateTimeOffset.Now.ToString("HH:mm");
-                tabTitle = BuildTabTitle(row.AuthorLogin, row.DisplayRepo, row.Number, shortSha, hhmm);
+                tabTitle = BuildTabTitle(row.AuthorLogin, row.DisplayRepo, row.Number, shortSha, hhmm, _config.IdentityClasses);
             }
         }
         catch (Exception ex)
@@ -104,9 +104,9 @@ public sealed class ReviewLauncher : IReviewLauncher, IAsyncDisposable
     /// review tabs easy to scan. Falls back to the repo-first form when the
     /// author is unknown.
     /// </summary>
-    internal static string BuildTabTitle(string? authorLogin, string displayRepo, int number, string shortSha, string hhmm)
+    internal static string BuildTabTitle(string? authorLogin, string displayRepo, int number, string shortSha, string hhmm, IReadOnlyList<IdentityClass>? classes)
     {
-        var author = ShortAuthor(authorLogin);
+        var author = ShortAuthor(authorLogin, classes);
         var repo = ShortRepo(displayRepo);
         return string.IsNullOrEmpty(author)
             ? $"{repo} #{number} @{shortSha} {hhmm}"
@@ -116,24 +116,20 @@ public sealed class ReviewLauncher : IReviewLauncher, IAsyncDisposable
     /// <summary>
     /// Short author handle for the tab title: the email local part's first
     /// segment (<c>jean-marc.prieur@example.com → jean-marc</c>), or, for a bare
-    /// login, the alias itself (<c>octocat → octocat</c>). EMU / proxima
-    /// logins carry an <c>_&lt;org&gt;</c> suffix
-    /// (<c>jmprieur_microsoft → jmprieur</c>); the <c>_microsoft</c> suffix is
+    /// login, the alias itself (<c>octocat → octocat</c>). EMU-style logins carry
+    /// an <c>_&lt;shortcode&gt;</c> suffix (<c>jmprieur_microsoft → jmprieur</c>);
+    /// a matching <see cref="PrInboxConfig.IdentityClasses"/> alias suffix is
     /// dropped so the tab shows just the alias.
     /// </summary>
-    internal static string ShortAuthor(string? login)
+    internal static string ShortAuthor(string? login, IReadOnlyList<IdentityClass>? classes)
     {
         if (string.IsNullOrWhiteSpace(login)) return string.Empty;
         var s = login.Trim();
         var at = s.IndexOf('@');
         if (at > 0) s = s[..at];          // strip email domain
 
-        // EMU / proxima (Microsoft) logins are "<alias>_microsoft".
-        const string emuSuffix = "_microsoft";
-        if (s.Length > emuSuffix.Length && s.EndsWith(emuSuffix, StringComparison.OrdinalIgnoreCase))
-        {
-            s = s[..^emuSuffix.Length];
-        }
+        // EMU-style logins are "<alias>_<shortcode>"; drop the class suffix for display.
+        s = IdentityClassifier.StripAliasSuffix(s, host: null, classes);
 
         var dot = s.IndexOf('.');
         if (dot > 0) s = s[..dot];        // firstname.lastname -> firstname

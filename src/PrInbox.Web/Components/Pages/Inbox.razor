@@ -1767,7 +1767,7 @@ else
         {
             if (string.Equals(sc.Id, row.SourceId, StringComparison.OrdinalIgnoreCase))
             {
-                return InboxFilters.LabelForClass(InboxFilters.ClassifyConfig(sc), sc.Id);
+                return InboxFilters.LabelForClass(InboxFilters.ClassifyConfig(sc, Config.IdentityClasses), sc.Id);
             }
         }
         return SourceLabelFromId(row.SourceId);
@@ -1795,7 +1795,7 @@ else
         {
             if (string.Equals(sc.Id, row.SourceId, StringComparison.OrdinalIgnoreCase))
             {
-                return InboxFilters.ClassifyConfig(sc);
+                return InboxFilters.ClassifyConfig(sc, Config.IdentityClasses);
             }
         }
         return InboxFilters.SourceClassOf(row.SourceId);

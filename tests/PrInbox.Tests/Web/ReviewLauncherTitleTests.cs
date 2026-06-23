@@ -9,13 +9,20 @@ namespace PrInbox.Tests.Web;
 /// </summary>
 public class ReviewLauncherTitleTests
 {
+    // Microsoft-style taxonomy for the tests: EMU + Public on github.com.
+    private static readonly IReadOnlyList<IdentityClass> Classes = new[]
+    {
+        new IdentityClass { Name = "EMU", Host = "github.com", AliasSuffix = "_microsoft" },
+        new IdentityClass { Name = "Public", Host = "github.com", AliasSuffix = "" },
+    };
+
     [Theory]
     [InlineData("octocat", "octocat/playground", "octocat playground #8114 @ff2dcab 15:46")]
     [InlineData("jean-marc.prieur@example.com", "octocat/playground", "jean-marc playground #8114 @ff2dcab 15:46")]
     [InlineData("alice@example.com", "Context/MyRepo", "alice MyRepo #8114 @ff2dcab 15:46")]
     public void BuildTabTitle_LeadsWithAuthor_ThenRepoNameOnly(string author, string repo, string expected)
     {
-        ReviewLauncher.BuildTabTitle(author, repo, 8114, "ff2dcab", "15:46")
+        ReviewLauncher.BuildTabTitle(author, repo, 8114, "ff2dcab", "15:46", Classes)
             .Should().Be(expected);
     }
 
@@ -25,7 +32,7 @@ public class ReviewLauncherTitleTests
     [InlineData("   ")]
     public void BuildTabTitle_FallsBackToRepoFirst_WhenAuthorUnknown(string? author)
     {
-        ReviewLauncher.BuildTabTitle(author, "octocat/playground", 8114, "ff2dcab", "15:46")
+        ReviewLauncher.BuildTabTitle(author, "octocat/playground", 8114, "ff2dcab", "15:46", Classes)
             .Should().Be("playground #8114 @ff2dcab 15:46");
     }
 
@@ -39,7 +46,17 @@ public class ReviewLauncherTitleTests
     [InlineData(null, "")]
     public void ShortAuthor_DerivesFirstNameOrAlias(string? login, string expected)
     {
-        ReviewLauncher.ShortAuthor(login).Should().Be(expected);
+        ReviewLauncher.ShortAuthor(login, Classes).Should().Be(expected);
+    }
+
+    [Fact]
+    public void ShortAuthor_StripsOnlyMatchingClassSuffix()
+    {
+        var acme = new[] { new IdentityClass { Name = "Corp", Host = "github.com", AliasSuffix = "_acme" } };
+        ReviewLauncher.ShortAuthor("dev_acme", acme).Should().Be("dev");          // matching suffix stripped
+        ReviewLauncher.ShortAuthor("dev_acme", Classes).Should().Be("dev_acme");  // non-matching suffix kept
+        ReviewLauncher.ShortAuthor("dev_microsoft", System.Array.Empty<IdentityClass>())
+            .Should().Be("dev_microsoft");                                        // no classes = no stripping
     }
 
     [Theory]
