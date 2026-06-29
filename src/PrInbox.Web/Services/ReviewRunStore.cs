@@ -77,6 +77,21 @@ public sealed class ReviewRunStore
 
     public void UpdateFindings(string prUrl, FindingsDocument? doc, IReadOnlyList<string> errors)
     {
+        // Defense-in-depth: findings.yaml is written by an LLM agent that
+        // reads attacker-controlled diff content. If the agent reports a
+        // pr_url that differs from the trusted run key, surface it as an
+        // error so Review.razor renders the warning banner instead of
+        // silently posting wrong-PR findings under the user's name. This
+        // is NOT a write-redirect (publish always uses the trusted prUrl
+        // key), purely an off-rails canary.
+        if (doc is { PrUrl: { Length: > 0 } reported }
+            && !string.Equals(reported, prUrl, StringComparison.OrdinalIgnoreCase))
+        {
+            errors = [.. errors,
+                $"findings.yaml pr_url '{reported}' does not match this run's PR '{prUrl}'. " +
+                "The agent may have reviewed the wrong PR — verify before publishing."];
+        }
+
         // NOTE: the `with` clause intentionally leaves BodyOverrides alone.
         // FindingsWatcher can reparse findings.yaml several times during a
         // single run (the agent re-writes it as it works); the user's

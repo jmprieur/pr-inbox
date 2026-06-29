@@ -15,7 +15,7 @@ pushd "%~dp0"
 
 echo.
 echo Applying public profile (profiles\public.json) ...
-dotnet run --project "src\PrInbox.Cli" -- config import "%~dp0profiles\public.json"
+dotnet run --project "src\PrInbox.Cli" -- config import "%~dp0profiles\public.json" --yes
 if errorlevel 1 (
     echo.
     echo Profile import failed. See errors above.

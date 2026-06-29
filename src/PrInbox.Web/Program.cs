@@ -120,17 +120,22 @@ app.MapPost("/shutdown", (HttpContext ctx, IHostApplicationLifetime lifetime) =>
         return Results.StatusCode(StatusCodes.Status403Forbidden);
     }
 
+    // Fail closed: the tray launcher (the only legitimate caller) ALWAYS sets
+    // PRINBOX_SHUTDOWN_TOKEN. If it's absent we're running under `dotnet run`
+    // or similar; rejecting here stops a stray web page POST from killing the
+    // app via a CORS-simple request (no preflight, no custom header needed).
     var expected = Environment.GetEnvironmentVariable("PRINBOX_SHUTDOWN_TOKEN");
-    if (!string.IsNullOrEmpty(expected))
+    if (string.IsNullOrEmpty(expected))
     {
-        var provided = ctx.Request.Headers["X-Shutdown-Token"].ToString();
-        var match = System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(
-            System.Text.Encoding.UTF8.GetBytes(provided),
-            System.Text.Encoding.UTF8.GetBytes(expected));
-        if (!match)
-        {
-            return Results.StatusCode(StatusCodes.Status403Forbidden);
-        }
+        return Results.StatusCode(StatusCodes.Status403Forbidden);
+    }
+    var provided = ctx.Request.Headers["X-Shutdown-Token"].ToString();
+    var match = System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(
+        System.Text.Encoding.UTF8.GetBytes(provided),
+        System.Text.Encoding.UTF8.GetBytes(expected));
+    if (!match)
+    {
+        return Results.StatusCode(StatusCodes.Status403Forbidden);
     }
 
     // Defer so the 202 response flushes before Kestrel starts draining.

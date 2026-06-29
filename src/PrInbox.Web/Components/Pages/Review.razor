@@ -163,6 +163,15 @@ else
                         {
                             <span class="edit-badge" title="Body has been edited locally; original is in findings.yaml">edited</span>
                         }
+                        @if (!string.IsNullOrWhiteSpace(f.SuggestedInline))
+                        {
+                            @* Visible cue that this finding carries a one-click-applyable
+                               ```suggestion``` block which is NOT shown in the body textarea.
+                               Without this badge the accountability gate is satisfied against
+                               only part of what gets posted. *@
+                            <span class="edit-badge suggestion-badge"
+                                  title="This finding includes a code suggestion block that GitHub will render with a one-click Commit button. Expand the rendered preview below to review it before publishing.">+ code suggestion</span>
+                        }
                     </td>
                     <td class="muted">@(f.DiffAnchorable ? "inline" : "body-only")</td>
                 </tr>
@@ -189,7 +198,11 @@ else
                                           value="@DraftFor(fid, f.Body ?? string.Empty)"
                                           @onchange="@(e => OnDraftCommit(fid, f.Body ?? string.Empty, e.Value as string))"></textarea>
                             </div>
-                            <details class="rendered-preview">
+                            @* Auto-open the rendered preview when the finding carries a
+                               suggested_inline so the user sees the FULL posted text — the
+                               body textarea above does NOT include the suggestion block. *@
+                            <details class="rendered-preview"
+                                     open="@(!string.IsNullOrWhiteSpace(f.SuggestedInline))">
                                 <summary class="muted">Rendered comment (what gets posted)</summary>
                                 <pre class="comment-preview">@PublishHelpers.ComposeInlineCommentBody(ToPostable(f))</pre>
                             </details>
