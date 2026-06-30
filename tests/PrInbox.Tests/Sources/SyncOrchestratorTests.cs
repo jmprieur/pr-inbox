@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using PrInbox.Core.Models;
 using PrInbox.Core.Storage;
 using PrInbox.Sources;
@@ -416,8 +417,11 @@ public class SyncOrchestratorTests : IAsyncLifetime
         await orch.RunFastAsync("jmprieur_microsoft", progress: null, CancellationToken.None);
 
         var alphaRow = await _prs.GetAsync(idAlpha.Url, CancellationToken.None);
-        var reports = new List<SyncProgress>();
-        var progress = new Progress<SyncProgress>(p => reports.Add(p));
+        // Progress<T> callbacks can run concurrently on thread-pool threads
+        // (IProgress<T> makes no thread-affinity guarantee), so the sink must
+        // be thread-safe — a plain List<T>.Add races two reports and can drop one.
+        var reports = new ConcurrentQueue<SyncProgress>();
+        var progress = new Progress<SyncProgress>(reports.Enqueue);
 
         await orch.RunEnrichAsync(
             "jmprieur_microsoft",
@@ -426,9 +430,8 @@ public class SyncOrchestratorTests : IAsyncLifetime
             precomputedCandidates: new[] { alphaRow! },
             tierLabel: "visible");
 
-        // Give the Progress<T> SynchronizationContext callbacks a beat to
-        // drain — Progress<T> posts asynchronously on the captured context.
-        for (var i = 0; i < 20 && !reports.Any(r => r.Message.Contains("visible")); i++)
+        // Wait for the exact report we assert on; Progress<T> posts asynchronously.
+        for (var i = 0; i < 40 && !reports.Any(r => r.Message.Contains("Enriching (visible)")); i++)
         {
             await Task.Delay(25);
         }
