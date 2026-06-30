@@ -89,4 +89,46 @@ public class ReviewLauncherTitleTests
         args.Should().StartWith($"-w {ReviewLauncherSettings.ReviewWindowName} nt ");
         args.Should().NotContain("-w new ");
     }
+
+    [Theory]
+    // Allowed characters survive verbatim — covers every char in the allowlist.
+    [InlineData("alice repo #42 @ab12cd 15:46", "alice repo #42 @ab12cd 15:46")]
+    [InlineData("a-z_./+:#@ 09", "a-z_./+:#@ 09")]
+    // wt.exe sub-command separator: a `;` inside --title is still a delimiter
+    // (wt re-splits every argv element on unescaped `;`). Must be neutralised.
+    [InlineData("x; calc ;y", "x_ calc _y")]
+    // cmd.exe metacharacters reachable via the `cmd /c start` fallback.
+    [InlineData("a&b|c^d<e>f%g", "a_b_c_d_e_f_g")]
+    // Quote / backslash / backtick — would break wt or pwsh quoting.
+    [InlineData("a\"b\\c`d", "a_b_c_d")]
+    // PowerShell sub-expression and parens.
+    [InlineData("$(evil) (x)", "__evil_ _x_")]
+    // ADO free-form display name attempting wt sub-command injection.
+    [InlineData("bot; powershell -enc AAA ;x repo #1 @ab 12:00",
+                "bot_ powershell -enc AAA _x repo #1 @ab 12:00")]
+    public void SanitizeForShellTitle_AllowlistsSafeChars(string input, string expected)
+    {
+        ReviewLauncher.SanitizeForShellTitle(input).Should().Be(expected);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("&|^;")]            // collapses to "____" → not whitespace, kept as-is
+    public void SanitizeForShellTitle_FallsBackOnEmpty(string? input)
+    {
+        var result = ReviewLauncher.SanitizeForShellTitle(input);
+        if (string.IsNullOrWhiteSpace(input))
+        {
+            result.Should().Be("pr-inbox review");
+        }
+        else
+        {
+            // Non-whitespace input never returns the fallback even if every
+            // character is replaced — a string of underscores is still a
+            // valid, harmless title.
+            result.Should().Be("____");
+        }
+    }
 }

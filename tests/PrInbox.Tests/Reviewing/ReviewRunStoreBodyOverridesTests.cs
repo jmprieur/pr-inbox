@@ -219,4 +219,56 @@ public class ReviewRunStoreBodyOverridesTests
         }
         finally { cleanup(); }
     }
+
+    [Fact]
+    public void UpdateFindings_Flags_Mismatched_PrUrl()
+    {
+        var (dir, cleanup) = FreshRunDir();
+        try
+        {
+            var store = new ReviewRunStore();
+            var run = MakeRun(dir); // .../pull/1
+            store.StartedRun(run);
+
+            store.UpdateFindings(run.PrUrl,
+                new FindingsDocument
+                {
+                    SchemaVersion = 1,
+                    PrUrl = "https://github.com/owner/repo/pull/999",
+                    HeadSha = "deadbeef",
+                    Findings = Array.Empty<Finding>(),
+                },
+                Array.Empty<string>());
+
+            store.Get(run.PrUrl)!.FindingsErrors
+                .Should().ContainSingle(e => e.Contains("does not match this run"));
+        }
+        finally { cleanup(); }
+    }
+
+    [Fact]
+    public void UpdateFindings_Ignores_TrailingSlash_PrUrl_Difference()
+    {
+        var (dir, cleanup) = FreshRunDir();
+        try
+        {
+            var store = new ReviewRunStore();
+            var run = MakeRun(dir, "https://github.com/owner/repo/pull/1");
+            store.StartedRun(run);
+
+            store.UpdateFindings(run.PrUrl,
+                new FindingsDocument
+                {
+                    SchemaVersion = 1,
+                    PrUrl = "https://github.com/owner/repo/pull/1/", // trailing slash only
+                    HeadSha = "deadbeef",
+                    Findings = Array.Empty<Finding>(),
+                },
+                Array.Empty<string>());
+
+            store.Get(run.PrUrl)!.FindingsErrors
+                .Should().NotContain(e => e.Contains("does not match this run"));
+        }
+        finally { cleanup(); }
+    }
 }

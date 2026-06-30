@@ -13,7 +13,7 @@ pushd "%~dp0"
 
 echo.
 echo Applying Microsoft profile (profiles\microsoft.json) ...
-dotnet run --project "src\PrInbox.Cli" -- config import "%~dp0profiles\microsoft.json"
+dotnet run --project "src\PrInbox.Cli" -- config import "%~dp0profiles\microsoft.json" --yes
 if errorlevel 1 (
     echo.
     echo Profile import failed. See errors above.

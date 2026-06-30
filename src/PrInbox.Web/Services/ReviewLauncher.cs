@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Text.RegularExpressions;
 using PrInbox.Core.Credentials;
 using PrInbox.Core.Reviewing;
 using PrInbox.Core.Storage;
@@ -137,6 +138,27 @@ public sealed class ReviewLauncher : IReviewLauncher, IAsyncDisposable
     }
 
     /// <summary>
+    /// Reduces a tab/session title derived from upstream PR metadata to a
+    /// strict allowlist so it is safe to interpolate into both the
+    /// <c>wt.exe</c> and the <c>cmd /c start</c> command lines. The title is
+    /// purely cosmetic, so any disallowed character is replaced with <c>_</c>.
+    /// <para>
+    /// Why this matters: Windows Terminal re-scans every argv element for an
+    /// unescaped <c>;</c> and treats it as a sub-command boundary even inside
+    /// what was a quoted <c>--title</c>; <c>cmd.exe</c> treats
+    /// <c>&amp; | ^ &lt; &gt; %</c> as metacharacters. The author display name
+    /// on Azure DevOps (when <c>uniqueName</c> is null, e.g. for service
+    /// principals) is free-form and could otherwise carry these.
+    /// </para>
+    /// </summary>
+    internal static string SanitizeForShellTitle(string? title)
+    {
+        if (string.IsNullOrWhiteSpace(title)) return "pr-inbox review";
+        var s = Regex.Replace(title, @"[^A-Za-z0-9 #@:_./+\-]", "_");
+        return string.IsNullOrWhiteSpace(s) ? "pr-inbox review" : s;
+    }
+
+    /// <summary>
     /// Repo name only — drops the <c>owner/</c> (GitHub) or <c>project/</c>
     /// (ADO) prefix: <c>octocat/playground → playground</c>.
     /// </summary>
@@ -255,9 +277,13 @@ public sealed class ReviewLauncher : IReviewLauncher, IAsyncDisposable
         // tab title is also re-used as the underlying agent's session name
         // (--name) so each review claims its own copilot session and the
         // CLI doesn't auto-load a colliding prior one.
-        var safeSessionName = string.IsNullOrWhiteSpace(tabTitle)
-            ? "pr-inbox review"
-            : tabTitle.Replace("\"", "");
+        //
+        // SECURITY: tabTitle derives from upstream PR metadata (author login,
+        // repo name). Apply a strict allowlist before it reaches the wt.exe /
+        // cmd.exe command line — wt re-splits every argv element on `;` even
+        // inside what was a quoted --title, and cmd treats `& | ^ %` as
+        // metacharacters. Simply stripping `"` is NOT sufficient.
+        var safeSessionName = SanitizeForShellTitle(tabTitle);
         var launcherArgs =
             $"-RunDirectory \"{runDir}\"" +
             $" -LaunchCommand \"{launchCommand}\"" +
@@ -265,14 +291,12 @@ public sealed class ReviewLauncher : IReviewLauncher, IAsyncDisposable
             (rl.AutoSend ? "" : " -NoAutoSend") +
             (rl.Yolo     ? " -Yolo"       : "");
 
-        // Strip embedded quotes from the tab title so wt doesn't mis-parse
-        // the command line. Falls back to the generic title on empty.
+        // Allowlist the tab title so wt/cmd never see a metacharacter from
+        // upstream PR data. Falls back to the generic title on empty.
         // Append a stable, machine-readable token containing the run id so
         // ConsoleWindowRegistry can find and validate this window even when
         // a human renames the tab — defeats HWND recycling.
-        var humanTitle = string.IsNullOrWhiteSpace(tabTitle)
-            ? "pr-inbox review"
-            : tabTitle.Replace("\"", "");
+        var humanTitle = SanitizeForShellTitle(tabTitle);
         var token = ConsoleWindowRegistry.TokenFor(runId);
         var safeTitle = $"{humanTitle} [{token}]";
 

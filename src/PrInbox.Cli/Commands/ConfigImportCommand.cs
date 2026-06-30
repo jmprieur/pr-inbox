@@ -14,6 +14,11 @@ internal sealed class ConfigImportSettings : CommandSettings
 
     [CommandOption("--config <PATH>")]
     public string? ConfigPath { get; init; }
+
+    [CommandOption("-y|--yes")]
+    [Description("Accept the profile's review launch command without an interactive prompt. "
+               + "Use only when the profile source is trusted (e.g. the in-repo Start-*.bat files).")]
+    public bool Yes { get; init; }
 }
 
 /// <summary>
@@ -50,6 +55,38 @@ internal sealed class ConfigImportCommand : AsyncCommand<ConfigImportSettings>
         }
 
         var config = await PrInboxConfig.LoadAsync(settings.ConfigPath);
+
+        // SECURITY: LaunchCommand is the executable that runs on the next
+        // Review click. Echo its full value and require explicit consent
+        // before a profile (which may have been socially-engineered) can
+        // persist it. --yes bypasses the prompt for the in-repo Start-*.bat
+        // launchers that import the bundled profiles.
+        var newLaunch = profile.ReviewLauncher?.LaunchCommand?.Trim();
+        if (!string.IsNullOrWhiteSpace(newLaunch)
+            && !string.Equals(newLaunch, config.ReviewLauncher.LaunchCommand, StringComparison.Ordinal))
+        {
+            AnsiConsole.MarkupLine("[yellow]This profile sets the review launch command to:[/]");
+            AnsiConsole.MarkupLine($"  [bold]{Markup.Escape(newLaunch)}[/]");
+            AnsiConsole.MarkupLine("[yellow]This command will be executed on your machine when you click Review.[/]");
+            if (!settings.Yes)
+            {
+                // Fail closed when there's no interactive console (CI, piped
+                // stdin): AnsiConsole.Confirm would otherwise read EOF and
+                // could hang. Require an explicit --yes to apply this way.
+                if (Console.IsInputRedirected)
+                {
+                    AnsiConsole.MarkupLine("[red]Import aborted.[/] A profile launch command needs confirmation; "
+                        + "re-run with [bold]--yes[/] to apply it non-interactively.");
+                    return 1;
+                }
+                if (!AnsiConsole.Confirm("Apply this launch command?", defaultValue: false))
+                {
+                    AnsiConsole.MarkupLine("[red]Import aborted.[/] No changes were saved.");
+                    return 1;
+                }
+            }
+        }
+
         var changes = profile.ApplyTo(config);
         if (changes.Count == 0)
         {

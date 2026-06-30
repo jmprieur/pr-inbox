@@ -6,8 +6,15 @@ namespace PrInbox.Core.Credentials;
 /// A lean, importable subset of <see cref="PrInboxConfig"/> that a profile file
 /// (e.g. <c>profiles/microsoft.json</c>) can set — currently the identity
 /// taxonomy and the review launch command. Keeping it lean means a profile can
-/// never override sources, tokens, or other sensitive state. Applied via
+/// never override sources or ADO references. Applied via
 /// <c>pr-inbox config import &lt;file&gt;</c>.
+/// <para>
+/// SECURITY: <see cref="ReviewLauncherProfile.LaunchCommand"/> is the literal
+/// executable + flags that runs on the user's desktop the next time they click
+/// Review. Importing a profile from an untrusted source is therefore equivalent
+/// to running an untrusted script. <c>ConfigImportCommand</c> echoes the new
+/// value and requires interactive confirmation before persisting it.
+/// </para>
 /// </summary>
 public sealed class ConfigProfile
 {
