@@ -19,7 +19,7 @@
 
     <!-- Source adapters -->
     <PackageVersion Include="Octokit" Version="14.0.0" />
-    <PackageVersion Include="Azure.Identity" Version="1.13.1" />
+    <PackageVersion Include="Azure.Identity" Version="1.21.0" />
 
     <!-- YAML parsing for findings.yaml schema -->
     <PackageVersion Include="YamlDotNet" Version="16.2.1" />
