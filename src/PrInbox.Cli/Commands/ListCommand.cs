@@ -20,7 +20,7 @@ internal sealed class ListSettings : CommandSettings
 
 internal sealed class ListCommand : AsyncCommand<ListSettings>
 {
-    public override async Task<int> ExecuteAsync(CommandContext context, ListSettings settings)
+    protected override async Task<int> ExecuteAsync(CommandContext context, ListSettings settings, CancellationToken cancellationToken)
     {
         var db = new PrInboxDb(PrInboxDb.DefaultUserConnectionString());
         await new MigrationRunner().MigrateAsync(db.ConnectionString);

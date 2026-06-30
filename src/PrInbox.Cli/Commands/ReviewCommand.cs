@@ -19,7 +19,7 @@ internal sealed class ReviewSettings : CommandSettings
 
 internal sealed class ReviewCommand : AsyncCommand<ReviewSettings>
 {
-    public override async Task<int> ExecuteAsync(CommandContext context, ReviewSettings settings)
+    protected override async Task<int> ExecuteAsync(CommandContext context, ReviewSettings settings, CancellationToken cancellationToken)
     {
         var db = new PrInboxDb(PrInboxDb.DefaultUserConnectionString());
         await new MigrationRunner().MigrateAsync(db.ConnectionString);
