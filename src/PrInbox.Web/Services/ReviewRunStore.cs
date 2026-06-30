@@ -83,9 +83,12 @@ public sealed class ReviewRunStore
         // error so Review.razor renders the warning banner instead of
         // silently posting wrong-PR findings under the user's name. This
         // is NOT a write-redirect (publish always uses the trusted prUrl
-        // key), purely an off-rails canary.
+        // key), purely an off-rails canary. Trailing slash / surrounding
+        // whitespace are normalized so a benign formatting difference does
+        // not raise a false alarm; OrdinalIgnoreCase covers scheme/host case.
         if (doc is { PrUrl: { Length: > 0 } reported }
-            && !string.Equals(reported, prUrl, StringComparison.OrdinalIgnoreCase))
+            && !string.Equals(reported.Trim().TrimEnd('/'), prUrl.Trim().TrimEnd('/'),
+                StringComparison.OrdinalIgnoreCase))
         {
             errors = [.. errors,
                 $"findings.yaml pr_url '{reported}' does not match this run's PR '{prUrl}'. " +

@@ -68,10 +68,22 @@ internal sealed class ConfigImportCommand : AsyncCommand<ConfigImportSettings>
             AnsiConsole.MarkupLine("[yellow]This profile sets the review launch command to:[/]");
             AnsiConsole.MarkupLine($"  [bold]{Markup.Escape(newLaunch)}[/]");
             AnsiConsole.MarkupLine("[yellow]This command will be executed on your machine when you click Review.[/]");
-            if (!settings.Yes && !AnsiConsole.Confirm("Apply this launch command?", defaultValue: false))
+            if (!settings.Yes)
             {
-                AnsiConsole.MarkupLine("[red]Import aborted.[/] No changes were saved.");
-                return 1;
+                // Fail closed when there's no interactive console (CI, piped
+                // stdin): AnsiConsole.Confirm would otherwise read EOF and
+                // could hang. Require an explicit --yes to apply this way.
+                if (Console.IsInputRedirected)
+                {
+                    AnsiConsole.MarkupLine("[red]Import aborted.[/] A profile launch command needs confirmation; "
+                        + "re-run with [bold]--yes[/] to apply it non-interactively.");
+                    return 1;
+                }
+                if (!AnsiConsole.Confirm("Apply this launch command?", defaultValue: false))
+                {
+                    AnsiConsole.MarkupLine("[red]Import aborted.[/] No changes were saved.");
+                    return 1;
+                }
             }
         }
 
