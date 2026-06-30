@@ -140,6 +140,29 @@ internal sealed class WebHostProcess : IDisposable
         return false;
     }
 
+    /// <summary>One-shot liveness check: true only if the child process is still
+    /// alive AND /healthz answers 200 within a short timeout. Used by the tray's
+    /// watchdog to notice a web that's gone or wedged while the process (or just
+    /// the tray) lingers — e.g. after the machine sleeps and wakes.</summary>
+    public async Task<bool> IsHealthyAsync(CancellationToken ct = default)
+    {
+        if (_process is null || _process.HasExited)
+        {
+            return false;
+        }
+
+        try
+        {
+            using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(3) };
+            using var resp = await http.GetAsync($"{BaseUrl}/healthz", ct).ConfigureAwait(false);
+            return resp.IsSuccessStatusCode;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
     /// <summary>Graceful stop: POST /shutdown, wait for exit, hard-kill on
     /// timeout. Idempotent.</summary>
     public async Task StopAsync()
