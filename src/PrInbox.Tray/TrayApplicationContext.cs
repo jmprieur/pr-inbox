@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Threading;
 using System.Windows.Forms;
+using Microsoft.Win32;
 
 namespace PrInbox.Tray;
 
@@ -23,11 +24,21 @@ internal sealed class TrayApplicationContext : ApplicationContext
     private readonly System.Windows.Forms.Timer _bootstrap;
     private readonly SemaphoreSlim _gate = new(1, 1);
 
+    // Self-healing tunables.
+    private static readonly TimeSpan WatchdogInterval = TimeSpan.FromSeconds(30);
+    private const int WatchdogFailuresBeforeRestart = 2;
+    private static readonly TimeSpan ResumeGrace = TimeSpan.FromSeconds(5);
+    private const int MaxRecoveriesPerWindow = 3;
+    private static readonly TimeSpan RecoveryWindow = TimeSpan.FromMinutes(10);
+    private readonly List<DateTime> _recentRecoveries = new();
+
     private WebHostProcess _host;
     private CancellationTokenSource? _startupCts;
+    private CancellationTokenSource? _watchdogCts;
     private SynchronizationContext? _ui;
     private volatile bool _exiting;
     private bool _running;
+    private bool _restarting;
 
     public TrayApplicationContext()
     {
@@ -61,6 +72,10 @@ internal sealed class TrayApplicationContext : ApplicationContext
             ContextMenuStrip = menu,
         };
         _notifyIcon.DoubleClick += (_, _) => OpenBrowser();
+
+        // Recover quickly when the machine wakes from sleep — a resumed session
+        // can leave the web gone or wedged while this tray lives on.
+        SystemEvents.PowerModeChanged += OnPowerModeChanged;
 
         // Defer startup until the message loop is running so the WinForms
         // SynchronizationContext is installed and await-continuations land on
@@ -139,6 +154,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
             _restartItem.Enabled = true;
             _notifyIcon.Text = Truncate($"PR Inbox — {_host.BaseUrl}");
             ShowBalloon("PR Inbox is running", $"Listening on {_host.BaseUrl}. Click to open.", ToolTipIcon.Info);
+            StartWatchdog();
             OpenBrowser();
         }
         else
@@ -154,10 +170,21 @@ internal sealed class TrayApplicationContext : ApplicationContext
         }
     }
 
-    private async Task RestartAsync()
+    private async Task RestartAsync(string? autoReason = null)
     {
+        // Single-flight: ignore overlapping restart triggers (menu double-click,
+        // watchdog, resume hook, unexpected-exit) so they can't stack.
+        if (_restarting)
+        {
+            return;
+        }
+        _restarting = true;
         try
         {
+            // Stop the watchdog before teardown so its health polls don't race
+            // the restart and queue another recovery.
+            StopWatchdog();
+
             await _gate.WaitAsync();
             try
             {
@@ -169,7 +196,14 @@ internal sealed class TrayApplicationContext : ApplicationContext
                 _openItem.Enabled = false;
                 _restartItem.Enabled = false;
                 _running = false;
-                _notifyIcon.Text = "PR Inbox — restarting…";
+                _notifyIcon.Text = autoReason is null
+                    ? "PR Inbox — restarting…"
+                    : "PR Inbox — recovering…";
+                if (autoReason is not null)
+                {
+                    TrayLog.Write($"Auto-recover: restarting because {autoReason}.");
+                    ShowBalloon("PR Inbox recovering", $"Restarting because {autoReason}.", ToolTipIcon.Warning);
+                }
 
                 _host.ExitedUnexpectedly -= OnWebExitedUnexpectedly;
                 await _host.StopAsync();
@@ -192,6 +226,173 @@ internal sealed class TrayApplicationContext : ApplicationContext
         {
             TrayLog.Write($"RestartAsync error: {ex}");
         }
+        finally
+        {
+            _restarting = false;
+        }
+    }
+
+    // --- Self-healing: health watchdog + sleep/resume recovery ----------------
+
+    /// <summary>Begins periodic /healthz polling. Safe to call repeatedly; any
+    /// existing watchdog is cancelled first.</summary>
+    private void StartWatchdog()
+    {
+        StopWatchdog();
+        var cts = new CancellationTokenSource();
+        _watchdogCts = cts;
+        _ = Task.Run(() => WatchdogLoopAsync(cts.Token));
+    }
+
+    private void StopWatchdog()
+    {
+        try { _watchdogCts?.Cancel(); } catch { }
+        _watchdogCts?.Dispose();
+        _watchdogCts = null;
+    }
+
+    /// <summary>Polls /healthz on a fixed cadence while the server is supposed to
+    /// be up. After enough consecutive failures it triggers an auto-restart —
+    /// this is what catches a web that's gone or wedged while the tray lives on
+    /// (e.g. after the machine sleeps and wakes, which the old build couldn't
+    /// notice because it only watched for the child process exiting).</summary>
+    private async Task WatchdogLoopAsync(CancellationToken ct)
+    {
+        var failures = 0;
+        try
+        {
+            using var timer = new PeriodicTimer(WatchdogInterval);
+            while (await timer.WaitForNextTickAsync(ct).ConfigureAwait(false))
+            {
+                if (_exiting || !_running)
+                {
+                    failures = 0;
+                    continue;
+                }
+
+                bool healthy;
+                try
+                {
+                    healthy = await _host.IsHealthyAsync(ct).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested)
+                {
+                    return;
+                }
+                catch
+                {
+                    healthy = false;
+                }
+
+                if (healthy)
+                {
+                    failures = 0;
+                    continue;
+                }
+
+                failures++;
+                TrayLog.Write($"Watchdog: health check failed ({failures}/{WatchdogFailuresBeforeRestart}).");
+                if (failures >= WatchdogFailuresBeforeRestart)
+                {
+                    RequestAutoRecover("the web server stopped responding");
+                    return; // the restart starts a fresh watchdog; end this loop.
+                }
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Cancelled by StopWatchdog — normal.
+        }
+        catch (Exception ex)
+        {
+            TrayLog.Write($"Watchdog loop error: {ex}");
+        }
+    }
+
+    /// <summary>Marshals an auto-restart onto the UI thread, rate-limited so a
+    /// web that refuses to stay up can't spin into a restart storm.</summary>
+    private void RequestAutoRecover(string reason)
+    {
+        void Run()
+        {
+            if (_exiting || _restarting)
+            {
+                return;
+            }
+
+            if (!AllowRecovery())
+            {
+                TrayLog.Write("Auto-recover suppressed: too many attempts in the recovery window.");
+                _running = false;
+                _openItem.Enabled = false;
+                _restartItem.Enabled = true;
+                _notifyIcon.Text = "PR Inbox — not responding";
+                ShowBalloon(
+                    "PR Inbox keeps stopping",
+                    "Auto-recovery gave up after repeated attempts. Use 'View log', then Restart.",
+                    ToolTipIcon.Error);
+                return;
+            }
+
+            _ = RestartAsync(reason);
+        }
+
+        if (_ui is not null)
+        {
+            _ui.Post(_ => Run(), null);
+        }
+        else
+        {
+            Run();
+        }
+    }
+
+    // UI-thread only — keeps the sliding window of recent auto-recoveries.
+    private bool AllowRecovery()
+    {
+        var now = DateTime.UtcNow;
+        _recentRecoveries.RemoveAll(t => now - t > RecoveryWindow);
+        if (_recentRecoveries.Count >= MaxRecoveriesPerWindow)
+        {
+            return false;
+        }
+        _recentRecoveries.Add(now);
+        return true;
+    }
+
+    private void OnPowerModeChanged(object? sender, PowerModeChangedEventArgs e)
+    {
+        if (e.Mode != PowerModes.Resume)
+        {
+            return;
+        }
+
+        TrayLog.Write("PowerMode: Resume — scheduling a health check.");
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                // Let the network stack and any pending OS work settle first.
+                await Task.Delay(ResumeGrace).ConfigureAwait(false);
+                if (_exiting || !_running)
+                {
+                    return;
+                }
+
+                bool healthy;
+                try { healthy = await _host.IsHealthyAsync(CancellationToken.None).ConfigureAwait(false); }
+                catch { healthy = false; }
+
+                if (!healthy)
+                {
+                    RequestAutoRecover("the machine resumed from sleep and the web wasn't responding");
+                }
+            }
+            catch (Exception ex)
+            {
+                TrayLog.Write($"Resume health check error: {ex}");
+            }
+        });
     }
 
     private async Task StopAndExitAsync()
@@ -207,6 +408,8 @@ internal sealed class TrayApplicationContext : ApplicationContext
             // the gate, so a Stop during startup interrupts promptly.
             _exiting = true;
             try { _startupCts?.Cancel(); } catch { }
+            StopWatchdog();
+            SystemEvents.PowerModeChanged -= OnPowerModeChanged;
 
             _notifyIcon.Text = "PR Inbox — stopping…";
             _notifyIcon.Visible = false;
@@ -269,9 +472,9 @@ internal sealed class TrayApplicationContext : ApplicationContext
         // Raised on a thread-pool thread — marshal to the UI thread.
         void Handle()
         {
-            // Only surface this if the server had actually come up; a child that
-            // dies during the initial start sequence is reported by StartCore.
-            if (_exiting || !_running)
+            // Only act if the server had actually come up; a child that dies
+            // during the initial start sequence is reported by StartCore.
+            if (_exiting || !_running || _restarting)
             {
                 return;
             }
@@ -280,10 +483,9 @@ internal sealed class TrayApplicationContext : ApplicationContext
             _openItem.Enabled = false;
             _restartItem.Enabled = true;
             _notifyIcon.Text = "PR Inbox — stopped";
-            ShowBalloon(
-                "PR Inbox stopped",
-                "The web server exited. Use 'View log' to see why, or Restart.",
-                ToolTipIcon.Warning);
+
+            // The web process died on its own — bring it back (rate-limited).
+            RequestAutoRecover("the web server exited");
         }
 
         if (_ui is not null)
@@ -315,6 +517,9 @@ internal sealed class TrayApplicationContext : ApplicationContext
     {
         if (disposing)
         {
+            _exiting = true;
+            SystemEvents.PowerModeChanged -= OnPowerModeChanged;
+            StopWatchdog();
             _bootstrap.Dispose();
             _notifyIcon.Visible = false;
             _notifyIcon.Dispose();
