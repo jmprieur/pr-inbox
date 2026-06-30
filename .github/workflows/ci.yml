@@ -22,7 +22,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       # Pin the SDK from global.json so a single source of truth governs
       # the toolchain for both local dev and CI. NuGet packages cached
