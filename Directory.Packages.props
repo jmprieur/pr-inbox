@@ -23,7 +23,7 @@
 
     <!-- YAML parsing for findings.yaml schema -->
     <PackageVersion Include="YamlDotNet" Version="16.2.1" />
-    <PackageVersion Include="JsonSchema.Net" Version="7.2.3" />
+    <PackageVersion Include="JsonSchema.Net" Version="9.2.2" />
 
     <!-- DI / config -->
     <PackageVersion Include="Microsoft.Extensions.DependencyInjection" Version="10.0.9" />

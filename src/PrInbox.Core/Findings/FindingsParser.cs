@@ -1,4 +1,5 @@
 using System.Reflection;
+using System.Text.Json;
 using System.Text.Json.Nodes;
 using Json.Schema;
 using YamlDotNet.Serialization;
@@ -66,10 +67,10 @@ public sealed class FindingsParser
         }
 
         var json = YamlToJson(raw) ?? new JsonObject();
-        var validation = Schema.Value.Evaluate(json, new EvaluationOptions
+        var element = JsonSerializer.SerializeToElement(json);
+        var validation = Schema.Value.Evaluate(element, new EvaluationOptions
         {
             OutputFormat = OutputFormat.List,
-            EvaluateAs = SpecVersion.Draft202012,
         });
 
         var errors = new List<string>();
