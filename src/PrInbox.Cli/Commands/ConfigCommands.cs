@@ -13,7 +13,7 @@ internal sealed class ConfigDoctorSettings : CommandSettings
 
 internal sealed class ConfigDoctorCommand : AsyncCommand<ConfigDoctorSettings>
 {
-    public override async Task<int> ExecuteAsync(CommandContext context, ConfigDoctorSettings settings)
+    protected override async Task<int> ExecuteAsync(CommandContext context, ConfigDoctorSettings settings, CancellationToken cancellationToken)
     {
         var config = await PrInboxConfig.LoadAsync(settings.ConfigPath);
 
@@ -84,7 +84,7 @@ internal sealed class ConfigInitSettings : CommandSettings
 
 internal sealed class ConfigInitCommand : AsyncCommand<ConfigInitSettings>
 {
-    public override async Task<int> ExecuteAsync(CommandContext context, ConfigInitSettings settings)
+    protected override async Task<int> ExecuteAsync(CommandContext context, ConfigInitSettings settings, CancellationToken cancellationToken)
     {
         var path = settings.ConfigPath ?? PrInboxConfig.DefaultPath;
         if (File.Exists(path))
@@ -136,7 +136,7 @@ internal sealed class AddSourceSettings : CommandSettings
 
 internal sealed class AddSourceCommand : AsyncCommand<AddSourceSettings>
 {
-    public override async Task<int> ExecuteAsync(CommandContext context, AddSourceSettings settings)
+    protected override async Task<int> ExecuteAsync(CommandContext context, AddSourceSettings settings, CancellationToken cancellationToken)
     {
         var config = await PrInboxConfig.LoadAsync(settings.ConfigPath);
         var kind = settings.Kind.ToLowerInvariant() switch
@@ -190,7 +190,7 @@ internal sealed class AddAdoProjectSettings : CommandSettings
 
 internal sealed class AddAdoProjectCommand : AsyncCommand<AddAdoProjectSettings>
 {
-    public override async Task<int> ExecuteAsync(CommandContext context, AddAdoProjectSettings settings)
+    protected override async Task<int> ExecuteAsync(CommandContext context, AddAdoProjectSettings settings, CancellationToken cancellationToken)
     {
         var config = await PrInboxConfig.LoadAsync(settings.ConfigPath);
         if (config.Ado.Projects.Any(p => p.Org == settings.Org && p.Project == settings.Project))

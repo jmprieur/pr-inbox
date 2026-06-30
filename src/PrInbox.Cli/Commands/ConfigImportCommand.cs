@@ -23,7 +23,7 @@ internal sealed class ConfigImportSettings : CommandSettings
 /// </summary>
 internal sealed class ConfigImportCommand : AsyncCommand<ConfigImportSettings>
 {
-    public override async Task<int> ExecuteAsync(CommandContext context, ConfigImportSettings settings)
+    protected override async Task<int> ExecuteAsync(CommandContext context, ConfigImportSettings settings, CancellationToken cancellationToken)
     {
         if (!System.IO.File.Exists(settings.File))
         {

@@ -28,7 +28,7 @@ internal sealed class SyncSettings : CommandSettings
 
 internal sealed class SyncCommand : AsyncCommand<SyncSettings>
 {
-    public override async Task<int> ExecuteAsync(CommandContext context, SyncSettings settings)
+    protected override async Task<int> ExecuteAsync(CommandContext context, SyncSettings settings, CancellationToken cancellationToken)
     {
         if (settings.Fast && settings.Enrich)
         {
