@@ -100,10 +100,8 @@ since your last brief, writes an **immutable** run directory (`brief.md` +
 review** — two strong models reading the same diff, where the *disagreement*
 between them is often the most interesting signal.
 
-<!-- TODO screenshot (redacted): a review session / the rendered comment preview.
-![A review session bootstrapped from PR Inbox, with the rendered comment preview showing exactly what will be posted.](assets/review.png)
-*The brief is immutable; re-reviewing appends a new run. The preview shows the full text that will be posted — including any code suggestion — before you commit to it.*
--->
+![The Review findings page: a dual-model review with a rendered "what gets posted" preview and an explicit accountability banner.](assets/review.png)
+*Findings from both models, with per-finding attribution (where they agreed, where they didn't). The "Rendered comment (what gets posted)" preview shows the exact text — including any code suggestion — and the banner is blunt: **AI assistance doesn't transfer accountability. Read each finding before you publish.***
 
 The point of two models isn't "more AI." It's that one model's confident blind
 spot is often the other's obvious catch. You read the convergence to move fast
