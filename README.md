@@ -13,6 +13,8 @@ it tells you which PRs need attention, what changed since the last time you
 looked, and hands a fully-bootstrapped brief to the Copilot session that
 will run the actual `dual-model-review`.
 
+![PR Inbox — one triage inbox across GitHub.com, GitHub Enterprise, and Azure DevOps. Repo, title, and author columns are redacted.](docs/assets/inbox.png)
+
 > **Looking for the "what can I do, when, why" tour?**
 > → [**USER_GUIDE.md**](USER_GUIDE.md) — end-to-end walkthroughs of every surface.
 
@@ -362,7 +364,7 @@ MIT. See [LICENSE](LICENSE).
 
 ## Acknowledgements
 
-Co-created by **Jean-Marc Prieur** and **Bridge** (Claude / Copilot CLI),
+Co-created by **Jean-Marc Prieur** and **Ember** (GitHub Copilot CLI),
 2026-05-13 onward. Plan and rubber-duck critique in
 [ARCHITECTURE.md](ARCHITECTURE.md); open design decisions in
 [AMBIGUITIES.md](AMBIGUITIES.md).
