@@ -172,9 +172,12 @@ public sealed class ReviewLauncher : IReviewLauncher, IAsyncDisposable
     }
 
     /// <summary>
-    /// Re-attach watchers to every run directory containing a brief but no
-    /// findings yet. Called once at startup so a web restart doesn't lose
-    /// visibility on in-flight reviews.
+    /// Re-attach a watcher to the most relevant run directory of each PR so a
+    /// web restart doesn't lose visibility on prior reviews. For each PR the
+    /// chosen run is the newest one whose <c>findings.yaml</c> has landed;
+    /// only if none have completed does it fall back to the newest in-flight
+    /// dir (so its watcher still catches findings when they're written).
+    /// Called once at startup. See <see cref="IsBetterCandidate"/>.
     /// </summary>
     public void RehydrateInFlightRuns()
     {
@@ -185,7 +188,7 @@ public sealed class ReviewLauncher : IReviewLauncher, IAsyncDisposable
             if (!Directory.Exists(reviewsRoot)) return;
 
             var (prRepo, _, _, reviewRepo) = OpenRepos();
-            var latestByPr = new Dictionary<string, (string runDir, long runId, string head, DateTimeOffset created)>(
+            var latestByPr = new Dictionary<string, (string runDir, long runId, string head, DateTimeOffset created, bool hasFindings)>(
                 StringComparer.OrdinalIgnoreCase);
 
             // Walk: reviewsRoot/<safe-pr>/<ts>_<sha>/{brief.md, [findings.yaml]}
@@ -210,9 +213,25 @@ public sealed class ReviewLauncher : IReviewLauncher, IAsyncDisposable
                         if (string.IsNullOrEmpty(prUrl)) continue;
                         var created = Directory.GetCreationTimeUtc(runDir);
 
-                        if (!latestByPr.TryGetValue(prUrl, out var existing) || created > existing.created)
+                        // A run "counts" as complete only once findings.yaml
+                        // has actually landed (non-empty). Dev/test cycles
+                        // leave behind abandoned launches whose dir is newest
+                        // but empty; rehydrating to those would drop a good
+                        // prior run's findings and strand the badge on
+                        // "in progress". So rank a run WITH findings above one
+                        // without, and only break ties by recency within the
+                        // same class. A PR with no completed run yet still
+                        // rehydrates its newest in-flight dir (so its watcher
+                        // catches the findings the moment they're written).
+                        var findingsPath = Path.Combine(runDir, "findings.yaml");
+                        bool hasFindings;
+                        try { hasFindings = new FileInfo(findingsPath) is { Exists: true, Length: > 0 }; }
+                        catch { hasFindings = false; }
+
+                        if (!latestByPr.TryGetValue(prUrl, out var existing)
+                            || IsBetterCandidate(hasFindings, created, existing.hasFindings, existing.created))
                         {
-                            latestByPr[prUrl] = (runDir, 0L, head, new DateTimeOffset(created, TimeSpan.Zero));
+                            latestByPr[prUrl] = (runDir, 0L, head, new DateTimeOffset(created, TimeSpan.Zero), hasFindings);
                         }
                     }
                     catch (Exception ex)
@@ -233,6 +252,20 @@ public sealed class ReviewLauncher : IReviewLauncher, IAsyncDisposable
             _log.LogWarning(ex, "Rehydration failed");
         }
     }
+
+    /// <summary>
+    /// Rehydration precedence for two run directories of the same PR: a run
+    /// whose <c>findings.yaml</c> has already landed always beats one that
+    /// hasn't (regardless of which dir is newer), so a web restart mid-dev
+    /// never strands the inbox badge on a newer-but-abandoned launch. Only
+    /// when both candidates are in the same completion class does recency
+    /// decide.
+    /// </summary>
+    internal static bool IsBetterCandidate(bool candidateHasFindings, DateTimeOffset candidateCreated,
+        bool incumbentHasFindings, DateTimeOffset incumbentCreated)
+        => candidateHasFindings != incumbentHasFindings
+            ? candidateHasFindings
+            : candidateCreated > incumbentCreated;
 
     private void StartWatcher(string prUrl, string runDir, long runId, string headSha,
         DateTimeOffset? startedAtUtc = null)
