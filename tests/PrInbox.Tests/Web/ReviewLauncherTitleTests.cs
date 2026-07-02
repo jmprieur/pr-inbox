@@ -131,4 +131,39 @@ public class ReviewLauncherTitleTests
             result.Should().Be("____");
         }
     }
+
+    // ---- RehydrateInFlightRuns candidate precedence (IsBetterCandidate) ----
+
+    private static readonly DateTimeOffset Older = new(2026, 6, 1, 10, 0, 0, TimeSpan.Zero);
+    private static readonly DateTimeOffset Newer = new(2026, 6, 2, 10, 0, 0, TimeSpan.Zero);
+
+    [Fact]
+    public void IsBetterCandidate_CompletedRun_BeatsNewerAbandonedRun()
+    {
+        // The regression that stranded badges on restart: a newer, empty
+        // (abandoned) launch must NOT displace an older completed run.
+        ReviewLauncher.IsBetterCandidate(
+            candidateHasFindings: false, candidateCreated: Newer,
+            incumbentHasFindings: true, incumbentCreated: Older)
+            .Should().BeFalse();
+
+        // ...and the completed run replaces a newer abandoned incumbent.
+        ReviewLauncher.IsBetterCandidate(
+            candidateHasFindings: true, candidateCreated: Older,
+            incumbentHasFindings: false, incumbentCreated: Newer)
+            .Should().BeTrue();
+    }
+
+    [Fact]
+    public void IsBetterCandidate_WithinSameClass_NewerWins()
+    {
+        // Both completed → newest completed run wins.
+        ReviewLauncher.IsBetterCandidate(true, Newer, true, Older).Should().BeTrue();
+        ReviewLauncher.IsBetterCandidate(true, Older, true, Newer).Should().BeFalse();
+
+        // Both abandoned (no PR has completed yet) → newest in-flight dir wins
+        // so its watcher catches findings when they land.
+        ReviewLauncher.IsBetterCandidate(false, Newer, false, Older).Should().BeTrue();
+        ReviewLauncher.IsBetterCandidate(false, Older, false, Newer).Should().BeFalse();
+    }
 }
