@@ -28,7 +28,7 @@ jobs:
       # the toolchain for both local dev and CI. NuGet packages cached
       # by the action via the global-packages folder.
       - name: Setup .NET (from global.json)
-        uses: actions/setup-dotnet@v5
+        uses: actions/setup-dotnet@v6
         with:
           global-json-file: global.json
 
