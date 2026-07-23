@@ -22,7 +22,7 @@
     <PackageVersion Include="Azure.Identity" Version="1.21.0" />
 
     <!-- YAML parsing for findings.yaml schema -->
-    <PackageVersion Include="YamlDotNet" Version="16.2.1" />
+    <PackageVersion Include="YamlDotNet" Version="18.1.0" />
     <PackageVersion Include="JsonSchema.Net" Version="9.3.0" />
 
     <!-- DI / config -->
