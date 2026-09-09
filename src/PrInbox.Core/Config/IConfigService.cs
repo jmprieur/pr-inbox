@@ -82,13 +82,18 @@ public interface IConfigService
     Task SetIgnoredReposAsync(IReadOnlyList<string> patterns, CancellationToken ct = default);
 
     /// <summary>
-    /// Updates the two live-toggleable Review-launcher flags
+    /// Updates the three live-toggleable Review-launcher flags
     /// (<see cref="ReviewLauncherSettings.AutoSend"/> and
+    /// <see cref="ReviewLauncherSettings.AllowAllPaths"/> and
     /// <see cref="ReviewLauncherSettings.Yolo"/>) and mirrors them onto
     /// the DI singleton so the next review launch picks them up without
     /// a process restart.
     /// </summary>
-    Task SetReviewLauncherFlagsAsync(bool autoSend, bool yolo, CancellationToken ct = default);
+    Task SetReviewLauncherFlagsAsync(
+        bool autoSend,
+        bool allowAllPaths,
+        bool yolo,
+        CancellationToken ct = default);
 
     /// <summary>
     /// Sets the Review-launcher command template

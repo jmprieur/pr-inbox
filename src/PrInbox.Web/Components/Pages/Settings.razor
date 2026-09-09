@@ -392,6 +392,19 @@ else
         <div class="settings-toggle">
             <label>
                 <input type="checkbox"
+                       checked="@_allowAllPaths"
+                       @onchange="@(e => OnAllowAllPathsChanged((bool)e.Value!))"
+                       disabled="@_busy" />
+                <strong>Allow all paths</strong>
+                <span class="muted">
+                    Appends <code>--allow-all-paths</code> to copilot, skipping folder access approval
+                    while retaining tool and URL permission prompts. Off by default.
+                </span>
+            </label>
+        </div>
+        <div class="settings-toggle">
+            <label>
+                <input type="checkbox"
                        checked="@_yolo"
                        @onchange="@(e => OnYoloChanged((bool)e.Value!))"
                        disabled="@_busy" />
@@ -457,6 +470,7 @@ else
     private string _ignoredReposText = string.Empty;
     private string _pathFiltersText = string.Empty;
     private bool _autoSend = true;
+    private bool _allowAllPaths;
     private bool _yolo;
     private bool _tabPerReview;
     private string _tabColor = string.Empty;
@@ -568,6 +582,7 @@ else
         _ignoredReposText = string.Join("\n", _cfg.IgnoredRepos);
         _pathFiltersText = FormatPathFilters(_cfg.RepoPathFilters);
         _autoSend = _cfg.ReviewLauncher.AutoSend;
+        _allowAllPaths = _cfg.ReviewLauncher.AllowAllPaths;
         _yolo = _cfg.ReviewLauncher.Yolo;
         _tabPerReview = _cfg.ReviewLauncher.TabPerReview;
         _tabColor = _cfg.ReviewLauncher.TabColor;
@@ -919,6 +934,12 @@ else
         return PersistLauncherFlagsAsync($"Yolo {(value ? "ON" : "OFF")}.");
     }
 
+    private Task OnAllowAllPathsChanged(bool value)
+    {
+        _allowAllPaths = value;
+        return PersistLauncherFlagsAsync($"Allow all paths {(value ? "ON" : "OFF")}.");
+    }
+
     private Task OnTabPerReviewChanged(bool value)
     {
         _tabPerReview = value;
@@ -984,7 +1005,7 @@ else
     {
         await WrapAsync(async () =>
         {
-            await ConfigSvc.SetReviewLauncherFlagsAsync(_autoSend, _yolo);
+            await ConfigSvc.SetReviewLauncherFlagsAsync(_autoSend, _allowAllPaths, _yolo);
             SetMessage(okMessage);
         });
     }

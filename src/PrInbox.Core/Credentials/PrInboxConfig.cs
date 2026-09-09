@@ -287,6 +287,18 @@ public sealed class ReviewLauncherSettings
     public bool AutoSend { get; set; } = true;
 
     /// <summary>
+    /// When true, appends <c>--allow-all-paths</c> to copilot's
+    /// pass-through args. This skips file-path approval prompts while
+    /// retaining tool and URL approval prompts. Default <c>false</c>.
+    /// </summary>
+    /// <remarks>
+    /// Mutable (<c>set</c> not <c>init</c>) so the Settings page can
+    /// toggle it on the live DI singleton and the next review launch
+    /// picks it up without a process restart.
+    /// </remarks>
+    public bool AllowAllPaths { get; set; } = false;
+
+    /// <summary>
     /// When true, appends <c>--yolo</c> to copilot's pass-through args
     /// (equivalent to <c>--allow-all-tools --allow-all-paths
     /// --allow-all-urls</c>) — every permission prompt is auto-approved

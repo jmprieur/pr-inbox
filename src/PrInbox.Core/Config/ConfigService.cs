@@ -192,10 +192,15 @@ public sealed class ConfigService : IConfigService
     }
 
     /// <inheritdoc />
-    public async Task SetReviewLauncherFlagsAsync(bool autoSend, bool yolo, CancellationToken ct = default)
+    public async Task SetReviewLauncherFlagsAsync(
+        bool autoSend,
+        bool allowAllPaths,
+        bool yolo,
+        CancellationToken ct = default)
     {
         var cfg = await PrInboxConfig.LoadAsync(_configPath, ct);
         cfg.ReviewLauncher.AutoSend = autoSend;
+        cfg.ReviewLauncher.AllowAllPaths = allowAllPaths;
         cfg.ReviewLauncher.Yolo = yolo;
         await SaveAndRefreshAsync(cfg, ct);
     }
@@ -399,9 +404,10 @@ public sealed class ConfigService : IConfigService
 
         // ReviewLauncher: the singleton's ReviewLauncher instance is the
         // same reference ReviewLauncher.SpawnConsole reads each launch,
-        // so mutating these two fields in place is what makes Settings
+        // so mutating these fields in place is what makes Settings
         // changes effective without a restart.
         _singleton.ReviewLauncher.AutoSend = cfg.ReviewLauncher.AutoSend;
+        _singleton.ReviewLauncher.AllowAllPaths = cfg.ReviewLauncher.AllowAllPaths;
         _singleton.ReviewLauncher.Yolo = cfg.ReviewLauncher.Yolo;
         _singleton.ReviewLauncher.TabColor = cfg.ReviewLauncher.TabColor;
         _singleton.ReviewLauncher.TabPerReview = cfg.ReviewLauncher.TabPerReview;

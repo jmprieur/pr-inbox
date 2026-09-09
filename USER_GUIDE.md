@@ -590,6 +590,7 @@ Persisted settings that take effect on the **next** review you launch
 | Setting | Effect |
 |---|---|
 | **AutoSend** | After spawning the terminal, hands the brief to the agent (`-i`) so the run starts hands-free. When off, the brief is copied to the clipboard and the terminal waits for you to paste it (Ctrl+V). |
+| **Allow all paths** | Appends `--allow-all-paths` to the review CLI invocation, skipping folder access approval while retaining tool and URL permission prompts. Off by default. |
 | **Yolo** | Appends `--yolo` to the review CLI invocation (`--allow-all-tools --allow-all-paths --allow-all-urls`), skipping every permission prompt. Faster and truly unattended — use only when you trust the agent. |
 | **Tab colour** | Colours the Windows Terminal tab for every review so it stands out from ordinary terminals. Accepts a hex like `#5da4ff`; leave blank to disable. |
 | **One tab per review** *(experimental)* | On: each review opens as a tab in one shared window (`pr-inbox-reviews`) instead of its own window — less desktop clutter when several run at once. Trade-off: the Inbox's per-review window controls don't apply in tab mode, and closing the shared window closes every review tab. Off (default): one window per review. |

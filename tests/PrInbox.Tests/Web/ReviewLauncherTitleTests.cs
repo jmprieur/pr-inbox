@@ -91,6 +91,26 @@ public class ReviewLauncherTitleTests
     }
 
     [Theory]
+    [InlineData(true, false, false, "")]
+    [InlineData(false, false, false, " -NoAutoSend")]
+    [InlineData(true, true, false, " -AllowAllPaths")]
+    [InlineData(true, false, true, " -Yolo")]
+    [InlineData(true, true, true, " -AllowAllPaths -Yolo")]
+    public void BuildLauncherScriptArguments_AppendsPersistedFlags(
+        bool autoSend, bool allowAllPaths, bool yolo, string expectedSuffix)
+    {
+        var args = ReviewLauncher.BuildLauncherScriptArguments(
+            @"C:\runs\7",
+            "agency copilot --agent example",
+            "example review",
+            autoSend,
+            allowAllPaths,
+            yolo);
+
+        args.Should().EndWith(expectedSuffix);
+    }
+
+    [Theory]
     // Allowed characters survive verbatim — covers every char in the allowlist.
     [InlineData("alice repo #42 @ab12cd 15:46", "alice repo #42 @ab12cd 15:46")]
     [InlineData("a-z_./+:#@ 09", "a-z_./+:#@ 09")]

@@ -317,12 +317,13 @@ public sealed class ReviewLauncher : IReviewLauncher, IAsyncDisposable
         // inside what was a quoted --title, and cmd treats `& | ^ %` as
         // metacharacters. Simply stripping `"` is NOT sufficient.
         var safeSessionName = SanitizeForShellTitle(tabTitle);
-        var launcherArgs =
-            $"-RunDirectory \"{runDir}\"" +
-            $" -LaunchCommand \"{launchCommand}\"" +
-            $" -SessionName \"{safeSessionName}\"" +
-            (rl.AutoSend ? "" : " -NoAutoSend") +
-            (rl.Yolo     ? " -Yolo"       : "");
+        var launcherArgs = BuildLauncherScriptArguments(
+            runDir,
+            launchCommand,
+            safeSessionName,
+            rl.AutoSend,
+            rl.AllowAllPaths,
+            rl.Yolo);
 
         // Allowlist the tab title so wt/cmd never see a metacharacter from
         // upstream PR data. Falls back to the generic title on empty.
@@ -406,6 +407,20 @@ public sealed class ReviewLauncher : IReviewLauncher, IAsyncDisposable
         var window = tabPerReview ? ReviewLauncherSettings.ReviewWindowName : "new";
         return $"-w {window} nt --title \"{safeTitle}\" --suppressApplicationTitle{tabColorArg} -d \"{runDir}\" pwsh -NoExit -File \"{ps1}\" {launcherArgs}";
     }
+
+    internal static string BuildLauncherScriptArguments(
+        string runDir,
+        string launchCommand,
+        string safeSessionName,
+        bool autoSend,
+        bool allowAllPaths,
+        bool yolo) =>
+        $"-RunDirectory \"{runDir}\"" +
+        $" -LaunchCommand \"{launchCommand}\"" +
+        $" -SessionName \"{safeSessionName}\"" +
+        (autoSend ? "" : " -NoAutoSend") +
+        (allowAllPaths ? " -AllowAllPaths" : "") +
+        (yolo ? " -Yolo" : "");
 
     private static string? FindLauncherScript()
     {

@@ -21,6 +21,10 @@
     to --allow-all-tools --allow-all-paths --allow-all-urls). Skips every
     permission prompt for the duration of this session.
 
+    Pass -AllowAllPaths to add `--allow-all-paths` to copilot's
+    pass-through args. Skips file-path approval prompts while retaining
+    tool and URL approval prompts.
+
     The agent writes findings.yaml back into the run directory;
     pr-inbox-web watches for it.
 
@@ -63,6 +67,10 @@
 .PARAMETER Yolo
     Pass `--yolo` to copilot. Auto-approves all tool / path / URL
     permission prompts for the session. Off by default.
+
+.PARAMETER AllowAllPaths
+    Pass `--allow-all-paths` to copilot. Auto-approves file path access
+    while retaining tool and URL permission prompts. Off by default.
 #>
 
 param(
@@ -73,6 +81,7 @@ param(
     [string] $LaunchCommand = $env:PRINBOX_REVIEW_COMMAND,
     [string] $SessionName = '',
     [switch] $NoAutoSend,
+    [switch] $AllowAllPaths,
     [switch] $Yolo
 )
 
@@ -152,6 +161,8 @@ if ($SessionName) {
 }
 if ($Yolo) {
     Write-Host ' Yolo:     ON (--yolo — all permission prompts auto-approved)' -ForegroundColor Yellow
+} elseif ($AllowAllPaths) {
+    Write-Host ' Paths:    ON (--allow-all-paths — folder approval skipped)' -ForegroundColor Yellow
 }
 Write-Host (' Findings: ' + $findingsPath) -ForegroundColor DarkGray
 Write-Host '------------------------------------------------------------' -ForegroundColor DarkGray
@@ -190,12 +201,12 @@ foreach ($name in $inherited) {
 # is intentionally NOT forwarded.
 
 # Tokenize the resolved launch command and invoke it. Pass-through flags
-# (-i bootstrap, --yolo) are appended after.
+# (-i bootstrap, --allow-all-paths, --yolo) are appended after.
 $cmdTokens = @($resolvedCommand -split '\s+' | Where-Object { $_ })
 $cmdExe    = $cmdTokens[0]
 $cmdArgs   = if ($cmdTokens.Count -gt 1) { $cmdTokens[1..($cmdTokens.Count - 1)] } else { @() }
 
-# Forward unknown flags (-i, --yolo) straight to copilot. Empirical:
+# Forward unknown flags (-i, --allow-all-paths, --yolo) straight to copilot. Empirical:
 # agency's clap config treats unknown flags as pass-through to the
 # engine. Importantly, do NOT use the `--` separator: when present,
 # agency includes it in the args it spawns copilot with and copilot
@@ -210,6 +221,9 @@ $passThrough = @()
 if ($autoSend) {
     $passThrough += '-i'
     $passThrough += 'Read brief.md and proceed.'
+}
+if ($AllowAllPaths -and -not $Yolo) {
+    $passThrough += '--allow-all-paths'
 }
 if ($Yolo) {
     $passThrough += '--yolo'
