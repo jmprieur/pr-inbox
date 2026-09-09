@@ -73,6 +73,25 @@ public static class PublisherWiring
             }
         }
 
+        // Current ADO configuration lives under ado.projects rather than
+        // sources. SourceFactory records these PRs with the "azure-cli"
+        // identity, so the write side must register the matching pair.
+        if (config.Ado.Projects.Count > 0)
+        {
+            const string host = "dev.azure.com";
+            const string identity = "azure-cli";
+            var firstProject = config.Ado.Projects[0];
+            var sourceId = $"ado:{firstProject.Org}/{firstProject.Project}";
+            var tokens = new AzureCliTokenProvider(
+                sourceId,
+                logFactory.CreateLogger<AzureCliTokenProvider>());
+            var publisher = new AdoReviewPublisher(
+                tokens, sharedClient, identity,
+                logFactory.CreateLogger<AdoReviewPublisher>());
+            byPair[(host, identity)] = publisher;
+            defaultByHost[host] = identity;
+        }
+
         return new ConfigDrivenPublisherSelector(
             byPair, defaultByHost,
             logFactory.CreateLogger<ConfigDrivenPublisherSelector>());
