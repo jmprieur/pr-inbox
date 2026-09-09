@@ -25,7 +25,7 @@ will run the actual `dual-model-review`.
 Reviewing many PRs at scale across three platforms with two identities is
 manual. The pain is not the review skill itself — that's mature
 (`dual-model-review` with `claude-opus-4.8` + `gpt-5.6-terra`, preserving the
-cross-family asymmetry pattern).
+cross-family asymmetry pattern observed across the historical N=6 runs).
 The pain is:
 
 | Pain | What `pr-inbox` does about it |
