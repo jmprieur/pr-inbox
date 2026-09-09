@@ -4,6 +4,6 @@
   ],
   "reviewLauncher": {
     "launchCommand": "copilot --plugin-dir {plugindir} --model {model} --agent {agent}",
-    "model": "claude-opus-4.8"
+    "model": "gpt-5.6-sol"
   }
 }

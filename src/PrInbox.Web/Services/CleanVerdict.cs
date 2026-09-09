@@ -36,8 +36,8 @@ public static class CleanVerdict
     /// Build the verdict string shown in the inbox-row tooltip and inline
     /// in the Review-page callout. Examples:
     /// <list type="bullet">
-    ///   <item>"Reviewed clean 2h ago · 2 reviewers agree · claude-opus-4.8 + gpt-5.5"</item>
-    ///   <item>"Reviewed clean 2h ago · 2 reviewers · claude-opus-4.8 + gpt-5.5" (no asymmetry block in the doc)</item>
+    ///   <item>"Reviewed clean 2h ago · 2 reviewers agree · claude-opus-4.8 + gpt-5.6-terra"</item>
+    ///   <item>"Reviewed clean 2h ago · 2 reviewers · claude-opus-4.8 + gpt-5.6-terra" (no asymmetry block in the doc)</item>
     ///   <item>"Reviewed clean 5m ago · claude-opus-4.8" (single reviewer)</item>
     ///   <item>"Reviewed clean just now" (no models declared)</item>
     /// </list>

@@ -20,7 +20,7 @@ public class ConfigProfileTests
             ReviewLauncher = new ReviewLauncherProfile
             {
                 LaunchCommand = "agency copilot --plugin {plugin} --model {model} --agent {agent}",
-                Model = "claude-opus-4.8",
+                Model = "gpt-5.6-sol",
             },
         };
 
@@ -31,7 +31,7 @@ public class ConfigProfileTests
         config.IdentityClasses[0].Name.Should().Be("EMU");
         config.ReviewLauncher.LaunchCommand
             .Should().Be("agency copilot --plugin {plugin} --model {model} --agent {agent}");
-        config.ReviewLauncher.Model.Should().Be("claude-opus-4.8");
+        config.ReviewLauncher.Model.Should().Be("gpt-5.6-sol");
     }
 
     [Fact]

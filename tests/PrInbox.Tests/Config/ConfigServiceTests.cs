@@ -349,13 +349,13 @@ public sealed class ConfigServiceTests : IDisposable
         {
             LaunchCommand = "x {plugindir} {plugin} {model} {agent}",
             Plugin = "market:dual-review@jmprieur/pr-inbox",
-            Model = "claude-opus-4.8",
+            Model = "gpt-5.6-sol",
             Agent = "dual-review:dual-model-review",
         };
 
         rl.ResolveLaunchCommand("C:/repo/plugins/dual-review").Should().Be(
             "x C:/repo/plugins/dual-review market:dual-review@jmprieur/pr-inbox " +
-            "claude-opus-4.8 dual-review:dual-model-review");
+            "gpt-5.6-sol dual-review:dual-model-review");
     }
 
     [Theory]

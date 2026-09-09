@@ -32,7 +32,7 @@ public class CleanVerdictTests
     public void IsConverged_TwoModels_AllAsymmetryZero_True()
     {
         var doc = MakeDoc(
-            models: new[] { "claude-opus-4.8", "gpt-5.5" },
+            models: new[] { "claude-opus-4.8", "gpt-5.6-terra" },
             asymmetry: new AsymmetryStats { BothFound = 0, OpusOnly = 0, GptOnly = 0 });
 
         Assert.True(CleanVerdict.IsConverged(doc));
@@ -45,7 +45,7 @@ public class CleanVerdictTests
         // it we can't assert agreement — the tooltip should still mention
         // "2 reviewers" but NOT "agree".
         var doc = MakeDoc(
-            models: new[] { "claude-opus-4.8", "gpt-5.5" },
+            models: new[] { "claude-opus-4.8", "gpt-5.6-terra" },
             asymmetry: null);
 
         Assert.False(CleanVerdict.IsConverged(doc));
@@ -68,7 +68,7 @@ public class CleanVerdictTests
         // zero-findings doc (e.g. agent records dropped findings), don't
         // claim convergence.
         var doc = MakeDoc(
-            models: new[] { "claude-opus-4.8", "gpt-5.5" },
+            models: new[] { "claude-opus-4.8", "gpt-5.6-terra" },
             asymmetry: new AsymmetryStats { BothFound = 1, OpusOnly = 0, GptOnly = 0 });
 
         Assert.False(CleanVerdict.IsConverged(doc));
@@ -78,14 +78,14 @@ public class CleanVerdictTests
     public void BuildTooltip_Converged_TwoReviewers_FullVerdict()
     {
         var doc = MakeDoc(
-            models: new[] { "claude-opus-4.8", "gpt-5.5" },
+            models: new[] { "claude-opus-4.8", "gpt-5.6-terra" },
             asymmetry: new AsymmetryStats { BothFound = 0, OpusOnly = 0, GptOnly = 0 },
             age: TimeSpan.FromHours(2));
 
         var s = CleanVerdict.BuildTooltip(doc, _now);
 
         Assert.Equal(
-            "Reviewed clean 2h ago · 2 reviewers agree · claude-opus-4.8 + gpt-5.5",
+            "Reviewed clean 2h ago · 2 reviewers agree · claude-opus-4.8 + gpt-5.6-terra",
             s);
     }
 
@@ -94,14 +94,14 @@ public class CleanVerdictTests
     {
         // No asymmetry block → mention "2 reviewers" but NOT "agree".
         var doc = MakeDoc(
-            models: new[] { "claude-opus-4.8", "gpt-5.5" },
+            models: new[] { "claude-opus-4.8", "gpt-5.6-terra" },
             asymmetry: null,
             age: TimeSpan.FromMinutes(45));
 
         var s = CleanVerdict.BuildTooltip(doc, _now);
 
         Assert.Equal(
-            "Reviewed clean 45m ago · 2 reviewers · claude-opus-4.8 + gpt-5.5",
+            "Reviewed clean 45m ago · 2 reviewers · claude-opus-4.8 + gpt-5.6-terra",
             s);
     }
 
@@ -149,14 +149,14 @@ public class CleanVerdictTests
         // Forward-compat: if/when the dual-model protocol becomes triple-
         // model, the count should track Models.Count, not a hardcoded 2.
         var doc = MakeDoc(
-            models: new[] { "claude-opus-4.8", "gpt-5.5", "gemini-3.0" },
+            models: new[] { "claude-opus-4.8", "gpt-5.6-terra", "gemini-3.0" },
             asymmetry: new AsymmetryStats { BothFound = 0, OpusOnly = 0, GptOnly = 0 },
             age: TimeSpan.FromHours(1));
 
         var s = CleanVerdict.BuildTooltip(doc, _now);
 
         Assert.Equal(
-            "Reviewed clean 1h ago · 3 reviewers agree · claude-opus-4.8 + gpt-5.5 + gemini-3.0",
+            "Reviewed clean 1h ago · 3 reviewers agree · claude-opus-4.8 + gpt-5.6-terra + gemini-3.0",
             s);
     }
 }

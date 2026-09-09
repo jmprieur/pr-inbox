@@ -194,6 +194,9 @@ Observed on PR #50 (the convergence run that motivated this agent):
 A representative single round on a moderate-sized PR (≈500 lines
 changed, ≈30 files of repo context) consumed roughly:
 
+The table records the historical PR #50 invocations; it does not define
+the current reviewer defaults.
+
 | Per reviewer per round | Input tokens | Output tokens |
 |---|---|---|
 | Opus 4.7 (`code-review` agent) | ~30k–50k | ~3k–8k |
