@@ -9,8 +9,8 @@ Read alongside `README.md` (user-facing) and `AMBIGUITIES.md` (open decisions).*
 
 Jean-Marc reviews many PRs at scale across `github.com`, GitHub Enterprise
 (Microsoft's GHE), and Azure DevOps. The `dual-model-review` skill defaults to
-`claude-opus-4.8` + `gpt-5.6-terra`, preserving the cross-family asymmetry
-pattern established by earlier review runs.
+`claude-opus-4.8` + `gpt-5.6-terra`; the cross-family asymmetry pattern was
+established across N=6 runs as of PRs #4133/#51/#53/#4248.
 The **harness** is not.
 
 `pr-inbox` is that harness. It does not perform the review — it
