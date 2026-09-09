@@ -80,16 +80,17 @@ public static class PublisherWiring
         {
             const string host = "dev.azure.com";
             const string identity = "azure-cli";
-            var firstProject = config.Ado.Projects[0];
-            var sourceId = $"ado:{firstProject.Org}/{firstProject.Project}";
             var tokens = new AzureCliTokenProvider(
-                sourceId,
+                sourceId: "ado:publisher",
                 logFactory.CreateLogger<AzureCliTokenProvider>());
             var publisher = new AdoReviewPublisher(
                 tokens, sharedClient, identity,
                 logFactory.CreateLogger<AdoReviewPublisher>());
             byPair[(host, identity)] = publisher;
-            defaultByHost[host] = identity;
+            if (!defaultByHost.ContainsKey(host))
+            {
+                defaultByHost[host] = identity;
+            }
         }
 
         return new ConfigDrivenPublisherSelector(
