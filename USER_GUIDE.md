@@ -595,8 +595,8 @@ Persisted settings that take effect on the **next** review you launch
 | **One tab per review** *(experimental)* | On: each review opens as a tab in one shared window (`pr-inbox-reviews`) instead of its own window — less desktop clutter when several run at once. Trade-off: the Inbox's per-review window controls don't apply in tab mode, and closing the shared window closes every review tab. Off (default): one window per review. |
 
 The review orchestrator model defaults to `gpt-5.6-sol`. This is distinct
-from the independent reviewer pair, which defaults to Claude Opus 4.8 and
-GPT-5.6 Terra.
+from the independent reviewer pair, which defaults to `claude-opus-4.8`
+and `gpt-5.6-terra`.
 
 If you need fancier overrides (different model, different plugin),
 use the env vars in [§ Review launcher overrides](README.md#review-launcher-overrides).
@@ -721,7 +721,8 @@ from the CLI, the same seven steps run:
    - Your open threads with status
    - Recent bot comments (Copilot review, Copilot coding agent) since
      the last brief
-   - Standard `dual-model-review` invocation block (Claude Opus 4.8 + GPT-5.6 Terra,
+   - Standard `dual-model-review` invocation block (`claude-opus-4.8` +
+     `gpt-5.6-terra`,
      asymmetry instructions, `do NOT post`, `diff_anchorable` flag,
      95%+ inline filter)
    - Staleness clause ("verify PR HEAD is still `<sha>` before posting")

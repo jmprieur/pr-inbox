@@ -24,7 +24,7 @@ will run the actual `dual-model-review`.
 
 Reviewing many PRs at scale across three platforms with two identities is
 manual. The pain is not the review skill itself — that's mature
-(`dual-model-review` with Claude Opus 4.8 + GPT-5.6 Terra, preserving the
+(`dual-model-review` with `claude-opus-4.8` + `gpt-5.6-terra`, preserving the
 cross-family asymmetry pattern).
 The pain is:
 
