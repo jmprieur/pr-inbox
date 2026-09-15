@@ -203,6 +203,20 @@ public sealed class LocalReviewRunnerTests
     }
 
     [Fact]
+    public void ProviderErrorDetail_AddsWebGpuFallbackInstructions()
+    {
+        var detail = LocalReviewRunner.BuildProviderErrorDetail(
+            "gpt-oss-20b",
+            """{"error":{"message":"WebGPU validation failed. binding index 4 not present"}}""");
+
+        detail.Should().Contain("WebGPU variant is incompatible");
+        detail.Should().Contain(
+            "foundry model download gpt-oss-20b-generic-cpu");
+        detail.Should().Contain(
+            "set the local reviewer model to gpt-oss-20b-generic-cpu");
+    }
+
+    [Fact]
     public void ResponseParser_AcceptsFencedJsonAndDropsMalformedFindings()
     {
         var response = """

@@ -728,7 +728,7 @@ public sealed class LocalReviewRunner : ILocalReviewRunner
             throw new HttpRequestException(
                 $"Local model request failed for patch chunk {chunkNumber}/{chunkCount} " +
                 $"({(int)response.StatusCode} {response.ReasonPhrase}): " +
-                Truncate(responseText, 2_000));
+                BuildProviderErrorDetail(model, responseText));
         }
 
         return LocalReviewResponseParser.Parse(
@@ -796,6 +796,30 @@ public sealed class LocalReviewRunner : ILocalReviewRunner
         }
         contextLength = 0;
         return false;
+    }
+
+    internal static string BuildProviderErrorDetail(
+        string model,
+        string responseText)
+    {
+        var detail = Truncate(responseText, 2_000);
+        if (!responseText.Contains(
+                "WebGPU validation failed",
+                StringComparison.OrdinalIgnoreCase))
+        {
+            return detail;
+        }
+
+        var cpuVariant = model.EndsWith(
+                "-generic-gpu",
+                StringComparison.OrdinalIgnoreCase)
+            ? model[..^"-generic-gpu".Length] + "-generic-cpu"
+            : model + "-generic-cpu";
+        return detail +
+            "\n\nThe selected WebGPU variant is incompatible with the current GPU/runtime. " +
+            "Use a hardware-native NPU model such as qwen2.5-coder-7b, or test the exact " +
+            $"CPU variant:\nfoundry model download {cpuVariant}\n" +
+            $"Then set the local reviewer model to {cpuVariant}.";
     }
 
     internal static int CalculateChunkCharacterBudget(int contextLength)
