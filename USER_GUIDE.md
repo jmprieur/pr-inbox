@@ -595,6 +595,11 @@ Persisted settings that take effect on the **next** review you launch
 | **Tab colour** | Colours the Windows Terminal tab for every review so it stands out from ordinary terminals. Accepts a hex like `#5da4ff`; leave blank to disable. |
 | **One tab per review** *(experimental)* | On: each review opens as a tab in one shared window (`pr-inbox-reviews`) instead of its own window — less desktop clutter when several run at once. Trade-off: the Inbox's per-review window controls don't apply in tab mode, and closing the shared window closes every review tab. Off (default): one window per review. |
 
+Every generated review-run directory is also passed as a session-scoped
+`--add-dir`. This handles Copilot CLI's separate startup folder-trust gate, so
+the unique timestamped run folder should not require confirmation on every
+launch. It does not auto-approve tools or URLs.
+
 The review orchestrator model defaults to `gpt-5.6-sol`. This is distinct
 from the independent reviewer pair, which defaults to `claude-opus-4.8`
 and `gpt-5.6-terra`.

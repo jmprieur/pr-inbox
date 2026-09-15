@@ -284,6 +284,11 @@ Use **Rerun local** on the Review page to repeat only this pass while tuning
 the model or settings; it reuses the current immutable run and does not reopen
 the cloud review.
 
+The review launcher passes each generated run directory to Copilot with
+`--add-dir`. This trusts that specific app-generated directory for the session
+and avoids a new folder-trust prompt for every timestamped run. The separate
+**Allow all paths** setting still controls broader path authorization.
+
 The default model is `qwen2.5-coder-7b`, which is a practical first choice on
 developer-class NPU/GPU hardware. The runner accepts any
 OpenAI-compatible loopback endpoint. Leave the endpoint blank to discover
