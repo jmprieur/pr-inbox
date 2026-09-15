@@ -615,7 +615,9 @@ Configure it under **Settings → Local shadow reviewer**:
 - Leave the endpoint blank to auto-discover Foundry Local, or enter an
   OpenAI-compatible loopback endpoint.
 - Choose the local model alias (default: `qwen2.5-coder-7b`).
-- Set a maximum patch size and inference timeout.
+- Set a maximum total patch size and inference timeout. The patch-size value
+  is a workload cap, not the model context window. `100000` is the recommended
+  starting point for Qwen 7B; accepted patches are chunked automatically.
 
 With endpoint auto-discovery, PR Inbox starts Foundry Local and loads the
 configured model automatically. It intentionally does not download missing
@@ -626,6 +628,12 @@ The runner sends the real unified GitHub/GHE patch to the model. If the patch
 is too large, the endpoint is unavailable, the response is malformed, or the
 PR is hosted on Azure DevOps, the local panel reports that state without
 interrupting the authoritative review.
+
+For Foundry Local, PR Inbox reads the selected model's reported context length.
+Patches that fit the configured overall size limit but not one model request
+are split at file and hunk boundaries. Each chunk is reviewed independently,
+then findings are combined and de-duplicated. The Review page explicitly
+reports how many chunks were used.
 
 Before downloading a large local model, move Foundry Local's global cache off
 a constrained system drive if necessary:

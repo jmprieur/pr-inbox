@@ -67,19 +67,25 @@ public sealed class LocalReviewRunnerTests
                 0,
                 """{"variants":[{"alias":"qwen2.5-coder-7b","cached":true}]}""",
                 ""),
+            new FoundryCliResult(
+                0,
+                """{"model":{"contextLength":32768}}""",
+                ""),
             new FoundryCliResult(0, "loaded", ""));
         var runtime = new FoundryLocalRuntime(cli);
 
-        await runtime.PrepareAsync(
+        var result = await runtime.PrepareAsync(
             configuredEndpoint: "",
             model: "qwen2.5-coder-7b",
             timeoutSeconds: 600,
             ct: CancellationToken.None);
 
+        result.ContextLength.Should().Be(32_768);
         cli.Commands.Should().Equal(
             "server status --output json",
             "server start",
             "model list --cached --variants --output json --limit 500",
+            "model info qwen2.5-coder-7b --output json",
             "model load qwen2.5-coder-7b");
     }
 
@@ -116,6 +122,51 @@ public sealed class LocalReviewRunnerTests
                 "http://localhost:39839/v1/chat/completions")
             .Should().Be(new Uri(
                 "http://localhost:39839/v1/chat/completions"));
+    }
+
+    [Theory]
+    [InlineData(32_768, 24_371)]
+    [InlineData(40_960, 31_334)]
+    [InlineData(131_072, 107_929)]
+    public void ChunkBudget_ScalesWithModelContext(
+        int contextLength,
+        int expectedCharacters)
+    {
+        LocalReviewRunner.CalculateChunkCharacterBudget(contextLength)
+            .Should().Be(expectedCharacters);
+    }
+
+    [Fact]
+    public void PatchChunker_SplitsOnFileBoundariesWithinBudget()
+    {
+        var first = BuildFileDiff("src/a.cs", 7_000);
+        var second = BuildFileDiff("src/b.cs", 7_000);
+        var third = BuildFileDiff("src/c.cs", 7_000);
+
+        var chunks = LocalReviewPatchChunker.Chunk(
+            first + second + third,
+            maxCharacters: 15_000);
+
+        chunks.Should().HaveCount(2);
+        chunks.Should().OnlyContain(chunk => chunk.Length <= 15_000);
+        string.Concat(chunks).Should().Be(first + second + third);
+        chunks[0].Should().Contain("src/a.cs").And.Contain("src/b.cs");
+        chunks[1].Should().Contain("src/c.cs");
+    }
+
+    [Fact]
+    public void PatchChunker_SplitsOversizedFileAndRepeatsItsHeader()
+    {
+        var patch = BuildFileDiff("src/large.cs", 30_000);
+
+        var chunks = LocalReviewPatchChunker.Chunk(
+            patch,
+            maxCharacters: 10_000);
+
+        chunks.Should().HaveCountGreaterThan(1);
+        chunks.Should().OnlyContain(chunk => chunk.Length <= 10_000);
+        chunks.Should().OnlyContain(chunk =>
+            chunk.StartsWith("diff --git a/src/large.cs b/src/large.cs"));
     }
 
     [Fact]
@@ -335,6 +386,42 @@ public sealed class LocalReviewRunnerTests
         run.LocalReview.Error.Should().Contain("Local model request failed");
     }
 
+    [Fact]
+    public async Task Runner_ChunksLargePatchAndAggregatesFindings()
+    {
+        var patch = BuildFileDiff("src/a.cs", 15_000)
+            + BuildFileDiff("src/b.cs", 15_000);
+        await using var fixture = await RunnerFixture.CreateAsync(
+            [
+                new StubResponse(
+                    HttpStatusCode.OK,
+                    ChatResponse(
+                        "First bug",
+                        "src/a.cs",
+                        10)),
+                new StubResponse(
+                    HttpStatusCode.OK,
+                    ChatResponse(
+                        "Second bug",
+                        "src/b.cs",
+                        20)),
+            ],
+            patch,
+            contextLength: 24_576);
+
+        await fixture.Runner.RunAsync(fixture.Brief, CancellationToken.None);
+
+        fixture.Handler.RequestBodies.Should().HaveCount(2);
+        var run = fixture.Store.Get(fixture.Brief.PrUrl)!;
+        run.LocalReview!.Status.Should().Be(LocalReviewStatus.Completed);
+        run.LocalReview.Findings.Select(finding => finding.Title)
+            .Should().Equal("First bug", "Second bug");
+        run.LocalReview.Findings.Select(finding => finding.Id)
+            .Should().Equal("local-01", "local-02");
+        run.LocalReview.Warnings.Should().ContainSingle(
+            warning => warning.Contains("2 chunks"));
+    }
+
     private sealed class RunnerFixture : IAsyncDisposable
     {
         private readonly Microsoft.Data.Sqlite.SqliteConnection _keepAlive;
@@ -364,6 +451,15 @@ public sealed class LocalReviewRunnerTests
         public static async Task<RunnerFixture> CreateAsync(
             HttpStatusCode status,
             string response)
+            => await CreateAsync(
+                [new StubResponse(status, response)],
+                StubPatchProvider.DefaultPatch,
+                contextLength: 32_768);
+
+        public static async Task<RunnerFixture> CreateAsync(
+            IReadOnlyList<StubResponse> responses,
+            string patch,
+            int contextLength)
         {
             var connString = PrInboxDb.InMemoryConnectionString(
                 $"local-review-{Guid.NewGuid():N}");
@@ -416,7 +512,7 @@ public sealed class LocalReviewRunnerTests
                 Findings: null,
                 FindingsErrors: Array.Empty<string>()));
 
-            var handler = new StubHttpHandler(status, response);
+            var handler = new StubHttpHandler(responses);
             var config = new PrInboxConfig();
             config.LocalReviewer.Enabled = true;
             config.LocalReviewer.Endpoint = "http://127.0.0.1:39839";
@@ -425,8 +521,8 @@ public sealed class LocalReviewRunnerTests
             var runner = new LocalReviewRunner(
                 config,
                 prRepo,
-                new StubPatchProvider(),
-                new StubFoundryRuntime(),
+                new StubPatchProvider(patch),
+                new StubFoundryRuntime(contextLength),
                 new StubEndpointResolver(),
                 new StubHttpClientFactory(handler),
                 store,
@@ -445,18 +541,26 @@ public sealed class LocalReviewRunnerTests
 
     private sealed class StubPatchProvider : IReviewPatchProvider
     {
+        public const string DefaultPatch = """
+            --- a/src/a.cs
+            +++ b/src/a.cs
+            @@ -1 +1 @@
+            -return input ?? string.Empty;
+            +return input.Trim();
+            """;
+
+        private readonly string _patch;
+
+        public StubPatchProvider(string patch)
+        {
+            _patch = patch;
+        }
+
         public Task<ReviewPatchResult> GetPatchAsync(
             PullRequestRow pr,
             int maxCharacters,
             CancellationToken ct) =>
-            Task.FromResult(ReviewPatchResult.Success(
-                """
-                --- a/src/a.cs
-                +++ b/src/a.cs
-                @@ -1 +1 @@
-                -return input ?? string.Empty;
-                +return input.Trim();
-                """));
+            Task.FromResult(ReviewPatchResult.Success(_patch));
     }
 
     private sealed class StubEndpointResolver : ILocalModelEndpointResolver
@@ -469,11 +573,19 @@ public sealed class LocalReviewRunnerTests
 
     private sealed class StubFoundryRuntime : IFoundryLocalRuntime
     {
-        public Task PrepareAsync(
+        private readonly int _contextLength;
+
+        public StubFoundryRuntime(int contextLength)
+        {
+            _contextLength = contextLength;
+        }
+
+        public Task<LocalModelRuntimeInfo> PrepareAsync(
             string configuredEndpoint,
             string model,
             int timeoutSeconds,
-            CancellationToken ct) => Task.CompletedTask;
+            CancellationToken ct) =>
+            Task.FromResult(new LocalModelRuntimeInfo(_contextLength));
     }
 
     private sealed class StubFoundryCliRunner : IFoundryCliRunner
@@ -511,29 +623,76 @@ public sealed class LocalReviewRunnerTests
 
     private sealed class StubHttpHandler : HttpMessageHandler
     {
-        private readonly HttpStatusCode _status;
-        private readonly string _response;
+        private readonly Queue<StubResponse> _responses;
 
-        public StubHttpHandler(HttpStatusCode status, string response)
+        public StubHttpHandler(IReadOnlyList<StubResponse> responses)
         {
-            _status = status;
-            _response = response;
+            _responses = new Queue<StubResponse>(responses);
         }
 
-        public string RequestBody { get; private set; } = string.Empty;
+        public IReadOnlyList<string> RequestBodies => _requestBodies;
+        public string RequestBody => _requestBodies.LastOrDefault() ?? string.Empty;
+        private readonly List<string> _requestBodies = new();
 
         protected override async Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request,
             CancellationToken cancellationToken)
         {
-            RequestBody = request.Content is null
+            _requestBodies.Add(request.Content is null
                 ? string.Empty
-                : await request.Content.ReadAsStringAsync(cancellationToken);
-            return new HttpResponseMessage(_status)
+                : await request.Content.ReadAsStringAsync(cancellationToken));
+            var response = _responses.Dequeue();
+            return new HttpResponseMessage(response.Status)
             {
                 Content = new StringContent(
-                    _response, Encoding.UTF8, "application/json"),
+                    response.Body, Encoding.UTF8, "application/json"),
             };
         }
+    }
+
+    private sealed record StubResponse(HttpStatusCode Status, string Body);
+
+    private static string BuildFileDiff(string path, int bodyCharacters)
+    {
+        var header = $"""
+            diff --git a/{path} b/{path}
+            index 1111111..2222222 100644
+            --- a/{path}
+            +++ b/{path}
+            @@ -1,1 +1,1 @@
+            """;
+        return header + "\n+" + new string('x', bodyCharacters) + "\n";
+    }
+
+    private static string ChatResponse(string title, string file, int line)
+    {
+        var content = JsonSerializer.Serialize(new
+        {
+            findings = new[]
+            {
+                new
+                {
+                    severity = "medium",
+                    confidence = "high",
+                    file,
+                    line,
+                    title,
+                    body = "Concrete bug.",
+                },
+            },
+        });
+        return JsonSerializer.Serialize(new
+        {
+            choices = new[]
+            {
+                new
+                {
+                    message = new
+                    {
+                        content,
+                    },
+                },
+            },
+        });
     }
 }

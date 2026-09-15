@@ -369,8 +369,10 @@ public sealed class LocalReviewerSettings
     public string Model { get; set; } = "qwen2.5-coder-7b";
 
     /// <summary>
-    /// Maximum unified-diff size sent to the model. Larger PRs are skipped
-    /// rather than truncated, because partial review would look complete.
+    /// Maximum total unified-diff size accepted for a local review. This is a
+    /// workload cap, not a per-request context limit: accepted patches are
+    /// split into model-context-sized chunks. Larger PRs are skipped rather
+    /// than truncated, because partial review would look complete.
     /// </summary>
     public int MaxPatchCharacters { get; set; } = 100_000;
 

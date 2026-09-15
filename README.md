@@ -308,6 +308,12 @@ The shadow reviewer currently obtains unified patches from GitHub.com and
 GitHub Enterprise. Azure DevOps runs are explicitly marked skipped until a
 complete ADO patch provider is available. Oversized patches are also skipped
 rather than truncated, because a partial review must not look complete.
+Within that configured overall limit, PR Inbox reads Foundry's reported
+`contextLength`, splits the patch into conservative file/hunk-aligned chunks,
+reviews every chunk, and de-duplicates the combined findings. This lets the
+current 32K Qwen2.5 Coder variants review larger PRs without pretending a
+truncated prompt was complete. Custom OpenAI-compatible endpoints use a
+conservative 32K default because they do not expose Foundry catalog metadata.
 
 ---
 
