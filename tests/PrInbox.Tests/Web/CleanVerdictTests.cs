@@ -16,12 +16,18 @@ public class CleanVerdictTests
 
     private static FindingsDocument MakeDoc(
         IReadOnlyList<string>? models = null,
+        IReadOnlyList<string>? primaryModels = null,
         AsymmetryStats? asymmetry = null,
-        TimeSpan? age = null)
+        TimeSpan? age = null,
+        ReviewCompleteness? reviewStatus = null,
+        string? incompleteReason = null)
     {
         return new FindingsDocument
         {
             Models = models ?? Array.Empty<string>(),
+            PrimaryModels = primaryModels ?? Array.Empty<string>(),
+            ReviewStatus = reviewStatus,
+            IncompleteReason = incompleteReason,
             Asymmetry = asymmetry,
             GeneratedAtUtc = _now - (age ?? TimeSpan.FromHours(2)),
             Findings = Array.Empty<Finding>(),
@@ -158,5 +164,36 @@ public class CleanVerdictTests
         Assert.Equal(
             "Reviewed clean 1h ago · 3 reviewers agree · claude-opus-4.8 + gpt-5.6-terra + gemini-3.0",
             s);
+    }
+
+    [Fact]
+    public void IsConverged_Shadow_Model_Does_Not_Replace_Missing_Primary()
+    {
+        var doc = new FindingsDocument
+        {
+            PrimaryModels = new[] { "gpt-5.6-terra" },
+            ShadowModels = new[] { "qwen2.5-coder-7b" },
+            ReviewStatus = ReviewCompleteness.Incomplete,
+            IncompleteReason = "Opus reviewer failed",
+            Asymmetry = new AsymmetryStats { BothFound = 0, OpusOnly = 0, GptOnly = 0 },
+            GeneratedAtUtc = _now,
+        };
+
+        Assert.False(CleanVerdict.IsConverged(doc));
+        Assert.Contains("Review incomplete", CleanVerdict.BuildTooltip(doc, _now));
+        Assert.Contains("Opus reviewer failed", CleanVerdict.BuildTooltip(doc, _now));
+    }
+
+    [Fact]
+    public void BuildTooltip_Degraded_Review_Is_Not_Called_Clean()
+    {
+        var doc = MakeDoc(
+            primaryModels: new[] { "gpt-5.6-terra" },
+            reviewStatus: ReviewCompleteness.Degraded,
+            age: TimeSpan.FromMinutes(10));
+
+        var tooltip = CleanVerdict.BuildTooltip(doc, _now);
+
+        Assert.Equal("Degraded review 10m ago · 1 primary reviewer · gpt-5.6-terra", tooltip);
     }
 }

@@ -107,7 +107,11 @@ public sealed class FindingsParser
             head_sha = doc.HeadSha,
             base_sha = doc.BaseSha,
             generated_at_utc = doc.GeneratedAtUtc.UtcDateTime.ToString("O"),
-            models = doc.Models,
+            models = doc.Models.Count > 0 ? doc.Models : null,
+            primary_models = doc.PrimaryModels.Count > 0 ? doc.PrimaryModels : null,
+            shadow_models = doc.ShadowModels.Count > 0 ? doc.ShadowModels : null,
+            review_status = doc.ReviewStatus?.ToYamlValue(),
+            incomplete_reason = doc.IncompleteReason,
             asymmetry = doc.Asymmetry,
             findings = doc.Findings.Select(f => new
             {
@@ -141,6 +145,12 @@ public sealed class FindingsParser
             BaseSha = raw.BaseSha,
             GeneratedAtUtc = raw.GeneratedAtUtc,
             Models = (IReadOnlyList<string>?)raw.Models ?? Array.Empty<string>(),
+            PrimaryModels = (IReadOnlyList<string>?)raw.PrimaryModels ?? Array.Empty<string>(),
+            ShadowModels = (IReadOnlyList<string>?)raw.ShadowModels ?? Array.Empty<string>(),
+            ReviewStatus = string.IsNullOrWhiteSpace(raw.ReviewStatus)
+                ? null
+                : FindingEnumExtensions.ParseReviewCompleteness(raw.ReviewStatus),
+            IncompleteReason = raw.IncompleteReason,
             Asymmetry = raw.Asymmetry,
             Findings = ((IEnumerable<RawFinding>?)raw.Findings ?? Array.Empty<RawFinding>()).Select(MapFinding).ToList(),
         };
@@ -271,6 +281,10 @@ public sealed class FindingsParser
         public string? BaseSha { get; set; }
         public DateTimeOffset GeneratedAtUtc { get; set; }
         public List<string>? Models { get; set; }
+        public List<string>? PrimaryModels { get; set; }
+        public List<string>? ShadowModels { get; set; }
+        public string? ReviewStatus { get; set; }
+        public string? IncompleteReason { get; set; }
         public AsymmetryStats? Asymmetry { get; set; }
         public List<RawFinding>? Findings { get; set; }
     }

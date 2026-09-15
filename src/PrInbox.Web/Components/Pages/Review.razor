@@ -192,6 +192,13 @@ else
     {
         <p class="empty">Review in progress · waiting for <code>findings.yaml</code> in @_run.RunDirectory</p>
     }
+    else if (_run.Findings.Findings.Count == 0
+             && (_run.Findings.ReviewStatus is ReviewCompleteness.Incomplete or ReviewCompleteness.Degraded))
+    {
+        <div class="drift-banner drift-forcepush" role="alert">
+            <span>@CleanVerdict.BuildTooltip(_run.Findings, DateTimeOffset.UtcNow)</span>
+        </div>
+    }
     else if (_run.Findings.Findings.Count == 0)
     {
         <div class="clean-callout" role="status">
@@ -201,6 +208,13 @@ else
     }
     else
     {
+        @if (_run.Findings.ReviewStatus is ReviewCompleteness.Incomplete or ReviewCompleteness.Degraded)
+        {
+            <div class="drift-banner drift-forcepush" role="alert">
+                <span>@CleanVerdict.BuildTooltip(_run.Findings, DateTimeOffset.UtcNow)</span>
+            </div>
+        }
+
         var conv = ConvergenceVerdict.Compute(_run.Findings);
         @if (conv.State != ConvergenceState.Hidden)
         {
@@ -640,6 +654,13 @@ else
     private async Task OnPostSelected()
     {
         if (_run?.Findings is null || string.IsNullOrEmpty(Url)) return;
+        if (_run.Findings.ReviewStatus == ReviewCompleteness.Incomplete)
+        {
+            _result = PublishResult.Failure(
+                "incomplete_review",
+                "The required Opus + GPT primary review is incomplete. Re-run the missing primary reviewer before publishing.");
+            return;
+        }
         var picks = _run.Findings.Findings.Where(f => _selected.Contains(f.Id)).ToList();
         // For a plain Comment review, posting nothing is meaningless; for
         // an Approve / Request-changes vote, the body header alone is fine.
