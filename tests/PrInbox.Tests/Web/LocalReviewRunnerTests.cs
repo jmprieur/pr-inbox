@@ -69,8 +69,9 @@ public sealed class LocalReviewRunnerTests
                 ""),
             new FoundryCliResult(
                 0,
-                """{"model":{"contextLength":32768}}""",
+                """{"model":{"alias":"qwen2.5-coder-7b","id":"qwen2.5-coder-7b-instruct-qnn-npu:1","contextLength":32768}}""",
                 ""),
+            new FoundryCliResult(0, """{"variants":[]}""", ""),
             new FoundryCliResult(0, "loaded", ""));
         var runtime = new FoundryLocalRuntime(cli);
 
@@ -86,7 +87,45 @@ public sealed class LocalReviewRunnerTests
             "server start",
             "model list --cached --variants --output json --limit 500",
             "model info qwen2.5-coder-7b --output json",
+            "model list --loaded --variants --output json --limit 500",
             "model load qwen2.5-coder-7b");
+    }
+
+    [Fact]
+    public async Task FoundryRuntime_UnloadsSiblingVariantBeforeExactLoad()
+    {
+        var cli = new StubFoundryCliRunner(
+            new FoundryCliResult(
+                0, """{"running":true,"state":"ready"}""", ""),
+            new FoundryCliResult(
+                0,
+                """{"variants":[{"alias":"gpt-oss-20b","variantId":"gpt-oss-20b-generic-cpu:1","cached":true}]}""",
+                ""),
+            new FoundryCliResult(
+                0,
+                """{"model":{"alias":"gpt-oss-20b","id":"gpt-oss-20b-generic-cpu:1","contextLength":131072}}""",
+                ""),
+            new FoundryCliResult(
+                0,
+                """{"variants":[{"alias":"gpt-oss-20b","variantId":"gpt-oss-20b-generic-gpu:1"},{"alias":"gpt-oss-20b","variantId":"gpt-oss-20b-generic-cpu:1"}]}""",
+                ""),
+            new FoundryCliResult(0, "unloaded", ""),
+            new FoundryCliResult(0, "loaded", ""));
+        var runtime = new FoundryLocalRuntime(cli);
+
+        await runtime.PrepareAsync(
+            configuredEndpoint: "",
+            model: "gpt-oss-20b-generic-cpu",
+            timeoutSeconds: 600,
+            ct: CancellationToken.None);
+
+        cli.Commands.Should().ContainInOrder(
+            "model info gpt-oss-20b-generic-cpu --output json",
+            "model list --loaded --variants --output json --limit 500",
+            "model unload gpt-oss-20b-generic-gpu:1",
+            "model load gpt-oss-20b-generic-cpu");
+        cli.Commands.Should().NotContain(
+            "model unload gpt-oss-20b-generic-cpu:1");
     }
 
     [Fact]
@@ -214,6 +253,20 @@ public sealed class LocalReviewRunnerTests
             "foundry model download gpt-oss-20b-generic-cpu");
         detail.Should().Contain(
             "set the local reviewer model to gpt-oss-20b-generic-cpu");
+    }
+
+    [Fact]
+    public void ProviderErrorDetail_ExplainsCpuAllocationFailure()
+    {
+        var detail = LocalReviewRunner.BuildProviderErrorDetail(
+            "gpt-oss-20b-generic-cpu",
+            """
+            {"error":{"message":"BFCArena::AllocateRawInternal Failed to allocate memory for requested buffer of size 64434643968"}}
+            """);
+
+        detail.Should().Contain("exceeded available system memory");
+        detail.Should().Contain("60.0 GiB buffer");
+        detail.Should().Contain("qwen2.5-coder-7b NPU");
     }
 
     [Fact]

@@ -310,6 +310,21 @@ public sealed class FoundryLocalRuntime : IFoundryLocalRuntime
             ["model", "info", model, "--output", "json"],
             TimeSpan.FromSeconds(30),
             ct);
+        var selectedModel = ParseModelSelection(modelInfo.StandardOutput);
+        var loaded = await RunRequiredAsync(
+            ["model", "list", "--loaded", "--variants", "--output", "json", "--limit", "500"],
+            TimeSpan.FromSeconds(30),
+            ct);
+        foreach (var sibling in FindLoadedSiblingVariants(
+                     loaded.StandardOutput,
+                     selectedModel.Alias,
+                     selectedModel.Id))
+        {
+            await RunRequiredAsync(
+                ["model", "unload", sibling],
+                TimeSpan.FromMinutes(2),
+                ct);
+        }
         await RunRequiredAsync(
             ["model", "load", model],
             TimeSpan.FromSeconds(timeoutSeconds),
@@ -356,6 +371,57 @@ public sealed class FoundryLocalRuntime : IFoundryLocalRuntime
             return null;
         }
         return value;
+    }
+
+    internal static FoundryModelSelection ParseModelSelection(string json)
+    {
+        using var doc = JsonDocument.Parse(json);
+        if (!doc.RootElement.TryGetProperty("model", out var model))
+        {
+            throw new FormatException("Foundry model info did not contain a model object.");
+        }
+        var alias = model.TryGetProperty("alias", out var aliasElement)
+            ? aliasElement.GetString()
+            : null;
+        var id = model.TryGetProperty("id", out var idElement)
+            ? idElement.GetString()
+            : null;
+        if (string.IsNullOrWhiteSpace(alias) || string.IsNullOrWhiteSpace(id))
+        {
+            throw new FormatException("Foundry model info did not contain an alias and id.");
+        }
+        return new FoundryModelSelection(alias, id);
+    }
+
+    internal static IReadOnlyList<string> FindLoadedSiblingVariants(
+        string json,
+        string alias,
+        string selectedId)
+    {
+        using var doc = JsonDocument.Parse(json);
+        if (!doc.RootElement.TryGetProperty("variants", out var variants)
+            || variants.ValueKind != JsonValueKind.Array)
+        {
+            return Array.Empty<string>();
+        }
+
+        var siblings = new List<string>();
+        foreach (var variant in variants.EnumerateArray())
+        {
+            var variantAlias = variant.TryGetProperty("alias", out var aliasElement)
+                ? aliasElement.GetString()
+                : null;
+            var variantId = variant.TryGetProperty("variantId", out var idElement)
+                ? idElement.GetString()
+                : null;
+            if (string.Equals(variantAlias, alias, StringComparison.OrdinalIgnoreCase)
+                && !string.IsNullOrWhiteSpace(variantId)
+                && !string.Equals(variantId, selectedId, StringComparison.OrdinalIgnoreCase))
+            {
+                siblings.Add(variantId);
+            }
+        }
+        return siblings;
     }
 
     private async Task<FoundryCliResult> RunRequiredAsync(
@@ -807,7 +873,24 @@ public sealed class LocalReviewRunner : ILocalReviewRunner
                 "WebGPU validation failed",
                 StringComparison.OrdinalIgnoreCase))
         {
-            return detail;
+            if (!responseText.Contains(
+                    "Failed to allocate memory for requested buffer",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                return detail;
+            }
+
+            var allocation = AllocationSizePattern.Match(responseText);
+            var sizeHint = allocation.Success
+                && long.TryParse(allocation.Groups["bytes"].Value, out var bytes)
+                ? $" The runtime requested a {bytes / (1024d * 1024d * 1024d):F1} GiB buffer."
+                : string.Empty;
+            return detail +
+                "\n\nThe selected model exceeded available system memory." +
+                sizeHint +
+                " Unload other variants or use the hardware-native " +
+                "qwen2.5-coder-7b NPU model. Foundry Local currently exposes " +
+                "no load-time option to reduce this model's reserved context.";
         }
 
         var cpuVariant = model.EndsWith(
@@ -883,6 +966,9 @@ public sealed class LocalReviewRunner : ILocalReviewRunner
     private static readonly Regex ContextLengthErrorPattern = new(
         @"maximum context length (?:of|is) (?<length>[\d,]+) tokens",
         RegexOptions.Compiled | RegexOptions.IgnoreCase);
+    private static readonly Regex AllocationSizePattern = new(
+        @"requested buffer of size (?<bytes>\d+)",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
     private const string LocalReviewerSystemPrompt = """
         You are an independent code-review model. Return exactly one JSON object
@@ -913,6 +999,8 @@ public sealed class LocalReviewRunner : ILocalReviewRunner
 internal sealed record AggregatedLocalReview(
     IReadOnlyList<Finding> Findings,
     IReadOnlyList<string> Warnings);
+
+internal sealed record FoundryModelSelection(string Alias, string Id);
 
 internal sealed class LocalContextLengthExceededException : Exception
 {
