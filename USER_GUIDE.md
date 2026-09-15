@@ -649,6 +649,11 @@ current execution provider actually serves. When the endpoint returns the
 effective context limit in a 400 response, PR Inbox automatically rechunks
 the complete patch to that lower limit and retries once.
 
+The local pass reports only issues anchored to added `+` lines. Its prompt
+requires the issue to survive in the post-change code, and PR Inbox rejects
+candidates anchored to deleted, unchanged, or old-side line numbers. Rejected
+candidates appear as warnings in `local-review.json`, not publishable findings.
+
 Before downloading a large local model, move Foundry Local's global cache off
 a constrained system drive if necessary:
 

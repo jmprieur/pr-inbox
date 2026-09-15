@@ -797,9 +797,10 @@ public sealed class LocalReviewRunner : ILocalReviewRunner
                 BuildProviderErrorDetail(model, responseText));
         }
 
-        return LocalReviewResponseParser.Parse(
+        var parsed = LocalReviewResponseParser.Parse(
             ExtractChatContent(responseText),
             model);
+        return LocalReviewDiffIndex.FilterToAddedLines(parsed, patchChunk);
     }
 
     private async Task SaveAndPublishAsync(
@@ -938,6 +939,20 @@ public sealed class LocalReviewRunner : ILocalReviewRunner
         or behavioral bugs introduced by the patch. Do not report style,
         naming, documentation, or speculative concerns.
 
+        Apply unified-diff semantics strictly:
+        - Lines beginning with "-" are removed old code. Never report a bug
+          merely because it exists in a removed line or in comments describing
+          the defect being fixed.
+        - Lines beginning with "+" are the new code that survives after the
+          patch. Context lines are unchanged.
+        - Before reporting a defect, verify that it still exists after all "+"
+          additions in this chunk are applied. If the patch adds a guard, test,
+          escalation, or error path for that defect, do not report the original
+          defect as a new finding.
+        - Anchor every finding to a "+" line and use that line's new-file line
+          number from the right side of the @@ hunk header. Do not use the old
+          line number from the left side.
+
         This is patch chunk {chunkNumber} of {chunkCount}. Review only the code
         shown here. Other chunks are reviewed independently and the caller
         combines and de-duplicates all findings.
@@ -988,8 +1003,9 @@ public sealed class LocalReviewRunner : ILocalReviewRunner
         }
 
         Use an empty findings array when there are no actionable bugs. Every
-        finding must be supported by the supplied diff. Do not invent files,
-        APIs, runtime behavior, or line numbers.
+        finding must be supported by an added "+" line in the supplied diff and
+        must remain true in the post-change code. Do not invent files, APIs,
+        runtime behavior, or line numbers.
         """;
 
     private static string Truncate(string value, int max)
@@ -1198,6 +1214,118 @@ internal static class LocalReviewPatchChunker
 internal sealed record LocalReviewParseResult(
     IReadOnlyList<Finding> Findings,
     IReadOnlyList<string> Warnings);
+
+internal static class LocalReviewDiffIndex
+{
+    public static LocalReviewParseResult FilterToAddedLines(
+        LocalReviewParseResult parsed,
+        string patch)
+    {
+        var addedLines = BuildAddedLineMap(patch);
+        var findings = new List<Finding>();
+        var warnings = new List<string>(parsed.Warnings);
+
+        foreach (var finding in parsed.Findings)
+        {
+            var path = NormalizePath(finding.File);
+            if (finding.Line is not { } line
+                || !addedLines.TryGetValue(path, out var lines)
+                || !lines.Contains(line))
+            {
+                warnings.Add(
+                    $"Ignored local finding '{finding.Title}' at " +
+                    $"{finding.File}:{finding.Line?.ToString() ?? "?"}: " +
+                    "it is not anchored to an added post-change line and may " +
+                    "describe deleted, unchanged, or already-fixed code.");
+                continue;
+            }
+
+            findings.Add(finding with
+            {
+                File = path,
+                DiffAnchorable = true,
+            });
+        }
+
+        return new LocalReviewParseResult(findings, warnings);
+    }
+
+    internal static IReadOnlyDictionary<string, IReadOnlySet<int>> BuildAddedLineMap(
+        string patch)
+    {
+        var result = new Dictionary<string, HashSet<int>>(
+            StringComparer.OrdinalIgnoreCase);
+        string? currentPath = null;
+        var newLine = 0;
+        var inHunk = false;
+
+        foreach (var rawLine in patch.Replace("\r\n", "\n").Split('\n'))
+        {
+            if (rawLine.StartsWith("+++ ", StringComparison.Ordinal))
+            {
+                var path = rawLine[4..].Trim();
+                currentPath = path == "/dev/null"
+                    ? null
+                    : NormalizePath(path);
+                inHunk = false;
+                continue;
+            }
+
+            if (rawLine.StartsWith("@@ ", StringComparison.Ordinal)
+                || rawLine.StartsWith("@@", StringComparison.Ordinal))
+            {
+                var match = HunkHeaderPattern.Match(rawLine);
+                if (!match.Success)
+                {
+                    inHunk = false;
+                    continue;
+                }
+                newLine = int.Parse(match.Groups["start"].Value);
+                inHunk = true;
+                continue;
+            }
+
+            if (!inHunk || currentPath is null) continue;
+            if (rawLine.StartsWith("+", StringComparison.Ordinal)
+                && !rawLine.StartsWith("+++", StringComparison.Ordinal))
+            {
+                if (!result.TryGetValue(currentPath, out var lines))
+                {
+                    lines = new HashSet<int>();
+                    result[currentPath] = lines;
+                }
+                lines.Add(newLine);
+                newLine++;
+            }
+            else if (rawLine.StartsWith("-", StringComparison.Ordinal)
+                     || rawLine.StartsWith("\\", StringComparison.Ordinal))
+            {
+                // Deleted lines and "\ No newline" do not advance new-file lines.
+            }
+            else
+            {
+                newLine++;
+            }
+        }
+
+        return result.ToDictionary(
+            pair => pair.Key,
+            pair => (IReadOnlySet<int>)pair.Value,
+            StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static string NormalizePath(string path)
+    {
+        var normalized = path.Trim().Replace('\\', '/');
+        return normalized.StartsWith("b/", StringComparison.Ordinal)
+            ? normalized[2..]
+            : normalized;
+    }
+
+    private static readonly Regex HunkHeaderPattern = new(
+        @"^@@\s+-\d+(?:,\d+)?\s+\+(?<start>\d+)(?:,\d+)?\s+@@",
+        RegexOptions.Compiled);
+}
 
 internal static class LocalReviewResponseParser
 {

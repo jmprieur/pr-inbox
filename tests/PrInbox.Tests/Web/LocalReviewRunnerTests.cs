@@ -424,7 +424,7 @@ public sealed class LocalReviewRunnerTests
               "choices": [
                 {
                   "message": {
-                    "content": "{\"findings\":[{\"issue\":\"Null dereference\",\"description\":\"Trim throws for null.\",\"severity\":\"high\",\"location\":\"src/a.cs\",\"line\":2}]}"
+                    "content": "{\"findings\":[{\"issue\":\"Null dereference\",\"description\":\"Trim throws for null.\",\"severity\":\"high\",\"location\":\"src/a.cs\",\"line\":1}]}"
                   }
                 }
               ]
@@ -445,6 +445,8 @@ public sealed class LocalReviewRunnerTests
             LocalReviewArtifact.FileName)).Should().BeTrue();
 
         fixture.Handler.RequestBody.Should().Contain("return input.Trim()");
+        fixture.Handler.RequestBody.Should().Contain("removed old code");
+        fixture.Handler.RequestBody.Should().Contain("post-change code");
         fixture.Handler.RequestBody.Should()
             .NotContain("triage the existing review threads");
     }
@@ -478,13 +480,13 @@ public sealed class LocalReviewRunnerTests
                     ChatResponse(
                         "First bug",
                         "src/a.cs",
-                        10)),
+                        1)),
                 new StubResponse(
                     HttpStatusCode.OK,
                     ChatResponse(
                         "Second bug",
                         "src/b.cs",
-                        20)),
+                        1)),
             ],
             patch,
             contextLength: 24_576);
@@ -505,7 +507,8 @@ public sealed class LocalReviewRunnerTests
     [Fact]
     public async Task Runner_RechunksWhenRuntimeLimitIsLowerThanCatalog()
     {
-        var patch = BuildFileDiff("src/large.cs", 15_000);
+        var patch = BuildFileDiff("src/first.cs", 7_000)
+            + BuildFileDiff("src/second.cs", 7_000);
         var contextError = """
             {"error":{"message":"Failed to handle OpenAI completion: This request requires 16922 total tokens (14874 input + 2048 output), which exceeds the model's maximum context length of 8192 tokens."}}
             """;
@@ -514,10 +517,10 @@ public sealed class LocalReviewRunnerTests
                 new StubResponse(HttpStatusCode.BadRequest, contextError),
                 new StubResponse(
                     HttpStatusCode.OK,
-                    ChatResponse("First chunk bug", "src/large.cs", 10)),
+                    ChatResponse("First chunk bug", "src/first.cs", 1)),
                 new StubResponse(
                     HttpStatusCode.OK,
-                    ChatResponse("Second chunk bug", "src/large.cs", 20)),
+                    ChatResponse("Second chunk bug", "src/second.cs", 1)),
             ],
             patch,
             contextLength: 131_072);
@@ -535,6 +538,59 @@ public sealed class LocalReviewRunnerTests
         run.LocalReview.Warnings.Should().Contain(
             warning => warning.Contains("2 chunks")
                        && warning.Contains("8,192-token"));
+    }
+
+    [Fact]
+    public void DiffFilter_RejectsOldLineFindingAndKeepsAddedLineFinding()
+    {
+        var patch = """
+            diff --git a/scripts/Reconcile.ps1 b/scripts/Reconcile.ps1
+            index 1111111..2222222 100644
+            --- a/scripts/Reconcile.ps1
+            +++ b/scripts/Reconcile.ps1
+            @@ -317,3 +340,7 @@
+             $warnings = @()
+            +$targetEntryCount = @($target.PSObject.Properties).Count
+            +if ($targetEntryCount -eq 0 -and $directDeps.Count -gt 0) {
+            +    $escalations += [pscustomobject]@{
+            +        reason = 'assets-file-has-no-resolved-packages'
+            +    }
+            +}
+             $nextStep = $true
+            """;
+        var parsed = new LocalReviewParseResult(
+            [
+                new Finding
+                {
+                    Id = "local-01",
+                    Severity = FindingSeverity.High,
+                    Confidence = FindingConfidence.High,
+                    FoundBy = ["qwen2.5-coder-14b"],
+                    File = "scripts/Reconcile.ps1",
+                    Line = 317,
+                    Title = "Empty graph reported idempotent",
+                },
+                new Finding
+                {
+                    Id = "local-02",
+                    Severity = FindingSeverity.Medium,
+                    Confidence = FindingConfidence.High,
+                    FoundBy = ["qwen2.5-coder-14b"],
+                    File = "scripts/Reconcile.ps1",
+                    Line = 342,
+                    Title = "New guard has another bug",
+                },
+            ],
+            Array.Empty<string>());
+
+        var filtered = LocalReviewDiffIndex.FilterToAddedLines(parsed, patch);
+
+        filtered.Findings.Should().ContainSingle()
+            .Which.Title.Should().Be("New guard has another bug");
+        filtered.Warnings.Should().ContainSingle(
+            warning => warning.Contains("Empty graph reported idempotent")
+                       && warning.Contains(
+                           "not anchored to an added post-change line"));
     }
 
     private sealed class RunnerFixture : IAsyncDisposable

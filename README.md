@@ -327,6 +327,13 @@ observed with the `gpt-oss-20b` WebGPU variant advertising 131K but serving
 8K), PR Inbox reads the effective limit from the 400 response, rechunks the
 entire patch, and retries once.
 
+Because the local reviewer is diff-only, its prompt explicitly distinguishes
+deleted `-` lines from surviving `+` lines and requires every candidate to
+remain true in the post-change result. PR Inbox also validates each candidate
+mechanically and drops findings that do not anchor to an added new-file line;
+this filters common false positives where a model restates the defect that the
+PR itself is fixing.
+
 ---
 
 ## Configuration
