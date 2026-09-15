@@ -602,6 +602,42 @@ and `gpt-5.6-terra`.
 If you need fancier overrides (different model, different plugin),
 use the env vars in [§ Review launcher overrides](README.md#review-launcher-overrides).
 
+### Local shadow reviewer
+
+The optional local shadow reviewer runs in parallel with the normal
+dual-model review and appears in a separate, read-only panel on the Review
+page. It is deliberately diff-only and does not affect convergence, selection,
+or publishing.
+
+Configure it under **Settings → Local shadow reviewer**:
+
+- Enable or disable it independently of the normal review launcher.
+- Leave the endpoint blank to auto-discover Foundry Local, or enter an
+  OpenAI-compatible loopback endpoint.
+- Choose the local model alias (default: `qwen2.5-coder-7b`).
+- Set a maximum patch size and inference timeout.
+
+With endpoint auto-discovery, PR Inbox starts Foundry Local and loads the
+configured model automatically. It intentionally does not download missing
+models. A missing model produces a **Skipped** local result with setup
+instructions rather than starting a large download from the Review button.
+
+The runner sends the real unified GitHub/GHE patch to the model. If the patch
+is too large, the endpoint is unavailable, the response is malformed, or the
+PR is hosted on Azure DevOps, the local panel reports that state without
+interrupting the authoritative review.
+
+Before downloading a large local model, move Foundry Local's global cache off
+a constrained system drive if necessary:
+
+```powershell
+foundry cache cd D:\FoundryLocal\models
+foundry cache location
+foundry model download qwen2.5-coder-7b
+foundry server start
+foundry model load qwen2.5-coder-7b
+```
+
 ### Where things live
 
 The Settings page prints the config file path at the top. The other

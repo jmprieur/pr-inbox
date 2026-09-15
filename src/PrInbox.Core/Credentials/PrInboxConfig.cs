@@ -27,6 +27,14 @@ public sealed class PrInboxConfig
     public ReviewLauncherSettings ReviewLauncher { get; init; } = new();
 
     /// <summary>
+    /// Optional independent local-model review that runs alongside the
+    /// authoritative dual-model review. Its output is informational only and
+    /// is never included in publishing unless a future workflow explicitly
+    /// promotes it.
+    /// </summary>
+    public LocalReviewerSettings LocalReviewer { get; init; } = new();
+
+    /// <summary>
     /// Regex patterns. Any PR whose display repo (e.g.
     /// <c>contoso/widgets</c>) fully matches one of these is hidden from the
     /// inbox by default. Toggle "Show ignored" in the UI to reveal.
@@ -337,4 +345,57 @@ public sealed class ReviewLauncherSettings
     /// without a process restart.
     /// </remarks>
     public bool TabPerReview { get; set; } = false;
+}
+
+/// <summary>
+/// Configuration for the optional local shadow reviewer. The model is reached
+/// through an OpenAI-compatible loopback endpoint. When <see cref="Endpoint"/>
+/// is blank, the runner discovers the active Foundry Local endpoint with
+/// <c>foundry server status --output json</c>.
+/// </summary>
+public sealed class LocalReviewerSettings
+{
+    /// <summary>Whether a local shadow review starts with each Web review launch.</summary>
+    public bool Enabled { get; set; }
+
+    /// <summary>
+    /// OpenAI-compatible loopback base URL. Blank enables Foundry Local
+    /// auto-discovery. Non-loopback endpoints are rejected to prevent sending
+    /// private patches to a remote service by mistake.
+    /// </summary>
+    public string Endpoint { get; set; } = string.Empty;
+
+    /// <summary>Model alias or id exposed by the local endpoint.</summary>
+    public string Model { get; set; } = "qwen2.5-coder-7b";
+
+    /// <summary>
+    /// Maximum unified-diff size sent to the model. Larger PRs are skipped
+    /// rather than truncated, because partial review would look complete.
+    /// </summary>
+    public int MaxPatchCharacters { get; set; } = 100_000;
+
+    /// <summary>Maximum local inference duration for one review.</summary>
+    public int TimeoutSeconds { get; set; } = 600;
+
+    /// <summary>
+    /// Normalizes a configured endpoint. Blank is valid and means
+    /// auto-discovery. Throws when the URL is not HTTP(S) loopback.
+    /// </summary>
+    public static string NormalizeEndpoint(string? value)
+    {
+        var trimmed = value?.Trim() ?? string.Empty;
+        if (trimmed.Length == 0) return string.Empty;
+
+        if (!Uri.TryCreate(trimmed, UriKind.Absolute, out var uri)
+            || (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps)
+            || !uri.IsLoopback)
+        {
+            throw new ArgumentException(
+                "Local reviewer endpoint must be an HTTP(S) loopback URL " +
+                "(localhost, 127.0.0.1, or ::1).",
+                nameof(value));
+        }
+
+        return trimmed.TrimEnd('/');
+    }
 }

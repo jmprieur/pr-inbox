@@ -334,6 +334,54 @@ button.review:hover { background: rgba(93,164,255,0.12); }
     border-color: #ffe69a;
     color: #7a5d05;
 }
+
+.local-review-card {
+    margin: 0 0 1rem;
+    padding: 0.8rem 1rem;
+    border: 1px solid var(--line);
+    border-left: 4px solid #7c5cff;
+    border-radius: 6px;
+    background: var(--card);
+}
+
+.local-review-heading {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.45rem 0.75rem;
+    align-items: baseline;
+}
+
+.local-review-running {
+    border-left-color: #5da4ff;
+}
+
+.local-review-failed,
+.local-review-skipped {
+    border-left-color: #d6a100;
+}
+
+.local-review-card p {
+    margin: 0.5rem 0 0;
+}
+
+.local-findings-table {
+    margin-top: 0.65rem;
+}
+
+.local-finding-body {
+    margin-top: 0.25rem;
+    white-space: pre-wrap;
+}
+
+.local-review-error {
+    margin: 0.5rem 0 0;
+    white-space: pre-wrap;
+    font: inherit;
+    color: inherit;
+    background: transparent;
+    border: 0;
+    overflow-wrap: anywhere;
+}
 .convergence-pill-lg {
     display: inline-block;
     padding: 0.2rem 0.55rem;

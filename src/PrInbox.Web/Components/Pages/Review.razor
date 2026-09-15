@@ -107,37 +107,101 @@
 {
     <p class="empty">No active review run for this PR. Launch one from the inbox first.</p>
 }
-else if (_run.Findings is null)
-{
-    <p class="empty">Review in progress · waiting for <code>findings.yaml</code> in @_run.RunDirectory</p>
-}
-else if (_run.Findings.Findings.Count == 0)
-{
-    <div class="clean-callout" role="status">
-        <span class="clean-pill clean-pill-lg">✓ clean</span>
-        <span>@CleanVerdict.BuildTooltip(_run.Findings, DateTimeOffset.UtcNow)</span>
-    </div>
-}
 else
 {
-    var conv = ConvergenceVerdict.Compute(_run.Findings);
-    @if (conv.State != ConvergenceState.Hidden)
+    @if (_run.LocalReview is { } local)
     {
-        <div class="convergence-callout convergence-callout-@conv.CssClass" role="status">
-            <span class="convergence-pill-lg @conv.CssClass">@conv.Glyph</span>
-            <span>@conv.Tooltip</span>
+        <div class="local-review-card local-review-@local.Status.ToString().ToLowerInvariant()" role="status">
+            <div class="local-review-heading">
+                <strong>Local shadow review · @local.Model</strong>
+                <span class="muted">diff-only · informational · never published</span>
+            </div>
+            @if (local.Status == LocalReviewStatus.Running)
+            {
+                <p>Running against the local OpenAI-compatible endpoint…</p>
+            }
+            else if (local.Status is LocalReviewStatus.Failed or LocalReviewStatus.Skipped)
+            {
+                <p><strong>@local.Status</strong></p>
+                <pre class="local-review-error">@(local.Error ?? "No detail reported.")</pre>
+            }
+            else
+            {
+                <p>
+                    Completed in @FormatDuration(local.DurationMs) ·
+                    <strong>@local.Findings.Count</strong> candidate finding@(local.Findings.Count == 1 ? "" : "s").
+                </p>
+                @if (local.Warnings.Count > 0)
+                {
+                    <ul class="muted">
+                        @foreach (var warning in local.Warnings)
+                        {
+                            <li>@warning</li>
+                        }
+                    </ul>
+                }
+                @if (local.Findings.Count > 0)
+                {
+                    <details>
+                        <summary>Inspect local candidates</summary>
+                        <table class="findings-table local-findings-table">
+                            <thead>
+                                <tr><th>Sev</th><th>File · line</th><th>Candidate</th></tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var finding in local.Findings)
+                                {
+                                    <tr>
+                                        <td><span class="@SevClass(finding.Severity)">@finding.Severity.ToString().ToLowerInvariant()</span></td>
+                                        <td><code>@finding.File:@(finding.Line?.ToString() ?? "?")</code></td>
+                                        <td>
+                                            <strong>@finding.Title</strong>
+                                            @if (!string.IsNullOrWhiteSpace(finding.Body))
+                                            {
+                                                <div class="muted local-finding-body">@finding.Body</div>
+                                            }
+                                        </td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </details>
+                }
+            }
         </div>
     }
 
-    <div class="severity-filters">
-        <span class="muted">Filter:</span>
-        <label><input type="checkbox" @bind="_showCritical" /> <span class="sev-critical">critical</span></label>
-        <label><input type="checkbox" @bind="_showHigh" /> <span class="sev-high">high</span></label>
-        <label><input type="checkbox" @bind="_showMedium" /> <span class="sev-medium">medium</span></label>
-        <label><input type="checkbox" @bind="_showLow" /> <span class="sev-low">low</span></label>
-    </div>
+    @if (_run.Findings is null)
+    {
+        <p class="empty">Review in progress · waiting for <code>findings.yaml</code> in @_run.RunDirectory</p>
+    }
+    else if (_run.Findings.Findings.Count == 0)
+    {
+        <div class="clean-callout" role="status">
+            <span class="clean-pill clean-pill-lg">✓ clean</span>
+            <span>@CleanVerdict.BuildTooltip(_run.Findings, DateTimeOffset.UtcNow)</span>
+        </div>
+    }
+    else
+    {
+        var conv = ConvergenceVerdict.Compute(_run.Findings);
+        @if (conv.State != ConvergenceState.Hidden)
+        {
+            <div class="convergence-callout convergence-callout-@conv.CssClass" role="status">
+                <span class="convergence-pill-lg @conv.CssClass">@conv.Glyph</span>
+                <span>@conv.Tooltip</span>
+            </div>
+        }
 
-    <table class="findings-table">
+        <div class="severity-filters">
+            <span class="muted">Filter:</span>
+            <label><input type="checkbox" @bind="_showCritical" /> <span class="sev-critical">critical</span></label>
+            <label><input type="checkbox" @bind="_showHigh" /> <span class="sev-high">high</span></label>
+            <label><input type="checkbox" @bind="_showMedium" /> <span class="sev-medium">medium</span></label>
+            <label><input type="checkbox" @bind="_showLow" /> <span class="sev-low">low</span></label>
+        </div>
+
+        <table class="findings-table">
         <thead>
             <tr>
                 <th></th>
@@ -211,21 +275,21 @@ else
                 </tr>
             }
         </tbody>
-    </table>
+        </table>
 
-    <details class="review-body-preview">
+        <details class="review-body-preview">
         <summary class="muted">Preview review body (@SelectedCount() selected)</summary>
         <pre class="comment-preview">@BuildReviewBodyPreview()</pre>
-    </details>
+        </details>
 
-    <p class="accountability-note" role="note">
+        <p class="accountability-note" role="note">
         ⚠ These are <strong>your</strong> review comments. AI assistance doesn't
         transfer accountability — read each finding before you publish. The
         review is posted under the identity bound to this PR (shown as
         <em>Identity used</em> after posting).
-    </p>
+        </p>
 
-    <div class="post-row">
+        <div class="post-row">
         <label><input type="checkbox" @bind="_dryRun" /> <strong>Dry run</strong> (recommended; no network)</label>
         @if (IsGitHubUrl)
         {
@@ -242,7 +306,8 @@ else
                 @onclick="OnPostSelected">
             @PostButtonLabel
         </button>
-    </div>
+        </div>
+    }
 }
 
 @if (_result is not null)
@@ -487,6 +552,15 @@ else
     {
         if (string.IsNullOrEmpty(sha)) return "?";
         return sha.Length >= 7 ? sha[..7] : sha;
+    }
+
+    private static string FormatDuration(long? durationMs)
+    {
+        if (durationMs is null) return "unknown time";
+        var duration = TimeSpan.FromMilliseconds(durationMs.Value);
+        return duration.TotalMinutes >= 1
+            ? $"{duration.TotalMinutes:F1} min"
+            : $"{duration.TotalSeconds:F1} sec";
     }
 
     private void RefreshRun()

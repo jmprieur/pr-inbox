@@ -257,6 +257,41 @@ public sealed class ConfigService : IConfigService
     }
 
     /// <inheritdoc />
+    public async Task SetLocalReviewerAsync(
+        bool enabled,
+        string endpoint,
+        string model,
+        int maxPatchCharacters,
+        int timeoutSeconds,
+        CancellationToken ct = default)
+    {
+        var normalizedEndpoint = LocalReviewerSettings.NormalizeEndpoint(endpoint);
+        var normalizedModel = model?.Trim();
+        if (string.IsNullOrEmpty(normalizedModel))
+        {
+            throw new ArgumentException("Local reviewer model is required.", nameof(model));
+        }
+        if (maxPatchCharacters is < 10_000 or > 1_000_000)
+        {
+            throw new ArgumentOutOfRangeException(nameof(maxPatchCharacters),
+                "Maximum patch characters must be between 10,000 and 1,000,000.");
+        }
+        if (timeoutSeconds is < 30 or > 3_600)
+        {
+            throw new ArgumentOutOfRangeException(nameof(timeoutSeconds),
+                "Local reviewer timeout must be between 30 and 3,600 seconds.");
+        }
+
+        var cfg = await PrInboxConfig.LoadAsync(_configPath, ct);
+        cfg.LocalReviewer.Enabled = enabled;
+        cfg.LocalReviewer.Endpoint = normalizedEndpoint;
+        cfg.LocalReviewer.Model = normalizedModel;
+        cfg.LocalReviewer.MaxPatchCharacters = maxPatchCharacters;
+        cfg.LocalReviewer.TimeoutSeconds = timeoutSeconds;
+        await SaveAndRefreshAsync(cfg, ct);
+    }
+
+    /// <inheritdoc />
     public async Task<BindIdentityResult> BindGitHubSourceToIdentityAsync(
         string sourceId,
         string identity,
@@ -412,6 +447,12 @@ public sealed class ConfigService : IConfigService
         _singleton.ReviewLauncher.TabColor = cfg.ReviewLauncher.TabColor;
         _singleton.ReviewLauncher.TabPerReview = cfg.ReviewLauncher.TabPerReview;
         _singleton.ReviewLauncher.LaunchCommand = cfg.ReviewLauncher.LaunchCommand;
+
+        _singleton.LocalReviewer.Enabled = cfg.LocalReviewer.Enabled;
+        _singleton.LocalReviewer.Endpoint = cfg.LocalReviewer.Endpoint;
+        _singleton.LocalReviewer.Model = cfg.LocalReviewer.Model;
+        _singleton.LocalReviewer.MaxPatchCharacters = cfg.LocalReviewer.MaxPatchCharacters;
+        _singleton.LocalReviewer.TimeoutSeconds = cfg.LocalReviewer.TimeoutSeconds;
     }
 
     private static string DefaultIdFor(SourceConfigKind kind, string host) => kind switch

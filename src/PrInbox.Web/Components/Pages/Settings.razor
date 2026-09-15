@@ -459,6 +459,90 @@ else
         </div>
     </section>
 
+    <section class="settings-section">
+        <h2>Local shadow reviewer <span class="muted">(experimental)</span></h2>
+        <p class="muted">
+            Runs an independent local model alongside the authoritative dual-model review.
+            Its findings are shown separately and are never selected or published.
+            GitHub.com and GitHub Enterprise patches are supported; Azure DevOps reviews
+            are skipped explicitly until patch acquisition is implemented.
+        </p>
+        <div class="settings-toggle">
+            <label>
+                <input type="checkbox" @bind="_localReviewerEnabled" disabled="@_busy" />
+                <strong>Enable local shadow review</strong>
+                <span class="muted">
+                    Starts Foundry Local and loads the configured model in the background
+                    when you click Review. The model must already be cached; PR Inbox never
+                    downloads models automatically.
+                    A local failure never blocks or changes the dual-model verdict.
+                </span>
+            </label>
+        </div>
+        <div class="settings-toggle">
+            <label>
+                <strong>OpenAI-compatible endpoint</strong>
+                <span class="muted">
+                    Leave blank to discover the active endpoint with
+                    <code>foundry server status --output json</code>.
+                    Only loopback URLs are accepted so private patches cannot be sent remotely by mistake.
+                </span>
+                <input type="text"
+                       @bind="_localReviewerEndpoint"
+                       placeholder="auto-discover Foundry Local"
+                       disabled="@_busy"
+                       style="grid-column: 1 / -1; width: 100%; margin-top: .35rem;" />
+            </label>
+        </div>
+        <div class="settings-toggle">
+            <label>
+                <strong>Model</strong>
+                <span class="muted">Foundry Local alias or model id.</span>
+                <input type="text"
+                       @bind="_localReviewerModel"
+                       placeholder="qwen2.5-coder-7b"
+                       disabled="@_busy"
+                       style="grid-column: 1 / -1; width: 100%; margin-top: .35rem;" />
+            </label>
+        </div>
+        <div class="settings-toggle">
+            <label>
+                <strong>Maximum patch characters</strong>
+                <span class="muted">
+                    Larger patches are skipped, never truncated. Range: 10,000–1,000,000.
+                </span>
+                <input type="number"
+                       @bind="_localReviewerMaxPatchCharacters"
+                       min="10000"
+                       max="1000000"
+                       step="10000"
+                       disabled="@_busy"
+                       style="grid-column: 1 / -1; width: 12rem; margin-top: .35rem;" />
+            </label>
+        </div>
+        <div class="settings-toggle">
+            <label>
+                <strong>Timeout (seconds)</strong>
+                <span class="muted">Range: 30–3,600.</span>
+                <input type="number"
+                       @bind="_localReviewerTimeoutSeconds"
+                       min="30"
+                       max="3600"
+                       step="30"
+                       disabled="@_busy"
+                       style="grid-column: 1 / -1; width: 8rem; margin-top: .35rem;" />
+            </label>
+        </div>
+        <p class="muted">
+            Foundry Local stores models outside pr-inbox. Configure that separately with
+            <code>foundry cache cd &lt;path&gt;</code>, and verify it with
+            <code>foundry cache location</code>, before enabling a large model.
+        </p>
+        <div class="settings-actions">
+            <button @onclick="SaveLocalReviewerAsync" disabled="@_busy">Save local reviewer</button>
+        </div>
+    </section>
+
     <p class="muted">
         Some changes take effect immediately (ignored repos, next sync tick). Adding or removing a source updates publisher wiring only after the next app restart.
     </p>
@@ -475,6 +559,11 @@ else
     private bool _tabPerReview;
     private string _tabColor = string.Empty;
     private string _launchCommand = string.Empty;
+    private bool _localReviewerEnabled;
+    private string _localReviewerEndpoint = string.Empty;
+    private string _localReviewerModel = "qwen2.5-coder-7b";
+    private int _localReviewerMaxPatchCharacters = 100_000;
+    private int _localReviewerTimeoutSeconds = 600;
 
     private bool _showGheForm;
     private string _gheHost = string.Empty;
@@ -587,6 +676,11 @@ else
         _tabPerReview = _cfg.ReviewLauncher.TabPerReview;
         _tabColor = _cfg.ReviewLauncher.TabColor;
         _launchCommand = _cfg.ReviewLauncher.LaunchCommand;
+        _localReviewerEnabled = _cfg.LocalReviewer.Enabled;
+        _localReviewerEndpoint = _cfg.LocalReviewer.Endpoint;
+        _localReviewerModel = _cfg.LocalReviewer.Model;
+        _localReviewerMaxPatchCharacters = _cfg.LocalReviewer.MaxPatchCharacters;
+        _localReviewerTimeoutSeconds = _cfg.LocalReviewer.TimeoutSeconds;
     }
 
     private static string FormatPathFilters(IReadOnlyDictionary<string, List<string>> filters)
@@ -1009,6 +1103,20 @@ else
             SetMessage(okMessage);
         });
     }
+
+    private Task SaveLocalReviewerAsync() =>
+        WrapAsync(async () =>
+        {
+            await ConfigSvc.SetLocalReviewerAsync(
+                _localReviewerEnabled,
+                _localReviewerEndpoint,
+                _localReviewerModel,
+                _localReviewerMaxPatchCharacters,
+                _localReviewerTimeoutSeconds);
+            SetMessage(_localReviewerEnabled
+                ? $"Local shadow reviewer enabled with {_localReviewerModel}."
+                : "Local shadow reviewer disabled.");
+        });
 
     private async Task RunDoctorAsync()
     {

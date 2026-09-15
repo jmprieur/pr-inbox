@@ -40,16 +40,21 @@ public sealed class ReviewLauncher : IReviewLauncher, IAsyncDisposable
     private readonly ILoggerFactory _logFactory;
     private readonly PrInboxConfig _config;
     private readonly ConsoleWindowRegistry _consoles;
+    private readonly ILocalReviewRunner _localReviewer;
+    private readonly IHostApplicationLifetime _lifetime;
     private readonly ConcurrentDictionary<string, FindingsWatcher> _watchers = new(StringComparer.OrdinalIgnoreCase);
 
     public ReviewLauncher(ReviewRunStore runs, ILogger<ReviewLauncher> log, ILoggerFactory logFactory,
-        PrInboxConfig config, ConsoleWindowRegistry consoles)
+        PrInboxConfig config, ConsoleWindowRegistry consoles,
+        ILocalReviewRunner localReviewer, IHostApplicationLifetime lifetime)
     {
         _runs = runs;
         _log = log;
         _logFactory = logFactory;
         _config = config;
         _consoles = consoles;
+        _localReviewer = localReviewer;
+        _lifetime = lifetime;
     }
 
     public async Task<string> LaunchAsync(string prUrl, CancellationToken ct)
@@ -92,9 +97,29 @@ public sealed class ReviewLauncher : IReviewLauncher, IAsyncDisposable
         }
 
         StartWatcher(brief.PrUrl, brief.RunDirectory, brief.RunId, brief.HeadSha);
+        if (_config.LocalReviewer.Enabled)
+        {
+            _ = RunLocalReviewAsync(brief);
+        }
         SpawnConsole(brief.RunDirectory, tabTitle, brief.RunId);
 
         return $"Review run #{brief.RunId} opened in a new window. Findings will land in {brief.RunDirectory}\\findings.yaml.";
+    }
+
+    private async Task RunLocalReviewAsync(BriefResult brief)
+    {
+        try
+        {
+            await _localReviewer.RunAsync(brief, _lifetime.ApplicationStopping);
+        }
+        catch (OperationCanceledException) when (_lifetime.ApplicationStopping.IsCancellationRequested)
+        {
+            _log.LogDebug("Local shadow review cancelled during shutdown for {PrUrl}.", brief.PrUrl);
+        }
+        catch (Exception ex)
+        {
+            _log.LogError(ex, "Unexpected local shadow review failure for {PrUrl}.", brief.PrUrl);
+        }
     }
 
     /// <summary>

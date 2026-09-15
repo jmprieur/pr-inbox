@@ -272,6 +272,43 @@ when launching from the web UI):
 | Review tab opens but model call fails | Review CLI not authenticated to the chosen model | Authenticate your CLI to its providers, or change `PRINBOX_REVIEW_MODEL` |
 | Web UI says port already in use | Another instance running, or stale Kestrel | `Get-NetTCPConnection -LocalPort 7341 \| Stop-Process -Force` |
 
+## Optional local shadow reviewer
+
+The Web UI can run an independent local model beside the authoritative
+dual-model review. Enable it under **Settings → Local shadow reviewer**.
+The local result is written to `local-review.json` in the immutable run
+directory and displayed separately on the Review page. It is informational:
+local candidates are never selected or published. This first version is
+deliberately diff-only; it does not give the local model repository tools.
+
+The default model is `qwen2.5-coder-7b`, which is a practical first choice on
+developer-class NPU/GPU hardware. The runner accepts any
+OpenAI-compatible loopback endpoint. Leave the endpoint blank to discover
+the current Foundry Local server with `foundry server status --output json`.
+Non-loopback URLs are rejected so a private PR patch cannot accidentally be
+sent to a remote endpoint.
+
+When endpoint discovery is selected, PR Inbox starts Foundry Local and loads
+the configured model automatically for each review. It never downloads a
+model implicitly. If the model is not cached, the local panel is marked
+**Skipped** and shows the exact `foundry cache` / `foundry model download`
+commands required.
+
+Foundry Local model storage is configured globally, outside pr-inbox:
+
+```powershell
+foundry cache cd D:\FoundryLocal\models
+foundry cache location
+foundry model download qwen2.5-coder-7b
+foundry server start
+foundry model load qwen2.5-coder-7b
+```
+
+The shadow reviewer currently obtains unified patches from GitHub.com and
+GitHub Enterprise. Azure DevOps runs are explicitly marked skipped until a
+complete ADO patch provider is available. Oversized patches are also skipped
+rather than truncated, because a partial review must not look complete.
+
 ---
 
 ## Configuration

@@ -347,6 +347,29 @@ public sealed class ConfigServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task SetLocalReviewerAsync_Persists_And_Mirrors_Singleton()
+    {
+        var singleton = new PrInboxConfig();
+        var svc = new ConfigService(singleton, _path);
+
+        await svc.SetLocalReviewerAsync(
+            enabled: true,
+            endpoint: " http://127.0.0.1:39839/ ",
+            model: " qwen2.5-coder-14b ",
+            maxPatchCharacters: 80_000,
+            timeoutSeconds: 900);
+
+        singleton.LocalReviewer.Enabled.Should().BeTrue();
+        singleton.LocalReviewer.Endpoint.Should().Be("http://127.0.0.1:39839");
+        singleton.LocalReviewer.Model.Should().Be("qwen2.5-coder-14b");
+        singleton.LocalReviewer.MaxPatchCharacters.Should().Be(80_000);
+        singleton.LocalReviewer.TimeoutSeconds.Should().Be(900);
+
+        var reloaded = await svc.GetAsync();
+        reloaded.LocalReviewer.Should().BeEquivalentTo(singleton.LocalReviewer);
+    }
+
+    [Fact]
     public void ResolveLaunchCommand_Substitutes_Placeholders()
     {
         var rl = new ReviewLauncherSettings
