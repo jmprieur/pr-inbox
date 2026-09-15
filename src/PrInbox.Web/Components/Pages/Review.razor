@@ -9,6 +9,8 @@
 @using PrInbox.Publishers
 @using PrInbox.Web.Services
 @inject ReviewRunStore Runs
+@inject IReviewLauncher ReviewLauncher
+@inject PrInbox.Core.Credentials.PrInboxConfig Config
 @inject ReviewPublishOrchestrator Orchestrator
 @inject PrSnapshotRepository SnapRepo
 @inject InboxState State
@@ -63,11 +65,26 @@
             Open findings.yaml
         </button>
     }
+    @if (_run is not null && Config.LocalReviewer.Enabled)
+    {
+        <span>&nbsp;·&nbsp;</span>
+        <button type="button"
+                class="link-like"
+                disabled="@_localRerunBusy"
+                @onclick="OnRerunLocalAsync"
+                title="Re-run only the local shadow reviewer for this review run.">
+            @(_localRerunBusy ? "Starting local…" : "Rerun local")
+        </button>
+    }
 </div>
 
 @if (!string.IsNullOrEmpty(_actionMessage))
 {
     <div class="action-error" role="alert">@_actionMessage</div>
+}
+@if (!string.IsNullOrEmpty(_localRerunMessage))
+{
+    <div class="settings-banner ok" role="status">@_localRerunMessage</div>
 }
 
     @if (_run is not null && _drift is not null
@@ -374,6 +391,8 @@ else
     private InboxRow? _inboxRow;
     private bool _actionBusy;
     private string? _actionMessage;
+    private bool _localRerunBusy;
+    private string? _localRerunMessage;
 
     protected override void OnInitialized()
     {
@@ -481,6 +500,28 @@ else
         {
             _actionBusy = false;
             StateHasChanged();
+        }
+    }
+
+    private async Task OnRerunLocalAsync()
+    {
+        if (string.IsNullOrWhiteSpace(Url) || _localRerunBusy) return;
+        _localRerunBusy = true;
+        _localRerunMessage = null;
+        try
+        {
+            _localRerunMessage = await ReviewLauncher.RerunLocalAsync(
+                Url,
+                CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            Log.LogError(ex, "Could not rerun local review for {Url}.", Url);
+            _localRerunMessage = $"Could not rerun local review: {ex.Message}";
+        }
+        finally
+        {
+            _localRerunBusy = false;
         }
     }
 

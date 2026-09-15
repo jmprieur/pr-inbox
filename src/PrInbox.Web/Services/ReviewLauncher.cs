@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Text.RegularExpressions;
 using PrInbox.Core.Credentials;
+using PrInbox.Core.Models;
 using PrInbox.Core.Reviewing;
 using PrInbox.Core.Storage;
 
@@ -19,6 +20,12 @@ public interface IReviewLauncher
     /// </summary>
     /// <returns>A short user-visible message describing what happened.</returns>
     Task<string> LaunchAsync(string prUrl, CancellationToken ct);
+
+    /// <summary>
+    /// Re-run only the optional local shadow reviewer for the current
+    /// immutable run. Does not launch Copilot or modify findings.yaml.
+    /// </summary>
+    Task<string> RerunLocalAsync(string prUrl, CancellationToken ct);
 }
 
 /// <summary>
@@ -43,6 +50,7 @@ public sealed class ReviewLauncher : IReviewLauncher, IAsyncDisposable
     private readonly ILocalReviewRunner _localReviewer;
     private readonly IHostApplicationLifetime _lifetime;
     private readonly ConcurrentDictionary<string, FindingsWatcher> _watchers = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, byte> _localReviews = new(StringComparer.OrdinalIgnoreCase);
 
     public ReviewLauncher(ReviewRunStore runs, ILogger<ReviewLauncher> log, ILoggerFactory logFactory,
         PrInboxConfig config, ConsoleWindowRegistry consoles,
@@ -99,11 +107,66 @@ public sealed class ReviewLauncher : IReviewLauncher, IAsyncDisposable
         StartWatcher(brief.PrUrl, brief.RunDirectory, brief.RunId, brief.HeadSha);
         if (_config.LocalReviewer.Enabled)
         {
-            _ = RunLocalReviewAsync(brief);
+            TryStartLocalReview(brief);
         }
         SpawnConsole(brief.RunDirectory, tabTitle, brief.RunId);
 
         return $"Review run #{brief.RunId} opened in a new window. Findings will land in {brief.RunDirectory}\\findings.yaml.";
+    }
+
+    public async Task<string> RerunLocalAsync(string prUrl, CancellationToken ct)
+    {
+        if (!_config.LocalReviewer.Enabled)
+        {
+            return "Enable the local shadow reviewer in Settings first.";
+        }
+
+        var run = _runs.Get(prUrl);
+        if (run is null)
+        {
+            return "No active review run exists for this PR.";
+        }
+
+        var briefPath = Path.Combine(run.RunDirectory, "brief.md");
+        var metadataPath = Path.Combine(run.RunDirectory, "metadata.json");
+        if (!File.Exists(briefPath) || !File.Exists(metadataPath))
+        {
+            return "The current review run is missing brief.md or metadata.json.";
+        }
+
+        var (_, snapRepo, _, _) = OpenRepos();
+        var latest = await snapRepo.GetLatestAsync(
+            new PrIdentity(prUrl, string.Empty),
+            ct);
+        if (latest is null)
+        {
+            return "No current PR snapshot is available. Sync and launch a new review.";
+        }
+        if (!string.Equals(latest.HeadSha, run.HeadSha, StringComparison.OrdinalIgnoreCase))
+        {
+            return "The PR HEAD changed since this run. Launch a new full review instead.";
+        }
+
+        var brief = new BriefResult(
+            run.RunId,
+            run.RunDirectory,
+            briefPath,
+            metadataPath,
+            run.HeadSha,
+            run.PrUrl);
+        return TryStartLocalReview(brief)
+            ? $"Local shadow review restarted with {_config.LocalReviewer.Model}."
+            : "The local shadow review is already running.";
+    }
+
+    private bool TryStartLocalReview(BriefResult brief)
+    {
+        if (!_localReviews.TryAdd(brief.RunDirectory, 0))
+        {
+            return false;
+        }
+        _ = RunLocalReviewAsync(brief);
+        return true;
     }
 
     private async Task RunLocalReviewAsync(BriefResult brief)
@@ -119,6 +182,10 @@ public sealed class ReviewLauncher : IReviewLauncher, IAsyncDisposable
         catch (Exception ex)
         {
             _log.LogError(ex, "Unexpected local shadow review failure for {PrUrl}.", brief.PrUrl);
+        }
+        finally
+        {
+            _localReviews.TryRemove(brief.RunDirectory, out _);
         }
     }
 

@@ -280,6 +280,9 @@ The local result is written to `local-review.json` in the immutable run
 directory and displayed separately on the Review page. It is informational:
 local candidates are never selected or published. This first version is
 deliberately diff-only; it does not give the local model repository tools.
+Use **Rerun local** on the Review page to repeat only this pass while tuning
+the model or settings; it reuses the current immutable run and does not reopen
+the cloud review.
 
 The default model is `qwen2.5-coder-7b`, which is a practical first choice on
 developer-class NPU/GPU hardware. The runner accepts any

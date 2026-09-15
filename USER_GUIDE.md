@@ -609,6 +609,10 @@ dual-model review and appears in a separate, read-only panel on the Review
 page. It is deliberately diff-only and does not affect convergence, selection,
 or publishing.
 
+Use **Rerun local** in the Review-page toolbar to repeat only the local pass
+after changing its model, timeout, or patch cap. It reuses the current run and
+refuses if the PR HEAD has moved; in that case, launch a new full review.
+
 Configure it under **Settings → Local shadow reviewer**:
 
 - Enable or disable it independently of the normal review launcher.
