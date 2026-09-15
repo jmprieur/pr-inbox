@@ -616,7 +616,7 @@ Configure it under **Settings → Local shadow reviewer**:
   OpenAI-compatible loopback endpoint.
 - Choose the local model alias (default: `qwen2.5-coder-7b`).
 - Set a maximum total patch size and inference timeout. The patch-size value
-  is a workload cap, not the model context window. `100000` is the recommended
+  is a workload cap, not the model context window. `200000` is the recommended
   starting point for Qwen 7B; accepted patches are chunked automatically.
 
 With endpoint auto-discovery, PR Inbox starts Foundry Local and loads the

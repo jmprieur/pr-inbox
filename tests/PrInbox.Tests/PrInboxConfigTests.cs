@@ -20,8 +20,8 @@ public class PrInboxConfigTests
         config.LocalReviewer.Enabled.Should().BeFalse();
         config.LocalReviewer.Endpoint.Should().BeEmpty();
         config.LocalReviewer.Model.Should().Be("qwen2.5-coder-7b");
-        config.LocalReviewer.MaxPatchCharacters.Should().Be(100_000);
-        config.LocalReviewer.TimeoutSeconds.Should().Be(600);
+        config.LocalReviewer.MaxPatchCharacters.Should().Be(200_000);
+        config.LocalReviewer.TimeoutSeconds.Should().Be(1_200);
     }
 
     [Theory]

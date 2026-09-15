@@ -511,7 +511,7 @@ else
                 <span class="muted">
                     Overall workload cap, not the model context window. Patches below this
                     limit are automatically split into context-safe chunks; larger patches
-                    are skipped, never truncated. Recommended for Qwen 7B: 100,000.
+                    are skipped, never truncated. Recommended for Qwen 7B: 200,000.
                     Range: 10,000–1,000,000.
                 </span>
                 <input type="number"
@@ -565,8 +565,8 @@ else
     private bool _localReviewerEnabled;
     private string _localReviewerEndpoint = string.Empty;
     private string _localReviewerModel = "qwen2.5-coder-7b";
-    private int _localReviewerMaxPatchCharacters = 100_000;
-    private int _localReviewerTimeoutSeconds = 600;
+    private int _localReviewerMaxPatchCharacters = 200_000;
+    private int _localReviewerTimeoutSeconds = 1_200;
 
     private bool _showGheForm;
     private string _gheHost = string.Empty;

@@ -374,10 +374,10 @@ public sealed class LocalReviewerSettings
     /// split into model-context-sized chunks. Larger PRs are skipped rather
     /// than truncated, because partial review would look complete.
     /// </summary>
-    public int MaxPatchCharacters { get; set; } = 100_000;
+    public int MaxPatchCharacters { get; set; } = 200_000;
 
     /// <summary>Maximum local inference duration for one review.</summary>
-    public int TimeoutSeconds { get; set; } = 600;
+    public int TimeoutSeconds { get; set; } = 1_200;
 
     /// <summary>
     /// Normalizes a configured endpoint. Blank is valid and means
