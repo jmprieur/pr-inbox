@@ -4,6 +4,7 @@ using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.RegularExpressions;
 using PrInbox.Core.Credentials;
 using PrInbox.Core.Findings;
 using PrInbox.Core.Models;
@@ -508,67 +509,43 @@ public sealed class LocalReviewRunner : ILocalReviewRunner
             var endpoint = await _endpointResolver.ResolveAsync(settings.Endpoint, ct);
             var requestUri = BuildChatCompletionsUri(endpoint);
             var contextLength = runtimeInfo.ContextLength ?? DefaultContextLength;
-            var chunkCharacterBudget = CalculateChunkCharacterBudget(contextLength);
-            var chunks = LocalReviewPatchChunker.Chunk(
-                patch.Patch,
-                chunkCharacterBudget);
 
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
             timeout.CancelAfter(TimeSpan.FromSeconds(settings.TimeoutSeconds));
 
-            var allFindings = new List<Finding>();
-            var warnings = new List<string>();
-            if (chunks.Count > 1)
+            AggregatedLocalReview review;
+            try
             {
-                warnings.Add(
-                    $"Reviewed the patch in {chunks.Count} chunks to fit the model's " +
-                    $"{contextLength:N0}-token context window.");
-            }
-
-            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            for (var index = 0; index < chunks.Count; index++)
-            {
-                var parsed = await ReviewChunkAsync(
+                review = await ReviewPatchAsync(
                     requestUri,
                     settings.Model,
                     pr,
                     brief.HeadSha,
-                    chunks[index],
-                    index + 1,
-                    chunks.Count,
+                    patch.Patch,
+                    contextLength,
                     timeout.Token);
-
-                warnings.AddRange(parsed.Warnings.Select(
-                    warning => chunks.Count == 1
-                        ? warning
-                        : $"Chunk {index + 1}: {warning}"));
-
-                foreach (var finding in parsed.Findings)
-                {
-                    var key = string.Join(
-                        '\u001f',
-                        finding.File,
-                        finding.Line?.ToString() ?? string.Empty,
-                        finding.Title);
-                    if (seen.Add(key))
-                    {
-                        allFindings.Add(finding);
-                    }
-                }
             }
-
-            if (allFindings.Count > MaxAggregatedFindings)
+            catch (LocalContextLengthExceededException ex)
+                when (ex.ContextLength > 0 && ex.ContextLength < contextLength)
             {
-                warnings.Add(
-                    $"Only the first {MaxAggregatedFindings} local findings were retained.");
-            }
-            var findings = allFindings
-                .Take(MaxAggregatedFindings)
-                .Select((finding, index) => finding with
+                review = await ReviewPatchAsync(
+                    requestUri,
+                    settings.Model,
+                    pr,
+                    brief.HeadSha,
+                    patch.Patch,
+                    ex.ContextLength,
+                    timeout.Token);
+                review = review with
                 {
-                    Id = $"local-{index + 1:00}",
-                })
-                .ToList();
+                    Warnings =
+                    [
+                        $"Foundry catalog reported {contextLength:N0} tokens, but the " +
+                        $"loaded runtime enforced {ex.ContextLength:N0}. Rechunked and retried.",
+                        .. review.Warnings,
+                    ],
+                };
+            }
 
             await SaveAndPublishAsync(brief, new LocalReviewArtifact
             {
@@ -578,8 +555,8 @@ public sealed class LocalReviewRunner : ILocalReviewRunner
                 HeadSha = brief.HeadSha,
                 GeneratedAtUtc = DateTimeOffset.UtcNow,
                 DurationMs = started.ElapsedMilliseconds,
-                Warnings = warnings,
-                Findings = findings,
+                Warnings = review.Warnings,
+                Findings = review.Findings,
             }, ct);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -631,6 +608,73 @@ public sealed class LocalReviewRunner : ILocalReviewRunner
         }, ct);
     }
 
+    private async Task<AggregatedLocalReview> ReviewPatchAsync(
+        Uri requestUri,
+        string model,
+        PullRequestRow pr,
+        string headSha,
+        string patch,
+        int contextLength,
+        CancellationToken ct)
+    {
+        var chunkCharacterBudget = CalculateChunkCharacterBudget(contextLength);
+        var chunks = LocalReviewPatchChunker.Chunk(patch, chunkCharacterBudget);
+        var allFindings = new List<Finding>();
+        var warnings = new List<string>();
+        if (chunks.Count > 1)
+        {
+            warnings.Add(
+                $"Reviewed the patch in {chunks.Count} chunks to fit the model's " +
+                $"{contextLength:N0}-token context window.");
+        }
+
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        for (var index = 0; index < chunks.Count; index++)
+        {
+            var parsed = await ReviewChunkAsync(
+                requestUri,
+                model,
+                pr,
+                headSha,
+                chunks[index],
+                index + 1,
+                chunks.Count,
+                ct);
+
+            warnings.AddRange(parsed.Warnings.Select(
+                warning => chunks.Count == 1
+                    ? warning
+                    : $"Chunk {index + 1}: {warning}"));
+
+            foreach (var finding in parsed.Findings)
+            {
+                var key = string.Join(
+                    '\u001f',
+                    finding.File,
+                    finding.Line?.ToString() ?? string.Empty,
+                    finding.Title);
+                if (seen.Add(key))
+                {
+                    allFindings.Add(finding);
+                }
+            }
+        }
+
+        if (allFindings.Count > MaxAggregatedFindings)
+        {
+            warnings.Add(
+                $"Only the first {MaxAggregatedFindings} local findings were retained.");
+        }
+        var findings = allFindings
+            .Take(MaxAggregatedFindings)
+            .Select((finding, index) => finding with
+            {
+                Id = $"local-{index + 1:00}",
+            })
+            .ToList();
+        return new AggregatedLocalReview(findings, warnings);
+    }
+
     private async Task<LocalReviewParseResult> ReviewChunkAsync(
         Uri requestUri,
         string model,
@@ -674,6 +718,13 @@ public sealed class LocalReviewRunner : ILocalReviewRunner
         var responseText = await response.Content.ReadAsStringAsync(ct);
         if (!response.IsSuccessStatusCode)
         {
+            if ((int)response.StatusCode == 400
+                && TryParseEffectiveContextLength(responseText, out var effectiveContext))
+            {
+                throw new LocalContextLengthExceededException(
+                    effectiveContext,
+                    responseText);
+            }
             throw new HttpRequestException(
                 $"Local model request failed for patch chunk {chunkNumber}/{chunkCount} " +
                 $"({(int)response.StatusCode} {response.ReasonPhrase}): " +
@@ -728,6 +779,23 @@ public sealed class LocalReviewRunner : ILocalReviewRunner
                 "Local endpoint returned no choices[0].message.content.");
         }
         return content.GetString() ?? string.Empty;
+    }
+
+    internal static bool TryParseEffectiveContextLength(
+        string responseText,
+        out int contextLength)
+    {
+        var match = ContextLengthErrorPattern.Match(responseText);
+        if (match.Success
+            && int.TryParse(
+                match.Groups["length"].Value.Replace(",", string.Empty),
+                out contextLength)
+            && contextLength > 0)
+        {
+            return true;
+        }
+        contextLength = 0;
+        return false;
     }
 
     internal static int CalculateChunkCharacterBudget(int contextLength)
@@ -788,6 +856,9 @@ public sealed class LocalReviewRunner : ILocalReviewRunner
     private const int MinimumChunkCharacters = 8_000;
     private const int MaximumChunkCharacters = 120_000;
     private const int MaxAggregatedFindings = 50;
+    private static readonly Regex ContextLengthErrorPattern = new(
+        @"maximum context length (?:of|is) (?<length>[\d,]+) tokens",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
     private const string LocalReviewerSystemPrompt = """
         You are an independent code-review model. Return exactly one JSON object
@@ -813,6 +884,21 @@ public sealed class LocalReviewRunner : ILocalReviewRunner
 
     private static string Truncate(string value, int max)
         => value.Length <= max ? value : value[..max] + "...";
+}
+
+internal sealed record AggregatedLocalReview(
+    IReadOnlyList<Finding> Findings,
+    IReadOnlyList<string> Warnings);
+
+internal sealed class LocalContextLengthExceededException : Exception
+{
+    public LocalContextLengthExceededException(int contextLength, string response)
+        : base(response)
+    {
+        ContextLength = contextLength;
+    }
+
+    public int ContextLength { get; }
 }
 
 internal static class LocalReviewPatchChunker

@@ -644,6 +644,11 @@ are split at file and hunk boundaries. Each chunk is reviewed independently,
 then findings are combined and de-duplicated. The Review page explicitly
 reports how many chunks were used.
 
+Some Foundry variants advertise a larger architectural context than their
+current execution provider actually serves. When the endpoint returns the
+effective context limit in a 400 response, PR Inbox automatically rechunks
+the complete patch to that lower limit and retries once.
+
 Before downloading a large local model, move Foundry Local's global cache off
 a constrained system drive if necessary:
 

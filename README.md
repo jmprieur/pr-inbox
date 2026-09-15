@@ -322,6 +322,10 @@ reviews every chunk, and de-duplicates the combined findings. This lets the
 current 32K Qwen2.5 Coder variants review larger PRs without pretending a
 truncated prompt was complete. Custom OpenAI-compatible endpoints use a
 conservative 32K default because they do not expose Foundry catalog metadata.
+If a runtime enforces a lower limit than its catalog metadata (currently
+observed with the `gpt-oss-20b` WebGPU variant advertising 131K but serving
+8K), PR Inbox reads the effective limit from the 400 response, rechunks the
+entire patch, and retries once.
 
 ---
 

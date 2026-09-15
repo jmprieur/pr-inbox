@@ -190,6 +190,19 @@ public sealed class LocalReviewRunnerTests
     }
 
     [Fact]
+    public void ContextErrorParser_ReadsEffectiveRuntimeLimit()
+    {
+        var response = """
+            {"error":{"message":"This request requires 16922 total tokens (14874 input + 2048 output), which exceeds the model's maximum context length of 8192 tokens."}}
+            """;
+
+        LocalReviewRunner.TryParseEffectiveContextLength(
+            response,
+            out var contextLength).Should().BeTrue();
+        contextLength.Should().Be(8_192);
+    }
+
+    [Fact]
     public void ResponseParser_AcceptsFencedJsonAndDropsMalformedFindings()
     {
         var response = """
@@ -420,6 +433,41 @@ public sealed class LocalReviewRunnerTests
             .Should().Equal("local-01", "local-02");
         run.LocalReview.Warnings.Should().ContainSingle(
             warning => warning.Contains("2 chunks"));
+    }
+
+    [Fact]
+    public async Task Runner_RechunksWhenRuntimeLimitIsLowerThanCatalog()
+    {
+        var patch = BuildFileDiff("src/large.cs", 15_000);
+        var contextError = """
+            {"error":{"message":"Failed to handle OpenAI completion: This request requires 16922 total tokens (14874 input + 2048 output), which exceeds the model's maximum context length of 8192 tokens."}}
+            """;
+        await using var fixture = await RunnerFixture.CreateAsync(
+            [
+                new StubResponse(HttpStatusCode.BadRequest, contextError),
+                new StubResponse(
+                    HttpStatusCode.OK,
+                    ChatResponse("First chunk bug", "src/large.cs", 10)),
+                new StubResponse(
+                    HttpStatusCode.OK,
+                    ChatResponse("Second chunk bug", "src/large.cs", 20)),
+            ],
+            patch,
+            contextLength: 131_072);
+
+        await fixture.Runner.RunAsync(fixture.Brief, CancellationToken.None);
+
+        fixture.Handler.RequestBodies.Should().HaveCount(3);
+        var run = fixture.Store.Get(fixture.Brief.PrUrl)!;
+        run.LocalReview!.Status.Should().Be(LocalReviewStatus.Completed);
+        run.LocalReview.Findings.Select(finding => finding.Title)
+            .Should().Equal("First chunk bug", "Second chunk bug");
+        run.LocalReview.Warnings.Should().Contain(
+            warning => warning.Contains("catalog reported 131,072")
+                       && warning.Contains("runtime enforced 8,192"));
+        run.LocalReview.Warnings.Should().Contain(
+            warning => warning.Contains("2 chunks")
+                       && warning.Contains("8,192-token"));
     }
 
     private sealed class RunnerFixture : IAsyncDisposable
