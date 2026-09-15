@@ -272,6 +272,61 @@ when launching from the web UI):
 | Review tab opens but model call fails | Review CLI not authenticated to the chosen model | Authenticate your CLI to its providers, or change `PRINBOX_REVIEW_MODEL` |
 | Web UI says port already in use | Another instance running, or stale Kestrel | `Get-NetTCPConnection -LocalPort 7341 \| Stop-Process -Force` |
 
+## Optional local shadow reviewer
+
+The Web UI can run an independent local model beside the authoritative
+dual-model review. Enable it under **Settings → Local shadow reviewer**.
+The local result is written to `local-review.json` in the immutable run
+directory and displayed separately on the Review page. It is informational:
+local candidates are never selected or published. This first version is
+deliberately diff-only; it does not give the local model repository tools.
+Use **Rerun local** on the Review page to repeat only this pass while tuning
+the model or settings; it reuses the current immutable run and does not reopen
+the cloud review.
+
+The review launcher passes each generated run directory to Copilot with
+`--add-dir`. This trusts that specific app-generated directory for the session
+and avoids a new folder-trust prompt for every timestamped run. The separate
+**Allow all paths** setting still controls broader path authorization.
+
+The default model is `qwen2.5-coder-7b`, which is a practical first choice on
+developer-class NPU/GPU hardware. The runner accepts any
+OpenAI-compatible loopback endpoint. Leave the endpoint blank to discover
+the current Foundry Local server with `foundry server status --output json`.
+Non-loopback URLs are rejected so a private PR patch cannot accidentally be
+sent to a remote endpoint.
+
+When endpoint discovery is selected, PR Inbox starts Foundry Local and loads
+the configured model automatically for each review. It never downloads a
+model implicitly. If the model is not cached, the local panel is marked
+**Skipped** and shows the exact `foundry cache` / `foundry model download`
+commands required.
+
+Foundry Local model storage is configured globally, outside pr-inbox:
+
+```powershell
+foundry cache cd D:\FoundryLocal\models
+foundry cache location
+foundry model download qwen2.5-coder-7b
+foundry server start
+foundry model load qwen2.5-coder-7b
+```
+
+The shadow reviewer currently obtains unified patches from GitHub.com and
+GitHub Enterprise. Azure DevOps runs are explicitly marked skipped until a
+complete ADO patch provider is available. Oversized patches are also skipped
+rather than truncated, because a partial review must not look complete.
+Within that configured overall limit, PR Inbox reads Foundry's reported
+`contextLength`, splits the patch into conservative file/hunk-aligned chunks,
+reviews every chunk, and de-duplicates the combined findings. This lets the
+current 32K Qwen2.5 Coder variants review larger PRs without pretending a
+truncated prompt was complete. Custom OpenAI-compatible endpoints use a
+conservative 32K default because they do not expose Foundry catalog metadata.
+If a runtime enforces a lower limit than its catalog metadata (currently
+observed with the `gpt-oss-20b` WebGPU variant advertising 131K but serving
+8K), PR Inbox reads the effective limit from the 400 response, rechunks the
+entire patch, and retries once.
+
 ---
 
 ## Configuration

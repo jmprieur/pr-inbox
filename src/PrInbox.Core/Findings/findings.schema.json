@@ -39,12 +39,36 @@
       "type": "array",
       "items": { "type": "string" },
       "minItems": 1,
-      "description": "Model identifiers used by the review (e.g. claude-opus-4.8, gpt-5.6-terra). If only one model was available, list just that one; do not invent a second."
+      "description": "Deprecated combined model list retained for legacy schema-v1 documents. New producers use primary_models and shadow_models."
+    },
+    "primary_models": {
+      "type": "array",
+      "items": { "type": "string" },
+      "minItems": 1,
+      "maxItems": 2,
+      "uniqueItems": true,
+      "description": "Primary reviewers whose independent reports determine findings and asymmetry. A complete review has exactly one Opus-family model and one GPT-family model."
+    },
+    "shadow_models": {
+      "type": "array",
+      "items": { "type": "string" },
+      "uniqueItems": true,
+      "description": "Supplemental informational reviewers. These never count toward primary quorum or asymmetry."
+    },
+    "review_status": {
+      "type": "string",
+      "enum": ["complete", "degraded", "incomplete"],
+      "description": "Whether the required primary review pair completed. Degraded mode must be explicitly approved by the operator."
+    },
+    "incomplete_reason": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Why the primary review is incomplete. Required when review_status is incomplete."
     },
     "asymmetry": {
       "type": "object",
       "additionalProperties": true,
-      "description": "Diagnostic breakdown of model agreement. Free-shape so future tools can extend without a schema bump. If only one model was available, set `single_model: <count>` (total findings from the single model) and omit the cross-model counts.",
+      "description": "Diagnostic breakdown of agreement between primary reviewers only. Shadow reviewers never contribute. single_model is allowed only in explicitly approved degraded mode.",
       "properties": {
         "both_found": { "type": "integer", "minimum": 0 },
         "opus_only": { "type": "integer", "minimum": 0 },
@@ -57,6 +81,64 @@
       "items": { "$ref": "#/$defs/Finding" }
     }
   },
+  "allOf": [
+    {
+      "if": {
+        "properties": { "review_status": { "const": "complete" } },
+        "required": ["review_status"]
+      },
+      "then": {
+        "required": ["primary_models", "asymmetry"],
+        "properties": {
+          "primary_models": {
+            "minItems": 2,
+            "maxItems": 2,
+            "allOf": [
+              { "contains": { "pattern": "(?:[Oo]pus|claude-opus)" } },
+              { "contains": { "pattern": "(?:[Gg][Pp][Tt]|gpt-)" } }
+            ]
+          },
+          "asymmetry": {
+            "not": { "required": ["single_model"] }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "review_status": { "const": "degraded" } },
+        "required": ["review_status"]
+      },
+      "then": {
+        "required": ["primary_models", "asymmetry"],
+        "properties": {
+          "primary_models": { "minItems": 1, "maxItems": 1 },
+          "asymmetry": { "required": ["single_model"] }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "review_status": { "const": "incomplete" } },
+        "required": ["review_status"]
+      },
+      "then": {
+        "required": ["incomplete_reason"]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "asymmetry": { "required": ["single_model"] }
+        },
+        "required": ["asymmetry"]
+      },
+      "then": {
+        "properties": { "review_status": { "const": "degraded" } },
+        "required": ["review_status"]
+      }
+    }
+  ],
   "$defs": {
     "Finding": {
       "type": "object",

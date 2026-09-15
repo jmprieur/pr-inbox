@@ -414,6 +414,7 @@ public class DoctorServiceTests : IAsyncLifetime
         public Task SetReviewLauncherCommandAsync(string launchCommand, CancellationToken ct = default) => throw new NotImplementedException();
         public Task SetReviewLauncherTabColorAsync(string tabColor, CancellationToken ct = default) => throw new NotImplementedException();
         public Task SetReviewLauncherTabPerReviewAsync(bool tabPerReview, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task SetLocalReviewerAsync(bool enabled, string endpoint, string model, int maxPatchCharacters, int timeoutSeconds, CancellationToken ct = default) => throw new NotImplementedException();
         public Task SetRepoPathFiltersAsync(IReadOnlyDictionary<string, IReadOnlyList<string>> filters, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<BindIdentityResult> BindGitHubSourceToIdentityAsync(string sourceId, string identity, CancellationToken ct = default) => throw new NotImplementedException();
     }

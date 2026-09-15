@@ -1,5 +1,6 @@
 @page "/"
 @rendermode InteractiveServer
+@using PrInbox.Core.Findings
 @implements IDisposable
 @using System.Collections.Frozen
 @using System.Text.Json
@@ -502,9 +503,24 @@ else
                                 }
                                 @if (total == 0)
                                 {
-                                    <a class="findings-link clean-pill"
-                                       title="@CleanVerdict.BuildTooltip(run.Findings, DateTimeOffset.UtcNow)"
-                                       href="@($"/review?url={Uri.EscapeDataString(row.Url)}")">✓ clean</a>
+                                    if (run.Findings.ReviewStatus == ReviewCompleteness.Incomplete)
+                                    {
+                                        <a class="badge enrich-basic"
+                                           title="@CleanVerdict.BuildTooltip(run.Findings, DateTimeOffset.UtcNow)"
+                                           href="@($"/review?url={Uri.EscapeDataString(row.Url)}")">incomplete</a>
+                                    }
+                                    else if (run.Findings.ReviewStatus == ReviewCompleteness.Degraded)
+                                    {
+                                        <a class="badge enrich-basic"
+                                           title="@CleanVerdict.BuildTooltip(run.Findings, DateTimeOffset.UtcNow)"
+                                           href="@($"/review?url={Uri.EscapeDataString(row.Url)}")">degraded</a>
+                                    }
+                                    else
+                                    {
+                                        <a class="findings-link clean-pill"
+                                           title="@CleanVerdict.BuildTooltip(run.Findings, DateTimeOffset.UtcNow)"
+                                           href="@($"/review?url={Uri.EscapeDataString(row.Url)}")">✓ clean</a>
+                                    }
                                 }
                                 else
                                 {

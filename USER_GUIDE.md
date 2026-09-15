@@ -595,12 +595,70 @@ Persisted settings that take effect on the **next** review you launch
 | **Tab colour** | Colours the Windows Terminal tab for every review so it stands out from ordinary terminals. Accepts a hex like `#5da4ff`; leave blank to disable. |
 | **One tab per review** *(experimental)* | On: each review opens as a tab in one shared window (`pr-inbox-reviews`) instead of its own window — less desktop clutter when several run at once. Trade-off: the Inbox's per-review window controls don't apply in tab mode, and closing the shared window closes every review tab. Off (default): one window per review. |
 
+Every generated review-run directory is also passed as a session-scoped
+`--add-dir`. This handles Copilot CLI's separate startup folder-trust gate, so
+the unique timestamped run folder should not require confirmation on every
+launch. It does not auto-approve tools or URLs.
+
 The review orchestrator model defaults to `gpt-5.6-sol`. This is distinct
 from the independent reviewer pair, which defaults to `claude-opus-4.8`
 and `gpt-5.6-terra`.
 
 If you need fancier overrides (different model, different plugin),
 use the env vars in [§ Review launcher overrides](README.md#review-launcher-overrides).
+
+### Local shadow reviewer
+
+The optional local shadow reviewer runs in parallel with the normal
+dual-model review and appears in a separate, read-only panel on the Review
+page. It is deliberately diff-only and does not affect convergence, selection,
+or publishing.
+
+Use **Rerun local** in the Review-page toolbar to repeat only the local pass
+after changing its model, timeout, or patch cap. It reuses the current run and
+refuses if the PR HEAD has moved; in that case, launch a new full review.
+
+Configure it under **Settings → Local shadow reviewer**:
+
+- Enable or disable it independently of the normal review launcher.
+- Leave the endpoint blank to auto-discover Foundry Local, or enter an
+  OpenAI-compatible loopback endpoint.
+- Choose the local model alias (default: `qwen2.5-coder-7b`).
+- Set a maximum total patch size and inference timeout. The patch-size value
+  is a workload cap, not the model context window. `200000` is the recommended
+  starting point for Qwen 7B; accepted patches are chunked automatically.
+
+With endpoint auto-discovery, PR Inbox starts Foundry Local and loads the
+configured model automatically. It intentionally does not download missing
+models. A missing model produces a **Skipped** local result with setup
+instructions rather than starting a large download from the Review button.
+
+The runner sends the real unified GitHub/GHE patch to the model. If the patch
+is too large, the endpoint is unavailable, the response is malformed, or the
+PR is hosted on Azure DevOps, the local panel reports that state without
+interrupting the authoritative review.
+
+For Foundry Local, PR Inbox reads the selected model's reported context length.
+Patches that fit the configured overall size limit but not one model request
+are split at file and hunk boundaries. Each chunk is reviewed independently,
+then findings are combined and de-duplicated. The Review page explicitly
+reports how many chunks were used.
+
+Some Foundry variants advertise a larger architectural context than their
+current execution provider actually serves. When the endpoint returns the
+effective context limit in a 400 response, PR Inbox automatically rechunks
+the complete patch to that lower limit and retries once.
+
+Before downloading a large local model, move Foundry Local's global cache off
+a constrained system drive if necessary:
+
+```powershell
+foundry cache cd D:\FoundryLocal\models
+foundry cache location
+foundry model download qwen2.5-coder-7b
+foundry server start
+foundry model load qwen2.5-coder-7b
+```
 
 ### Where things live
 

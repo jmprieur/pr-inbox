@@ -17,6 +17,30 @@ public class PrInboxConfigTests
         config.Bots.ExtraLogins.Should().BeEmpty();
         config.ReviewLauncher.Model.Should().Be("gpt-5.6-sol");
         config.ReviewLauncher.AllowAllPaths.Should().BeFalse();
+        config.LocalReviewer.Enabled.Should().BeFalse();
+        config.LocalReviewer.Endpoint.Should().BeEmpty();
+        config.LocalReviewer.Model.Should().Be("qwen2.5-coder-7b");
+        config.LocalReviewer.MaxPatchCharacters.Should().Be(200_000);
+        config.LocalReviewer.TimeoutSeconds.Should().Be(1_200);
+    }
+
+    [Theory]
+    [InlineData("", "")]
+    [InlineData("  http://127.0.0.1:39839/  ", "http://127.0.0.1:39839")]
+    [InlineData("https://localhost:1234/v1", "https://localhost:1234/v1")]
+    public void NormalizeLocalEndpoint_AcceptsBlankOrLoopback(string input, string expected)
+    {
+        LocalReviewerSettings.NormalizeEndpoint(input).Should().Be(expected);
+    }
+
+    [Theory]
+    [InlineData("https://api.example.com/v1")]
+    [InlineData("file:///tmp/model")]
+    [InlineData("not-a-url")]
+    public void NormalizeLocalEndpoint_RejectsNonLoopback(string input)
+    {
+        var act = () => LocalReviewerSettings.NormalizeEndpoint(input);
+        act.Should().Throw<ArgumentException>();
     }
 
     [Fact]

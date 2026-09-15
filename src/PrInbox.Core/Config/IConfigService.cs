@@ -125,6 +125,19 @@ public interface IConfigService
     Task SetReviewLauncherTabPerReviewAsync(bool tabPerReview, CancellationToken ct = default);
 
     /// <summary>
+    /// Updates the optional local shadow-reviewer settings and mirrors them
+    /// onto the live config singleton. A blank endpoint means automatic
+    /// Foundry Local endpoint discovery.
+    /// </summary>
+    Task SetLocalReviewerAsync(
+        bool enabled,
+        string endpoint,
+        string model,
+        int maxPatchCharacters,
+        int timeoutSeconds,
+        CancellationToken ct = default);
+
+    /// <summary>
     /// Replaces the entire <see cref="PrInboxConfig.RepoPathFilters"/> map
     /// (monorepo path scoping) and mirrors it onto the DI singleton so the
     /// inbox picks it up without a restart. Repos with an empty pattern

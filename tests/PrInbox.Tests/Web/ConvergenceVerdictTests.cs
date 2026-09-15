@@ -15,7 +15,10 @@ public class ConvergenceVerdictTests
     private static FindingsDocument MakeDoc(
         int findingsCount = 1,
         IReadOnlyList<string>? models = null,
-        AsymmetryStats? asymmetry = null)
+        AsymmetryStats? asymmetry = null,
+        IReadOnlyList<string>? primaryModels = null,
+        IReadOnlyList<string>? shadowModels = null,
+        ReviewCompleteness? reviewStatus = null)
     {
         var findings = new List<Finding>();
         for (var i = 0; i < findingsCount; i++)
@@ -25,6 +28,9 @@ public class ConvergenceVerdictTests
         return new FindingsDocument
         {
             Models = models ?? Array.Empty<string>(),
+            PrimaryModels = primaryModels ?? Array.Empty<string>(),
+            ShadowModels = shadowModels ?? Array.Empty<string>(),
+            ReviewStatus = reviewStatus,
             Asymmetry = asymmetry,
             Findings = findings,
         };
@@ -187,5 +193,20 @@ public class ConvergenceVerdictTests
         Assert.Equal(ConvergenceState.Asymmetric, badge.State);
         Assert.Contains("Opus only", badge.Tooltip);
         Assert.Contains("GPT only", badge.Tooltip);
+    }
+
+    [Fact]
+    public void Compute_Shadow_Model_Does_Not_Satisfy_Primary_Quorum()
+    {
+        var doc = MakeDoc(
+            findingsCount: 1,
+            primaryModels: new[] { "gpt-5.6-terra" },
+            shadowModels: new[] { "qwen2.5-coder-7b" },
+            reviewStatus: ReviewCompleteness.Incomplete,
+            asymmetry: new AsymmetryStats { BothFound = 1, OpusOnly = 0, GptOnly = 0 });
+
+        var badge = ConvergenceVerdict.Compute(doc);
+
+        Assert.Equal(ConvergenceState.Hidden, badge.State);
     }
 }
