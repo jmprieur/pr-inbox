@@ -2118,18 +2118,35 @@ internal static class LocalReviewResponseParser
 {
     public static LocalReviewParseResult Parse(string text, string model)
     {
-        var json = ExtractJsonObject(text, "findings");
-        using var doc = JsonDocument.Parse(json);
-        if (!doc.RootElement.TryGetProperty("findings", out var findingsElement)
-            || findingsElement.ValueKind != JsonValueKind.Array)
+        try
         {
-            throw new FormatException("Local reviewer response has no findings array.");
+            var json = ExtractJsonObject(text, "findings");
+            using var doc = JsonDocument.Parse(json);
+            if (!doc.RootElement.TryGetProperty("findings", out var findingsElement)
+                || findingsElement.ValueKind != JsonValueKind.Array)
+            {
+                throw new FormatException("Local reviewer response has no findings array.");
+            }
+            return ParseFindingElements(
+                findingsElement.EnumerateArray(),
+                model,
+                Array.Empty<string>());
         }
+        catch (FormatException original)
+        {
+            return RecoverCompleteFindings(text, model, original);
+        }
+    }
 
+    private static LocalReviewParseResult ParseFindingElements(
+        IEnumerable<JsonElement> elements,
+        string model,
+        IReadOnlyList<string> initialWarnings)
+    {
         var findings = new List<Finding>();
-        var warnings = new List<string>();
+        var warnings = new List<string>(initialWarnings);
         var index = 0;
-        foreach (var item in findingsElement.EnumerateArray())
+        foreach (var item in elements)
         {
             index++;
             if (findings.Count >= 50)
@@ -2171,18 +2188,115 @@ internal static class LocalReviewResponseParser
         return new LocalReviewParseResult(findings, warnings);
     }
 
+    private static LocalReviewParseResult RecoverCompleteFindings(
+        string text,
+        string model,
+        FormatException original)
+    {
+        var regionStart = text.LastIndexOf(
+            "</think>",
+            StringComparison.OrdinalIgnoreCase);
+        if (regionStart >= 0)
+        {
+            regionStart += "</think>".Length;
+        }
+        else
+        {
+            regionStart = text.LastIndexOf(
+                "```json",
+                StringComparison.OrdinalIgnoreCase);
+            if (regionStart < 0) throw original;
+            regionStart += "```json".Length;
+        }
+
+        var region = text[regionStart..];
+        var findingsMarker = region.LastIndexOf(
+            "\"findings\"",
+            StringComparison.OrdinalIgnoreCase);
+        if (findingsMarker < 0) throw original;
+        var arrayStart = region.IndexOf('[', findingsMarker);
+        if (arrayStart < 0) throw original;
+
+        var recovered = new List<JsonElement>();
+        for (var index = arrayStart + 1; index < region.Length;)
+        {
+            while (index < region.Length
+                   && (char.IsWhiteSpace(region[index])
+                       || region[index] == ','))
+            {
+                index++;
+            }
+            if (index >= region.Length || region[index] == ']') break;
+            if (region[index] != '{') break;
+
+            var end = FindBalancedObjectEnd(region, index);
+            if (end < 0) break;
+            var candidate = region[index..(end + 1)];
+            try
+            {
+                using var doc = JsonDocument.Parse(candidate);
+                recovered.Add(doc.RootElement.Clone());
+            }
+            catch (JsonException)
+            {
+                break;
+            }
+            index = end + 1;
+        }
+
+        if (recovered.Count == 0) throw original;
+        var suffix = recovered.Count == 1 ? "finding" : "findings";
+        return ParseFindingElements(
+            recovered,
+            model,
+            [
+                $"Recovered {recovered.Count} complete {suffix} from an " +
+                "incomplete final JSON document; incomplete trailing output " +
+                "was ignored.",
+            ]);
+    }
+
     internal static string ExtractJsonObject(
         string text,
         string requiredProperty)
     {
         var trimmed = text.Trim();
-        for (var start = trimmed.LastIndexOf('{');
-             start >= 0;
-             start = start == 0 ? -1 : trimmed.LastIndexOf('{', start - 1))
+        string region;
+        if (trimmed.StartsWith('{'))
         {
-            var end = FindBalancedObjectEnd(trimmed, start);
+            region = trimmed;
+        }
+        else
+        {
+            var marker = trimmed.LastIndexOf(
+                "</think>",
+                StringComparison.OrdinalIgnoreCase);
+            if (marker >= 0)
+            {
+                region = trimmed[(marker + "</think>".Length)..].Trim();
+            }
+            else
+            {
+                marker = trimmed.LastIndexOf(
+                    "```json",
+                    StringComparison.OrdinalIgnoreCase);
+                if (marker < 0)
+                {
+                    throw new FormatException(
+                        $"Local reviewer response did not contain a final JSON " +
+                        $"document with a '{requiredProperty}' property.");
+                }
+                region = trimmed[(marker + "```json".Length)..].Trim();
+            }
+        }
+
+        for (var start = region.LastIndexOf('{');
+             start >= 0;
+             start = start == 0 ? -1 : region.LastIndexOf('{', start - 1))
+        {
+            var end = FindBalancedObjectEnd(region, start);
             if (end < 0) continue;
-            var candidate = trimmed[start..(end + 1)];
+            var candidate = region[start..(end + 1)];
             try
             {
                 using var doc = JsonDocument.Parse(candidate);

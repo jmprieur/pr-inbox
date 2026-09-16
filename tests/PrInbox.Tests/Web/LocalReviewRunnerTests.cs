@@ -428,6 +428,60 @@ public sealed class LocalReviewRunnerTests
     }
 
     [Fact]
+    public void ResponseParser_RecoversCompleteFindingBeforeIncompleteTail()
+    {
+        var response = """
+            Thinking Process:
+            I considered several possible issues.
+            </think>
+
+            {
+              "findings": [
+                {
+                  "severity": "high",
+                  "confidence": "high",
+                  "file": "src/a.cs",
+                  "line": 2,
+                  "title": "Complete candidate",
+                  "body": "This object is complete."
+                },
+                {
+                  "severity": "medium",
+                  "confidence": "high",
+                  "file": "src/b.cs",
+                  "line": 4,
+                  "title": "Incomplete candidate",
+                  "body": "The model stopped here
+            """;
+
+        var parsed = LocalReviewResponseParser.Parse(
+            response,
+            "qwen3.5-9b-generic-cpu:3");
+
+        parsed.Findings.Should().ContainSingle();
+        parsed.Findings[0].Title.Should().Be("Complete candidate");
+        parsed.Warnings.Should().ContainSingle(
+            warning => warning.Contains("Recovered 1 complete finding")
+                       && warning.Contains("incomplete trailing output"));
+    }
+
+    [Fact]
+    public void ResponseParser_DoesNotRecoverIllustrativeReasoningObject()
+    {
+        var response = """
+            Thinking Process:
+            An example would be {"findings":[{"severity":"high"}]}.
+            The model stopped before producing a final answer.
+            """;
+
+        var act = () => LocalReviewResponseParser.Parse(
+            response,
+            "qwen3.5-9b-generic-cpu:3");
+
+        act.Should().Throw<FormatException>();
+    }
+
+    [Fact]
     public void ReviewRunStore_RehydratesLocalArtifact()
     {
         var runDirectory = Path.Combine(

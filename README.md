@@ -373,6 +373,13 @@ analysis; PR Inbox safely selects the final valid JSON object with the expected
 contract. A response ending with `finish_reason: length` is treated as
 truncated, never as malformed-but-usable JSON.
 
+If a model reports `stop` but leaves the final findings array malformed, PR
+Inbox may recover only balanced, individually valid finding objects after an
+explicit `</think>` terminator or final JSON fence. An incomplete trailing
+finding is discarded, and every recovered candidate still passes added-line
+and full-file verification. JSON examples embedded in ordinary reasoning are
+never treated as results.
+
 ---
 
 ## Configuration

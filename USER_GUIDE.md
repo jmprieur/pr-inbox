@@ -687,6 +687,11 @@ Reasoning-capable local models receive a larger output allowance and
 the final contract-shaped JSON object. Provider responses that stop with
 `finish_reason: length` are rejected explicitly as truncated.
 
+For a `stop` response with a malformed final findings array, PR Inbox can
+recover complete finding objects only from the final post-reasoning section.
+Incomplete trailing objects are ignored and recovered candidates still pass
+all normal verification gates; illustrative JSON inside reasoning is rejected.
+
 Before downloading a large local model, move Foundry Local's global cache off
 a constrained system drive if necessary:
 
