@@ -366,6 +366,13 @@ local model receives the source text but no credential, network access, or
 repository tool. It must return an exact quoted source line from an added line;
 unverifiable candidates are dropped. Azure DevOps remains unsupported.
 
+Foundry models marked with the `reasoning` capability receive a larger
+8,192-token output budget and a Qwen-compatible `/no_think` control. Requests
+also ask for OpenAI JSON mode. Some reasoning models still emit visible
+analysis; PR Inbox safely selects the final valid JSON object with the expected
+contract. A response ending with `finish_reason: length` is treated as
+truncated, never as malformed-but-usable JSON.
+
 ---
 
 ## Configuration

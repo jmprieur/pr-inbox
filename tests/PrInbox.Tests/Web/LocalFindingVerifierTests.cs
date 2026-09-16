@@ -77,9 +77,10 @@ public sealed class LocalFindingVerifierTests : IDisposable
                 },
             ],
             32_768,
-            transcript,
+            isReasoning: false,
+            transcriptPath: transcript,
             reviewPass: 1,
-            CancellationToken.None);
+            ct: CancellationToken.None);
 
         result.Findings.Should().BeEmpty();
         result.Warnings.Should().Equal(
@@ -135,9 +136,10 @@ public sealed class LocalFindingVerifierTests : IDisposable
                 },
             ],
             32_768,
-            transcript,
+            isReasoning: false,
+            transcriptPath: transcript,
             reviewPass: 1,
-            CancellationToken.None);
+            ct: CancellationToken.None);
 
         result.Findings.Should().ContainSingle();
         result.Findings[0].Line.Should().Be(2);

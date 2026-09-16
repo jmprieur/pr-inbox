@@ -82,6 +82,7 @@ public sealed class LocalReviewRunnerTests
             ct: CancellationToken.None);
 
         result.ContextLength.Should().Be(32_768);
+        result.IsReasoning.Should().BeFalse();
         cli.Commands.Should().Equal(
             "server status --output json",
             "server start",
@@ -89,6 +90,34 @@ public sealed class LocalReviewRunnerTests
             "model info qwen2.5-coder-7b --output json",
             "model list --loaded --variants --output json --limit 500",
             "model load qwen2.5-coder-7b");
+    }
+
+    [Fact]
+    public async Task FoundryRuntime_DetectsReasoningCapability()
+    {
+        var cli = new StubFoundryCliRunner(
+            new FoundryCliResult(
+                0, """{"running":true,"state":"ready"}""", ""),
+            new FoundryCliResult(
+                0,
+                """{"variants":[{"alias":"qwen3.5-9b","variantName":"qwen3.5-9b-generic-cpu","variantId":"qwen3.5-9b-generic-cpu:3","cached":true}]}""",
+                ""),
+            new FoundryCliResult(
+                0,
+                """{"model":{"alias":"qwen3.5-9b","id":"qwen3.5-9b-generic-cpu:3","contextLength":262144,"capabilities":"reasoning,tool-calling"}}""",
+                ""),
+            new FoundryCliResult(0, """{"variants":[]}""", ""),
+            new FoundryCliResult(0, "loaded", ""));
+        var runtime = new FoundryLocalRuntime(cli);
+
+        var result = await runtime.PrepareAsync(
+            configuredEndpoint: "",
+            model: "qwen3.5-9b-generic-cpu:3",
+            timeoutSeconds: 600,
+            ct: CancellationToken.None);
+
+        result.ContextLength.Should().Be(262_144);
+        result.IsReasoning.Should().BeTrue();
     }
 
     [Fact]
@@ -229,6 +258,26 @@ public sealed class LocalReviewRunnerTests
     }
 
     [Fact]
+    public void ExtractChatCompletion_ReportsOutputTruncation()
+    {
+        var response = """
+            {
+              "choices": [
+                {
+                  "message": { "content": "analysis without final JSON" },
+                  "finish_reason": "length"
+                }
+              ]
+            }
+            """;
+
+        var completion = LocalReviewRunner.ExtractChatCompletion(response);
+
+        completion.Content.Should().Be("analysis without final JSON");
+        completion.FinishReason.Should().Be("length");
+    }
+
+    [Fact]
     public void ContextErrorParser_ReadsEffectiveRuntimeLimit()
     {
         var response = """
@@ -358,6 +407,27 @@ public sealed class LocalReviewRunnerTests
     }
 
     [Fact]
+    public void ResponseParser_UsesFinalJsonAfterVisibleReasoning()
+    {
+        var response = """
+            I considered this code:
+            { not valid JSON }
+            An illustrative object is {"note":"not the result"}.
+            Final answer:
+            ```json
+            {"findings":[]}
+            ```
+            """;
+
+        var parsed = LocalReviewResponseParser.Parse(
+            response,
+            "qwen3.5-9b-generic-cpu:3");
+
+        parsed.Findings.Should().BeEmpty();
+        parsed.Warnings.Should().BeEmpty();
+    }
+
+    [Fact]
     public void ReviewRunStore_RehydratesLocalArtifact()
     {
         var runDirectory = Path.Combine(
@@ -468,10 +538,31 @@ public sealed class LocalReviewRunnerTests
         transcript.Should().Contain("Null dereference");
 
         fixture.Handler.RequestBody.Should().Contain("return input.Trim()");
+        fixture.Handler.RequestBody.Should().Contain(
+            "\"response_format\":{\"type\":\"json_object\"}");
         fixture.Handler.RequestBody.Should().Contain("removed old code");
         fixture.Handler.RequestBody.Should().Contain("post-change code");
         fixture.Handler.RequestBody.Should()
             .NotContain("triage the existing review threads");
+    }
+
+    [Fact]
+    public async Task Runner_UsesLargerOutputBudgetForReasoningModel()
+    {
+        await using var fixture = await RunnerFixture.CreateAsync(
+            [
+                new StubResponse(
+                    HttpStatusCode.OK,
+                    ChatResponse("Null dereference", "src/a.cs", 1)),
+            ],
+            StubPatchProvider.DefaultPatch,
+            contextLength: 262_144,
+            isReasoning: true);
+
+        await fixture.Runner.RunAsync(fixture.Brief, CancellationToken.None);
+
+        fixture.Handler.RequestBody.Should().Contain("\"max_tokens\":8192");
+        fixture.Handler.RequestBody.Should().Contain("/no_think");
     }
 
     [Fact]
@@ -749,7 +840,8 @@ public sealed class LocalReviewRunnerTests
         public static async Task<RunnerFixture> CreateAsync(
             IReadOnlyList<StubResponse> responses,
             string patch,
-            int contextLength)
+            int contextLength,
+            bool isReasoning = false)
         {
             var connString = PrInboxDb.InMemoryConnectionString(
                 $"local-review-{Guid.NewGuid():N}");
@@ -812,7 +904,7 @@ public sealed class LocalReviewRunnerTests
                 config,
                 prRepo,
                 new StubPatchProvider(patch),
-                new StubFoundryRuntime(contextLength),
+                new StubFoundryRuntime(contextLength, isReasoning),
                 new StubEndpointResolver(),
                 new StubFindingVerifier(),
                 new StubHttpClientFactory(handler),
@@ -876,10 +968,12 @@ public sealed class LocalReviewRunnerTests
     private sealed class StubFoundryRuntime : IFoundryLocalRuntime
     {
         private readonly int _contextLength;
+        private readonly bool _isReasoning;
 
-        public StubFoundryRuntime(int contextLength)
+        public StubFoundryRuntime(int contextLength, bool isReasoning = false)
         {
             _contextLength = contextLength;
+            _isReasoning = isReasoning;
         }
 
         public Task<LocalModelRuntimeInfo> PrepareAsync(
@@ -887,7 +981,9 @@ public sealed class LocalReviewRunnerTests
             string model,
             int timeoutSeconds,
             CancellationToken ct) =>
-            Task.FromResult(new LocalModelRuntimeInfo(_contextLength));
+            Task.FromResult(new LocalModelRuntimeInfo(
+                _contextLength,
+                _isReasoning));
     }
 
     private sealed class StubFindingVerifier : ILocalFindingVerifier
@@ -900,6 +996,7 @@ public sealed class LocalReviewRunnerTests
             string patch,
             IReadOnlyList<Finding> candidates,
             int contextLength,
+            bool isReasoning,
             string transcriptPath,
             int reviewPass,
             CancellationToken ct) =>

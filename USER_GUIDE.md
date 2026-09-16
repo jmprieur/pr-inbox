@@ -682,6 +682,11 @@ It must quote exact evidence from an added line. Fetch failures, oversized
 files, malformed verification responses, and unsupported Azure DevOps files
 all fail closed by dropping the candidate with a warning.
 
+Reasoning-capable local models receive a larger output allowance and
+`/no_think` instruction. If they still print visible analysis, PR Inbox reads
+the final contract-shaped JSON object. Provider responses that stop with
+`finish_reason: length` are rejected explicitly as truncated.
+
 Before downloading a large local model, move Foundry Local's global cache off
 a constrained system drive if necessary:
 
