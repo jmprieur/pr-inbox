@@ -304,6 +304,11 @@ optimized for one interactive inference stream, not concurrent server loads.
 Each Review page shows `Queued` plus its live position; cloud review windows
 continue to run in parallel.
 
+The Inbox shows a global **Local review queue** panel whenever work is active.
+It lists the running PR, every waiting PR in order, live positions, model, HEAD,
+and links back to each Review page. The panel disappears when the queue is
+empty.
+
 The review launcher passes each generated run directory to Copilot with
 `--add-dir`. This trusts that specific app-generated directory for the session
 and avoids a new folder-trust prompt for every timestamped run. The separate

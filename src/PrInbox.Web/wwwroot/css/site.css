@@ -359,6 +359,58 @@ button.review:hover { background: rgba(93,164,255,0.12); }
     border-left-color: #8b7bb8;
 }
 
+.local-queue-panel {
+    margin: 0.75rem 0 1rem;
+    padding: 0.75rem 1rem;
+    border: 1px solid var(--line);
+    border-left: 4px solid #8b7bb8;
+    border-radius: 6px;
+    background: var(--card);
+}
+
+.local-queue-header {
+    display: flex;
+    align-items: baseline;
+    gap: 0.75rem;
+    margin-bottom: 0.55rem;
+}
+
+.local-queue-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.local-queue-table th,
+.local-queue-table td {
+    padding: 0.35rem 0.55rem;
+    border-top: 1px solid var(--line);
+    text-align: left;
+    vertical-align: top;
+}
+
+.local-queue-table th {
+    color: var(--muted);
+    font-size: 0.82rem;
+    font-weight: 500;
+}
+
+.local-queue-status {
+    display: inline-block;
+    padding: 0.1rem 0.4rem;
+    border-radius: 999px;
+    font-size: 0.78rem;
+}
+
+.local-queue-status-running {
+    background: rgba(93, 164, 255, 0.16);
+    color: #8fc1ff;
+}
+
+.local-queue-status-queued {
+    background: rgba(139, 123, 184, 0.18);
+    color: #c0b2e5;
+}
+
 .local-review-failed,
 .local-review-skipped {
     border-left-color: #d6a100;

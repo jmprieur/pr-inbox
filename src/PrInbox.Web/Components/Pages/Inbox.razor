@@ -12,6 +12,7 @@
 @inject InboxState State
 @inject ReviewRunStore Runs
 @inject IReviewLauncher Launcher
+@inject ILocalReviewQueue LocalQueue
 @inject InboxSyncHostedService Sync
 @inject PullRequestRepository PrRepo
 @inject TagRepository TagRepo
@@ -264,6 +265,47 @@ else if (consoles.Count > 0)
             </span>
         }
     </div>
+}
+
+@{
+    var localQueue = LocalQueue.Snapshot();
+}
+@if (localQueue.Count > 0)
+{
+    <section class="local-queue-panel" aria-label="Local review queue">
+        <div class="local-queue-header">
+            <strong>Local review queue</strong>
+            <span class="muted">@localQueue.Count job@(localQueue.Count == 1 ? "" : "s")</span>
+        </div>
+        <table class="local-queue-table">
+            <thead>
+                <tr><th>Position</th><th>Status</th><th>Pull request</th><th>Model</th></tr>
+            </thead>
+            <tbody>
+                @foreach (var item in localQueue)
+                {
+                    var queueRow = State.CurrentRows.FirstOrDefault(candidate =>
+                        string.Equals(candidate.Url, item.PrUrl, StringComparison.OrdinalIgnoreCase));
+                    var label = queueRow is null
+                        ? item.PrUrl
+                        : $"{queueRow.DisplayRepo} #{queueRow.Number} — {queueRow.Title}";
+                    <tr>
+                        <td><strong>@item.Position</strong></td>
+                        <td>
+                            <span class="local-queue-status local-queue-status-@item.Status.ToString().ToLowerInvariant()">
+                                @(item.Status == LocalReviewQueueItemStatus.Running ? "Running" : "Queued")
+                            </span>
+                        </td>
+                        <td>
+                            <a href="@($"/review?url={Uri.EscapeDataString(item.PrUrl)}")">@label</a>
+                            <div class="muted"><code>@ShortSha(item.HeadSha)</code></div>
+                        </td>
+                        <td><code>@item.Model</code></td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </section>
 }
 
 @{
@@ -886,6 +928,7 @@ else
         State.Changed += OnStateChanged;
         Runs.Changed += OnStateChanged;
         Consoles.Changed += OnStateChanged;
+        LocalQueue.Changed += OnStateChanged;
         await LoadPrefsAsync();
         await ReloadTagsAsync();
         CompileIgnoredRepoRegexes();
@@ -1899,5 +1942,6 @@ else
         State.Changed -= OnStateChanged;
         Runs.Changed -= OnStateChanged;
         Consoles.Changed -= OnStateChanged;
+        LocalQueue.Changed -= OnStateChanged;
     }
 }

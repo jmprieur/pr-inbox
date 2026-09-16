@@ -34,11 +34,29 @@ public sealed record LocalReviewEnqueueResult(
     int? QueuePosition,
     string Message);
 
+public enum LocalReviewQueueItemStatus
+{
+    Running,
+    Queued,
+}
+
+public sealed record LocalReviewQueueItem(
+    string PrUrl,
+    string RunDirectory,
+    string HeadSha,
+    string Model,
+    LocalReviewQueueItemStatus Status,
+    int Position);
+
 public interface ILocalReviewQueue
 {
+    event Action? Changed;
+
     Task<LocalReviewEnqueueResult> EnqueueAsync(
         BriefResult brief,
         CancellationToken ct);
+
+    IReadOnlyList<LocalReviewQueueItem> Snapshot();
 }
 
 /// <summary>
@@ -59,6 +77,8 @@ public sealed class LocalReviewQueue : BackgroundService, ILocalReviewQueue
     private readonly PrInboxConfig _config;
     private readonly ILogger<LocalReviewQueue> _log;
     private BriefResult? _active;
+
+    public event Action? Changed;
 
     public LocalReviewQueue(
         ILocalReviewRunner runner,
@@ -101,6 +121,7 @@ public sealed class LocalReviewQueue : BackgroundService, ILocalReviewQueue
         {
             await PublishQueuedPositionsAsync(positions, ct);
             _signal.Release();
+            RaiseChanged();
             return new LocalReviewEnqueueResult(
                 Accepted: true,
                 QueuePosition: position,
@@ -127,7 +148,33 @@ public sealed class LocalReviewQueue : BackgroundService, ILocalReviewQueue
                 }
             }
             _known.TryRemove(brief.RunDirectory, out _);
+            RaiseChanged();
             throw;
+        }
+    }
+
+    public IReadOnlyList<LocalReviewQueueItem> Snapshot()
+    {
+        lock (_gate)
+        {
+            var result = new List<LocalReviewQueueItem>(
+                _waiting.Count + (_active is null ? 0 : 1));
+            if (_active is not null)
+            {
+                result.Add(ToQueueItem(
+                    _active,
+                    LocalReviewQueueItemStatus.Running,
+                    position: 1));
+            }
+            var position = _active is null ? 1 : 2;
+            foreach (var brief in _waiting)
+            {
+                result.Add(ToQueueItem(
+                    brief,
+                    LocalReviewQueueItemStatus.Queued,
+                    position++));
+            }
+            return result;
         }
     }
 
@@ -152,6 +199,7 @@ public sealed class LocalReviewQueue : BackgroundService, ILocalReviewQueue
             if (brief is null) continue;
 
             await PublishQueuedPositionsAsync(positions, stoppingToken);
+            RaiseChanged();
             try
             {
                 await _runner.RunAsync(brief, stoppingToken);
@@ -175,6 +223,7 @@ public sealed class LocalReviewQueue : BackgroundService, ILocalReviewQueue
                     positions = SnapshotQueuedPositionsLocked();
                 }
                 _known.TryRemove(brief.RunDirectory, out _);
+                RaiseChanged();
                 try
                 {
                     await PublishQueuedPositionsAsync(
@@ -186,8 +235,20 @@ public sealed class LocalReviewQueue : BackgroundService, ILocalReviewQueue
                     _log.LogWarning(ex, "Could not refresh local review queue positions.");
                 }
             }
+
         }
     }
+
+    private LocalReviewQueueItem ToQueueItem(
+        BriefResult brief,
+        LocalReviewQueueItemStatus status,
+        int position) => new(
+            brief.PrUrl,
+            brief.RunDirectory,
+            brief.HeadSha,
+            _config.LocalReviewer.Model,
+            status,
+            position);
 
     private List<(BriefResult Brief, int Position)> SnapshotQueuedPositionsLocked()
     {
@@ -215,5 +276,11 @@ public sealed class LocalReviewQueue : BackgroundService, ILocalReviewQueue
                 QueuePosition = item.Position,
             }, ct);
         }
+    }
+
+    private void RaiseChanged()
+    {
+        try { Changed?.Invoke(); }
+        catch { }
     }
 }

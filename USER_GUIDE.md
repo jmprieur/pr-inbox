@@ -635,6 +635,10 @@ Local reviews are processed one at a time. When another PR is using Foundry,
 the local panel shows **Queued** and its live queue position. This does not
 serialize or delay the normal cloud review.
 
+The Inbox also shows a global **Local review queue** panel while any local work
+is running or waiting. It links each queue entry to its Review page and updates
+positions live as jobs complete.
+
 Configure it under **Settings → Local shadow reviewer**:
 
 - Enable or disable it independently of the normal review launcher.

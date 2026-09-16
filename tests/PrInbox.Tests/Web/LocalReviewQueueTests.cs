@@ -40,6 +40,8 @@ public sealed class LocalReviewQueueTests : IAsyncLifetime
             new LocalReviewArtifactStore(store),
             config,
             NullLogger<LocalReviewQueue>.Instance);
+        var changedCount = 0;
+        queue.Changed += () => Interlocked.Increment(ref changedCount);
         await queue.StartAsync(CancellationToken.None);
 
         var first = CreateRun(store, 1);
@@ -53,6 +55,14 @@ public sealed class LocalReviewQueueTests : IAsyncLifetime
                 CancellationToken.None);
             firstResult.QueuePosition.Should().Be(1);
             (await runner.Started.Reader.ReadAsync()).Should().Be(first.RunDirectory);
+            queue.Snapshot().Should().ContainSingle().Which.Should()
+                .BeEquivalentTo(new LocalReviewQueueItem(
+                    first.PrUrl,
+                    first.RunDirectory,
+                    first.HeadSha,
+                    "qwen2.5-coder-14b",
+                    LocalReviewQueueItemStatus.Running,
+                    Position: 1));
 
             var secondResult = await queue.EnqueueAsync(
                 second,
@@ -64,6 +74,11 @@ public sealed class LocalReviewQueueTests : IAsyncLifetime
             thirdResult.QueuePosition.Should().Be(3);
             store.Get(second.PrUrl)!.LocalReview!.QueuePosition.Should().Be(2);
             store.Get(third.PrUrl)!.LocalReview!.QueuePosition.Should().Be(3);
+            queue.Snapshot().Select(item => (item.Status, item.Position, item.PrUrl))
+                .Should().Equal(
+                    (LocalReviewQueueItemStatus.Running, 1, first.PrUrl),
+                    (LocalReviewQueueItemStatus.Queued, 2, second.PrUrl),
+                    (LocalReviewQueueItemStatus.Queued, 3, third.PrUrl));
 
             var duplicate = await queue.EnqueueAsync(
                 second,
@@ -79,6 +94,8 @@ public sealed class LocalReviewQueueTests : IAsyncLifetime
             (await runner.Started.Reader.ReadAsync()).Should().Be(third.RunDirectory);
             runner.Release(third.RunDirectory);
             await WaitUntilAsync(() => runner.CompletedCount == 3);
+            await WaitUntilAsync(() => queue.Snapshot().Count == 0);
+            changedCount.Should().BeGreaterThan(3);
         }
         finally
         {
