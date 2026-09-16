@@ -623,6 +623,10 @@ chunk and the raw endpoint responses. The transcript is
 `local-review-transcript.txt` beside `local-review.json` in the private run
 directory. It contains private diff content; do not attach or publish it.
 
+When Foundry closes the transport connection mid-request, PR Inbox re-prepares
+the runtime and retries the complete local pass once. The transcript records
+the reset and both attempts.
+
 Local reviews are processed one at a time. When another PR is using Foundry,
 the local panel shows **Queued** and its live queue position. This does not
 serialize or delay the normal cloud review.

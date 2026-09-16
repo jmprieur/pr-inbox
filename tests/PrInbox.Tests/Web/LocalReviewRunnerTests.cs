@@ -242,6 +242,19 @@ public sealed class LocalReviewRunnerTests
     }
 
     [Fact]
+    public void ConnectionResetDetector_ReadsNestedSocketError()
+    {
+        var error = new HttpRequestException(
+            "An error occurred while sending the request.",
+            new IOException(
+                "Unable to read data from the transport connection.",
+                new System.Net.Sockets.SocketException(
+                    (int)System.Net.Sockets.SocketError.ConnectionReset)));
+
+        LocalReviewRunner.IsConnectionReset(error).Should().BeTrue();
+    }
+
+    [Fact]
     public void ProviderErrorDetail_AddsWebGpuFallbackInstructions()
     {
         var detail = LocalReviewRunner.BuildProviderErrorDetail(
@@ -563,6 +576,47 @@ public sealed class LocalReviewRunnerTests
     }
 
     [Fact]
+    public async Task Runner_RetriesCompletePassOnceAfterConnectionReset()
+    {
+        var reset = new HttpRequestException(
+            "An error occurred while sending the request.",
+            new IOException(
+                "Unable to read data from the transport connection.",
+                new System.Net.Sockets.SocketException(
+                    (int)System.Net.Sockets.SocketError.ConnectionReset)));
+        await using var fixture = await RunnerFixture.CreateAsync(
+            [
+                new StubResponse(
+                    HttpStatusCode.ServiceUnavailable,
+                    string.Empty,
+                    reset),
+                new StubResponse(
+                    HttpStatusCode.OK,
+                    ChatResponse("Recovered bug", "src/a.cs", 1)),
+            ],
+            StubPatchProvider.DefaultPatch,
+            contextLength: 32_768);
+
+        await fixture.Runner.RunAsync(fixture.Brief, CancellationToken.None);
+
+        fixture.Handler.RequestBodies.Should().HaveCount(2);
+        var run = fixture.Store.Get(fixture.Brief.PrUrl)!;
+        run.LocalReview!.Status.Should().Be(LocalReviewStatus.Completed);
+        run.LocalReview.Findings.Should().ContainSingle()
+            .Which.Title.Should().Be("Recovered bug");
+        run.LocalReview.Warnings.Should().ContainSingle(
+            warning => warning.Contains("closed the connection")
+                       && warning.Contains("retried"));
+        var transcript = File.ReadAllText(Path.Combine(
+            fixture.Brief.RunDirectory,
+            LocalReviewArtifact.TranscriptFileName));
+        transcript.Should().Contain("REQUEST pass 1, chunk 1/1");
+        transcript.Should().Contain("PROVIDER CONNECTION RESET");
+        transcript.Should().Contain("REQUEST pass 2, chunk 1/1");
+        transcript.Should().Contain("HTTP 200 OK");
+    }
+
+    [Fact]
     public void DiffFilter_RejectsOldLineFindingAndKeepsAddedLineFinding()
     {
         var patch = """
@@ -835,6 +889,10 @@ public sealed class LocalReviewRunnerTests
                 ? string.Empty
                 : await request.Content.ReadAsStringAsync(cancellationToken));
             var response = _responses.Dequeue();
+            if (response.Error is not null)
+            {
+                throw response.Error;
+            }
             return new HttpResponseMessage(response.Status)
             {
                 Content = new StringContent(
@@ -843,7 +901,10 @@ public sealed class LocalReviewRunnerTests
         }
     }
 
-    private sealed record StubResponse(HttpStatusCode Status, string Body);
+    private sealed record StubResponse(
+        HttpStatusCode Status,
+        string Body,
+        Exception? Error = null);
 
     private static string BuildFileDiff(string path, int bodyCharacters)
     {

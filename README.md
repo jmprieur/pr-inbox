@@ -290,6 +290,11 @@ chunk's exact system/user prompts, request parameters, HTTP status, and raw
 provider response, including failed attempts and context-limit retries. The
 transcript includes private PR code and must not be published.
 
+If the local provider forcibly resets the TCP connection, PR Inbox assumes the
+daemon may have crashed, re-prepares Foundry, resolves its potentially new
+loopback endpoint, and retries the complete patch once. Partial findings from
+the interrupted pass are discarded; both attempts remain in the transcript.
+
 Local model work is serialized through a single queue because Foundry Local is
 optimized for one interactive inference stream, not concurrent server loads.
 Each Review page shows `Queued` plus its live position; cloud review windows

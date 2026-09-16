@@ -589,44 +589,94 @@ public sealed class LocalReviewRunner : ILocalReviewRunner
                 ct);
             var endpoint = await _endpointResolver.ResolveAsync(settings.Endpoint, ct);
             var requestUri = BuildChatCompletionsUri(endpoint);
-            var contextLength = runtimeInfo.ContextLength ?? DefaultContextLength;
 
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
             timeout.CancelAfter(TimeSpan.FromSeconds(settings.TimeoutSeconds));
 
+            var reviewPass = 0;
+            async Task<AggregatedLocalReview> ReviewWithContextFallbackAsync(
+                Uri uri,
+                int advertisedContextLength)
+            {
+                try
+                {
+                    return await ReviewPatchAsync(
+                        uri,
+                        settings.Model,
+                        pr,
+                        brief.HeadSha,
+                        patch.Patch,
+                        advertisedContextLength,
+                        transcriptPath,
+                        reviewPass: ++reviewPass,
+                        timeout.Token);
+                }
+                catch (LocalContextLengthExceededException ex)
+                    when (ex.ContextLength > 0
+                          && ex.ContextLength < advertisedContextLength)
+                {
+                    var fallbackReview = await ReviewPatchAsync(
+                        uri,
+                        settings.Model,
+                        pr,
+                        brief.HeadSha,
+                        patch.Patch,
+                        ex.ContextLength,
+                        transcriptPath,
+                        reviewPass: ++reviewPass,
+                        timeout.Token);
+                    return fallbackReview with
+                    {
+                        Warnings =
+                        [
+                            $"Foundry catalog reported {advertisedContextLength:N0} tokens, but the " +
+                            $"loaded runtime enforced {ex.ContextLength:N0}. Rechunked and retried.",
+                            .. fallbackReview.Warnings,
+                        ],
+                    };
+                }
+            }
+
+            var contextLength = runtimeInfo.ContextLength ?? DefaultContextLength;
             AggregatedLocalReview review;
             try
             {
-                review = await ReviewPatchAsync(
+                review = await ReviewWithContextFallbackAsync(
                     requestUri,
-                    settings.Model,
-                    pr,
-                    brief.HeadSha,
-                    patch.Patch,
-                    contextLength,
-                    transcriptPath,
-                    reviewPass: 1,
-                    timeout.Token);
+                    contextLength);
             }
-            catch (LocalContextLengthExceededException ex)
-                when (ex.ContextLength > 0 && ex.ContextLength < contextLength)
+            catch (LocalTransportResetException ex)
             {
-                review = await ReviewPatchAsync(
-                    requestUri,
-                    settings.Model,
-                    pr,
-                    brief.HeadSha,
-                    patch.Patch,
-                    ex.ContextLength,
+                await AppendTranscriptAsync(
                     transcriptPath,
-                    reviewPass: 2,
+                    $"""
+
+                    === PROVIDER CONNECTION RESET ===
+                    Foundry closed the transport connection. Re-preparing the
+                    runtime and retrying the complete patch once.
+                    {ex.InnerException ?? ex}
+
+                    """,
+                    CancellationToken.None);
+                runtimeInfo = await _foundryRuntime.PrepareAsync(
+                    settings.Endpoint,
+                    settings.Model,
+                    settings.TimeoutSeconds,
                     timeout.Token);
+                endpoint = await _endpointResolver.ResolveAsync(
+                    settings.Endpoint,
+                    timeout.Token);
+                requestUri = BuildChatCompletionsUri(endpoint);
+                contextLength = runtimeInfo.ContextLength ?? DefaultContextLength;
+                review = await ReviewWithContextFallbackAsync(
+                    requestUri,
+                    contextLength);
                 review = review with
                 {
                     Warnings =
                     [
-                        $"Foundry catalog reported {contextLength:N0} tokens, but the " +
-                        $"loaded runtime enforced {ex.ContextLength:N0}. Rechunked and retried.",
+                        "Foundry closed the connection during the first attempt. " +
+                        "PR Inbox re-prepared the runtime and retried the complete patch once.",
                         .. review.Warnings,
                     ],
                 };
@@ -855,6 +905,10 @@ public sealed class LocalReviewRunner : ILocalReviewRunner
                 transcriptPath,
                 $"\n--- REQUEST ERROR ---\n{ex}\n",
                 CancellationToken.None);
+            if (IsConnectionReset(ex))
+            {
+                throw new LocalTransportResetException(ex);
+            }
             throw;
         }
         using (response)
@@ -963,6 +1017,27 @@ public sealed class LocalReviewRunner : ILocalReviewRunner
             return true;
         }
         contextLength = 0;
+        return false;
+    }
+
+    internal static bool IsConnectionReset(Exception ex)
+    {
+        for (Exception? current = ex; current is not null; current = current.InnerException)
+        {
+            if (current is System.Net.Sockets.SocketException socket
+                && socket.SocketErrorCode
+                    is System.Net.Sockets.SocketError.ConnectionReset
+                        or System.Net.Sockets.SocketError.ConnectionAborted)
+            {
+                return true;
+            }
+            if (current.Message.Contains(
+                    "forcibly closed by the remote host",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
         return false;
     }
 
@@ -1128,6 +1203,14 @@ internal sealed class LocalContextLengthExceededException : Exception
     }
 
     public int ContextLength { get; }
+}
+
+internal sealed class LocalTransportResetException : Exception
+{
+    public LocalTransportResetException(Exception innerException)
+        : base("The local model provider reset the connection.", innerException)
+    {
+    }
 }
 
 internal static class LocalReviewPatchChunker
