@@ -472,9 +472,10 @@ else
                 <input type="checkbox" @bind="_localReviewerEnabled" disabled="@_busy" />
                 <strong>Enable local shadow review</strong>
                 <span class="muted">
-                    Starts Foundry Local and loads the configured model in the background
-                    when you click Review. The model must already be cached; PR Inbox never
-                    downloads models automatically.
+                    Makes the Review-page <strong>Run local</strong> action available.
+                    Normal cloud reviews do not start local inference automatically.
+                    When requested, PR Inbox starts Foundry Local and loads the configured
+                    cached model; it never downloads models automatically.
                     A local failure never blocks or changes the dual-model verdict.
                 </span>
             </label>

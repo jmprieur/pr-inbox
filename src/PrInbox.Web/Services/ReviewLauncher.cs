@@ -102,17 +102,9 @@ public sealed class ReviewLauncher : IReviewLauncher, IAsyncDisposable
         }
 
         StartWatcher(brief.PrUrl, brief.RunDirectory, brief.RunId, brief.HeadSha);
-        LocalReviewEnqueueResult? localQueueResult = null;
-        if (_config.LocalReviewer.Enabled)
-        {
-            localQueueResult = await _localQueue.EnqueueAsync(brief, ct);
-        }
         SpawnConsole(brief.RunDirectory, tabTitle, brief.RunId);
 
-        var message = $"Review run #{brief.RunId} opened in a new window. Findings will land in {brief.RunDirectory}\\findings.yaml.";
-        return localQueueResult is null
-            ? message
-            : $"{message} {localQueueResult.Message}";
+        return $"Review run #{brief.RunId} opened in a new window. Findings will land in {brief.RunDirectory}\\findings.yaml.";
     }
 
     public async Task<string> RerunLocalAsync(string prUrl, CancellationToken ct)

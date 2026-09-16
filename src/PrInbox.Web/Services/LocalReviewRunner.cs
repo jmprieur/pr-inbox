@@ -1035,10 +1035,15 @@ public sealed class LocalReviewRunner : ILocalReviewRunner
             timeout.CancelAfter(TimeSpan.FromSeconds(settings.TimeoutSeconds));
 
             var reviewPass = 0;
+            var chunkCache = new Dictionary<string, LocalReviewParseResult>(
+                StringComparer.Ordinal);
+            int? effectiveContextOverride = null;
             async Task<AggregatedLocalReview> ReviewWithContextFallbackAsync(
                 Uri uri,
                 int advertisedContextLength)
             {
+                var selectedContextLength =
+                    effectiveContextOverride ?? advertisedContextLength;
                 try
                 {
                     return await ReviewPatchAsync(
@@ -1047,15 +1052,17 @@ public sealed class LocalReviewRunner : ILocalReviewRunner
                         pr,
                         brief.HeadSha,
                         patch.Patch,
-                        advertisedContextLength,
+                        selectedContextLength,
                         transcriptPath,
                         reviewPass: ++reviewPass,
+                        chunkCache,
                         timeout.Token);
                 }
                 catch (LocalContextLengthExceededException ex)
                     when (ex.ContextLength > 0
-                          && ex.ContextLength < advertisedContextLength)
+                          && ex.ContextLength < selectedContextLength)
                 {
+                    effectiveContextOverride = ex.ContextLength;
                     var fallbackReview = await ReviewPatchAsync(
                         uri,
                         settings.Model,
@@ -1065,12 +1072,13 @@ public sealed class LocalReviewRunner : ILocalReviewRunner
                         ex.ContextLength,
                         transcriptPath,
                         reviewPass: ++reviewPass,
+                        chunkCache,
                         timeout.Token);
                     return fallbackReview with
                     {
                         Warnings =
                         [
-                            $"Foundry catalog reported {advertisedContextLength:N0} tokens, but the " +
+                            $"Foundry catalog reported {selectedContextLength:N0} tokens, but the " +
                             $"loaded runtime enforced {ex.ContextLength:N0}. Rechunked and retried.",
                             .. fallbackReview.Warnings,
                         ],
@@ -1080,46 +1088,56 @@ public sealed class LocalReviewRunner : ILocalReviewRunner
 
             var contextLength = runtimeInfo.ContextLength ?? DefaultContextLength;
             AggregatedLocalReview review;
-            try
+            var providerWarnings = new List<string>();
+            var providerResetCount = 0;
+            while (true)
             {
-                review = await ReviewWithContextFallbackAsync(
-                    requestUri,
-                    contextLength);
+                try
+                {
+                    review = await ReviewWithContextFallbackAsync(
+                        requestUri,
+                        contextLength);
+                    break;
+                }
+                catch (LocalTransportResetException ex)
+                    when (providerResetCount < MaxProviderResetRetries)
+                {
+                    providerResetCount++;
+                    await AppendTranscriptAsync(
+                        transcriptPath,
+                        $"""
+
+                        === PROVIDER CONNECTION RESET {providerResetCount}/{MaxProviderResetRetries} ===
+                        Foundry closed the transport connection. Re-preparing the
+                        runtime and resuming from completed chunk checkpoints.
+                        {ex.InnerException ?? ex}
+
+                        """,
+                        CancellationToken.None);
+                    providerWarnings.Add(
+                        $"Foundry closed the connection during local review. " +
+                        $"Recovery {providerResetCount}/{MaxProviderResetRetries} " +
+                        "resumed from completed chunk checkpoints.");
+                    runtimeInfo = await _foundryRuntime.PrepareAsync(
+                        settings.Endpoint,
+                        settings.Model,
+                        settings.TimeoutSeconds,
+                        timeout.Token);
+                    endpoint = await _endpointResolver.ResolveAsync(
+                        settings.Endpoint,
+                        timeout.Token);
+                    requestUri = BuildChatCompletionsUri(endpoint);
+                    contextLength =
+                        effectiveContextOverride
+                        ?? runtimeInfo.ContextLength
+                        ?? DefaultContextLength;
+                }
             }
-            catch (LocalTransportResetException ex)
+            if (providerWarnings.Count > 0)
             {
-                await AppendTranscriptAsync(
-                    transcriptPath,
-                    $"""
-
-                    === PROVIDER CONNECTION RESET ===
-                    Foundry closed the transport connection. Re-preparing the
-                    runtime and retrying the complete patch once.
-                    {ex.InnerException ?? ex}
-
-                    """,
-                    CancellationToken.None);
-                runtimeInfo = await _foundryRuntime.PrepareAsync(
-                    settings.Endpoint,
-                    settings.Model,
-                    settings.TimeoutSeconds,
-                    timeout.Token);
-                endpoint = await _endpointResolver.ResolveAsync(
-                    settings.Endpoint,
-                    timeout.Token);
-                requestUri = BuildChatCompletionsUri(endpoint);
-                contextLength = runtimeInfo.ContextLength ?? DefaultContextLength;
-                review = await ReviewWithContextFallbackAsync(
-                    requestUri,
-                    contextLength);
                 review = review with
                 {
-                    Warnings =
-                    [
-                        "Foundry closed the connection during the first attempt. " +
-                        "PR Inbox re-prepared the runtime and retried the complete patch once.",
-                        .. review.Warnings,
-                    ],
+                    Warnings = [.. providerWarnings, .. review.Warnings],
                 };
             }
 
@@ -1207,6 +1225,7 @@ public sealed class LocalReviewRunner : ILocalReviewRunner
         int contextLength,
         string transcriptPath,
         int reviewPass,
+        IDictionary<string, LocalReviewParseResult> chunkCache,
         CancellationToken ct)
     {
         var chunkCharacterBudget = CalculateChunkCharacterBudget(contextLength);
@@ -1223,18 +1242,37 @@ public sealed class LocalReviewRunner : ILocalReviewRunner
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         for (var index = 0; index < chunks.Count; index++)
         {
-            var parsed = await ReviewChunkAsync(
-                requestUri,
-                model,
-                pr,
-                headSha,
-                chunks[index],
-                index + 1,
-                chunks.Count,
-                contextLength,
-                transcriptPath,
-                reviewPass,
-                ct);
+            LocalReviewParseResult parsed;
+            if (chunkCache.TryGetValue(chunks[index], out var cached))
+            {
+                parsed = cached;
+                await AppendTranscriptAsync(
+                    transcriptPath,
+                    $"""
+
+                    === REUSED COMPLETED CHUNK pass {reviewPass}, chunk {index + 1}/{chunks.Count} ===
+                    No provider request was made; the successful result from an
+                    earlier pass was reused after provider recovery.
+
+                    """,
+                    ct);
+            }
+            else
+            {
+                parsed = await ReviewChunkAsync(
+                    requestUri,
+                    model,
+                    pr,
+                    headSha,
+                    chunks[index],
+                    index + 1,
+                    chunks.Count,
+                    contextLength,
+                    transcriptPath,
+                    reviewPass,
+                    ct);
+                chunkCache[chunks[index]] = parsed;
+            }
 
             warnings.AddRange(parsed.Warnings.Select(
                 warning => chunks.Count == 1
@@ -1607,6 +1645,7 @@ public sealed class LocalReviewRunner : ILocalReviewRunner
     private const int MinimumChunkCharacters = 8_000;
     private const int MaximumChunkCharacters = 120_000;
     private const int MaxAggregatedFindings = 50;
+    private const int MaxProviderResetRetries = 3;
     private static readonly Regex ContextLengthErrorPattern = new(
         @"maximum context length (?:of|is) (?<length>[\d,]+) tokens",
         RegexOptions.Compiled | RegexOptions.IgnoreCase);

@@ -614,6 +614,9 @@ dual-model review and appears in a separate, read-only panel on the Review
 page. It is deliberately diff-only and does not affect convergence, selection,
 or publishing.
 
+It is on-demand: enabling the feature adds **Run local** to Review pages but
+does not start local inference when the normal Review button is clicked.
+
 Use **Rerun local** in the Review-page toolbar to repeat only the local pass
 after changing its model, timeout, or patch cap. It reuses the current run and
 refuses if the PR HEAD has moved; in that case, launch a new full review.
@@ -624,8 +627,9 @@ chunk and the raw endpoint responses. The transcript is
 directory. It contains private diff content; do not attach or publish it.
 
 When Foundry closes the transport connection mid-request, PR Inbox re-prepares
-the runtime and retries the complete local pass once. The transcript records
-the reset and both attempts.
+the runtime and resumes from successful in-memory chunk checkpoints. It allows
+up to three daemon recoveries per review. The transcript records each reset,
+reused chunk, and provider request.
 
 Local reviews are processed one at a time. When another PR is using Foundry,
 the local panel shows **Queued** and its live queue position. This does not

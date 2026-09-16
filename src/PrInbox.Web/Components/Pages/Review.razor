@@ -72,8 +72,10 @@
                 class="link-like"
                 disabled="@_localRerunBusy"
                 @onclick="OnRerunLocalAsync"
-                title="Re-run only the local shadow reviewer for this review run.">
-            @(_localRerunBusy ? "Starting local…" : "Rerun local")
+                title="Run only the local shadow reviewer for this review run.">
+            @(_localRerunBusy
+                ? "Starting local…"
+                : _run.LocalReview is null ? "Run local" : "Rerun local")
         </button>
         @if (File.Exists(Path.Combine(
             _run.RunDirectory,

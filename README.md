@@ -275,7 +275,9 @@ when launching from the web UI):
 ## Optional local shadow reviewer
 
 The Web UI can run an independent local model beside the authoritative
-dual-model review. Enable it under **Settings → Local shadow reviewer**.
+dual-model review. Enable it under **Settings → Local shadow reviewer**, then
+use **Run local** on an individual Review page. Normal review launches do not
+start local inference automatically while this path remains experimental.
 The local result is written to `local-review.json` in the immutable run
 directory and displayed separately on the Review page. It is informational:
 local candidates are never selected or published. This first version is
@@ -291,9 +293,11 @@ provider response, including failed attempts and context-limit retries. The
 transcript includes private PR code and must not be published.
 
 If the local provider forcibly resets the TCP connection, PR Inbox assumes the
-daemon may have crashed, re-prepares Foundry, resolves its potentially new
-loopback endpoint, and retries the complete patch once. Partial findings from
-the interrupted pass are discarded; both attempts remain in the transcript.
+daemon may have crashed, re-prepares Foundry, and resolves its potentially new
+loopback endpoint. Successful chunk results are checkpointed in memory, so
+recovery resumes at the failed chunk instead of replaying the whole PR. Up to
+three daemon recoveries are allowed per review; every attempt and reused chunk
+is recorded in the transcript.
 
 Local model work is serialized through a single queue because Foundry Local is
 optimized for one interactive inference stream, not concurrent server loads.

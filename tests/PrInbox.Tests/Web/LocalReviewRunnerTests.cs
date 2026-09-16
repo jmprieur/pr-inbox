@@ -576,7 +576,7 @@ public sealed class LocalReviewRunnerTests
     }
 
     [Fact]
-    public async Task Runner_RetriesCompletePassOnceAfterConnectionReset()
+    public async Task Runner_RecoversAfterConnectionReset()
     {
         var reset = new HttpRequestException(
             "An error occurred while sending the request.",
@@ -606,7 +606,7 @@ public sealed class LocalReviewRunnerTests
             .Which.Title.Should().Be("Recovered bug");
         run.LocalReview.Warnings.Should().ContainSingle(
             warning => warning.Contains("closed the connection")
-                       && warning.Contains("retried"));
+                       && warning.Contains("checkpoints"));
         var transcript = File.ReadAllText(Path.Combine(
             fixture.Brief.RunDirectory,
             LocalReviewArtifact.TranscriptFileName));
@@ -614,6 +614,49 @@ public sealed class LocalReviewRunnerTests
         transcript.Should().Contain("PROVIDER CONNECTION RESET");
         transcript.Should().Contain("REQUEST pass 2, chunk 1/1");
         transcript.Should().Contain("HTTP 200 OK");
+    }
+
+    [Fact]
+    public async Task Runner_ResumesAtFailedChunkAfterConnectionReset()
+    {
+        var reset = new HttpRequestException(
+            "An error occurred while sending the request.",
+            new IOException(
+                "Unable to read data from the transport connection.",
+                new System.Net.Sockets.SocketException(
+                    (int)System.Net.Sockets.SocketError.ConnectionReset)));
+        var patch = BuildFileDiff("src/first.cs", 15_000)
+            + BuildFileDiff("src/second.cs", 15_000);
+        await using var fixture = await RunnerFixture.CreateAsync(
+            [
+                new StubResponse(
+                    HttpStatusCode.OK,
+                    ChatResponse("First bug", "src/first.cs", 1)),
+                new StubResponse(
+                    HttpStatusCode.ServiceUnavailable,
+                    string.Empty,
+                    reset),
+                new StubResponse(
+                    HttpStatusCode.OK,
+                    ChatResponse("Second bug", "src/second.cs", 1)),
+            ],
+            patch,
+            contextLength: 24_576);
+
+        await fixture.Runner.RunAsync(fixture.Brief, CancellationToken.None);
+
+        fixture.Handler.RequestBodies.Should().HaveCount(3);
+        var run = fixture.Store.Get(fixture.Brief.PrUrl)!;
+        run.LocalReview!.Status.Should().Be(LocalReviewStatus.Completed);
+        run.LocalReview.Findings.Select(finding => finding.Title)
+            .Should().Equal("First bug", "Second bug");
+        var transcript = File.ReadAllText(Path.Combine(
+            fixture.Brief.RunDirectory,
+            LocalReviewArtifact.TranscriptFileName));
+        transcript.Should().Contain("REQUEST pass 1, chunk 1/2");
+        transcript.Should().Contain("REQUEST pass 1, chunk 2/2");
+        transcript.Should().Contain("REUSED COMPLETED CHUNK pass 2, chunk 1/2");
+        transcript.Should().Contain("REQUEST pass 2, chunk 2/2");
     }
 
     [Fact]
