@@ -771,6 +771,7 @@ public sealed class LocalReviewRunnerTests
                 new StubPatchProvider(patch),
                 new StubFoundryRuntime(contextLength),
                 new StubEndpointResolver(),
+                new StubFindingVerifier(),
                 new StubHttpClientFactory(handler),
                 new LocalReviewArtifactStore(store),
                 NullLogger<LocalReviewRunner>.Instance);
@@ -808,6 +809,17 @@ public sealed class LocalReviewRunnerTests
             int maxCharacters,
             CancellationToken ct) =>
             Task.FromResult(ReviewPatchResult.Success(_patch));
+
+        public Task<PostChangeFileResult> GetPostChangeFileAsync(
+            PullRequestRow pr,
+            string path,
+            string headSha,
+            int maxCharacters,
+            CancellationToken ct) =>
+            Task.FromResult(new PostChangeFileResult(
+                "return input.Trim();",
+                false,
+                null));
     }
 
     private sealed class StubEndpointResolver : ILocalModelEndpointResolver
@@ -833,6 +845,24 @@ public sealed class LocalReviewRunnerTests
             int timeoutSeconds,
             CancellationToken ct) =>
             Task.FromResult(new LocalModelRuntimeInfo(_contextLength));
+    }
+
+    private sealed class StubFindingVerifier : ILocalFindingVerifier
+    {
+        public Task<LocalReviewParseResult> VerifyAsync(
+            Uri requestUri,
+            string model,
+            PullRequestRow pr,
+            string headSha,
+            string patch,
+            IReadOnlyList<Finding> candidates,
+            int contextLength,
+            string transcriptPath,
+            int reviewPass,
+            CancellationToken ct) =>
+            Task.FromResult(new LocalReviewParseResult(
+                candidates,
+                Array.Empty<string>()));
     }
 
     private sealed class StubFoundryCliRunner : IFoundryCliRunner

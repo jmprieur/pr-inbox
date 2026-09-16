@@ -667,6 +667,13 @@ requires the issue to survive in the post-change code, and PR Inbox rejects
 candidates anchored to deleted, unchanged, or old-side line numbers. Rejected
 candidates appear as warnings in `local-review.json`, not publishable findings.
 
+PR Inbox then verifies each remaining candidate against the complete
+post-change file fetched at the reviewed HEAD. The fetch uses PR Inbox's
+existing delegated GitHub/GHE credential; the model receives source text only.
+It must quote exact evidence from an added line. Fetch failures, oversized
+files, malformed verification responses, and unsupported Azure DevOps files
+all fail closed by dropping the candidate with a warning.
+
 Before downloading a large local model, move Foundry Local's global cache off
 a constrained system drive if necessary:
 

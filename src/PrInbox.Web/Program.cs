@@ -29,6 +29,7 @@ builder.Services.AddSingleton<IFoundryCliRunner, FoundryCliRunner>();
 builder.Services.AddSingleton<IFoundryLocalRuntime, FoundryLocalRuntime>();
 builder.Services.AddSingleton<ILocalModelEndpointResolver, FoundryLocalEndpointResolver>();
 builder.Services.AddSingleton<LocalReviewArtifactStore>();
+builder.Services.AddSingleton<ILocalFindingVerifier, LocalFindingVerifier>();
 builder.Services.AddSingleton<ILocalReviewRunner, LocalReviewRunner>();
 builder.Services.AddSingleton<LocalReviewQueue>();
 builder.Services.AddSingleton<ILocalReviewQueue>(

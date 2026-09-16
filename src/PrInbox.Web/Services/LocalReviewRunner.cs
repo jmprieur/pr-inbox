@@ -77,6 +77,13 @@ public interface IReviewPatchProvider
         PullRequestRow pr,
         int maxCharacters,
         CancellationToken ct);
+
+    Task<PostChangeFileResult> GetPostChangeFileAsync(
+        PullRequestRow pr,
+        string path,
+        string headSha,
+        int maxCharacters,
+        CancellationToken ct);
 }
 
 public sealed record ReviewPatchResult(string? Patch, string? SkipReason)
@@ -84,6 +91,11 @@ public sealed record ReviewPatchResult(string? Patch, string? SkipReason)
     public static ReviewPatchResult Success(string patch) => new(patch, null);
     public static ReviewPatchResult Skipped(string reason) => new(null, reason);
 }
+
+public sealed record PostChangeFileResult(
+    string? Content,
+    bool ExceededLimit,
+    string? Error);
 
 internal sealed class GitHubReviewPatchProvider : IReviewPatchProvider
 {
@@ -159,6 +171,86 @@ internal sealed class GitHubReviewPatchProvider : IReviewPatchProvider
             return ReviewPatchResult.Skipped("The platform returned an empty patch.");
         }
         return ReviewPatchResult.Success(result.Text);
+    }
+
+    public async Task<PostChangeFileResult> GetPostChangeFileAsync(
+        PullRequestRow pr,
+        string path,
+        string headSha,
+        int maxCharacters,
+        CancellationToken ct)
+    {
+        var parsed = PrUrl.Parse(pr.Url);
+        if (parsed.Platform == PrPlatform.AzureDevOps)
+        {
+            return new PostChangeFileResult(
+                null,
+                false,
+                "Azure DevOps post-change file acquisition is not supported.");
+        }
+
+        var source = _config.Sources.FirstOrDefault(s =>
+            string.Equals(s.Id, pr.SourceId, StringComparison.OrdinalIgnoreCase));
+        if (source is null)
+        {
+            return new PostChangeFileResult(
+                null,
+                false,
+                $"Source '{pr.SourceId}' is not present in the current configuration.");
+        }
+
+        var tokenProvider = new GhCliTokenProvider(
+            source.Id,
+            source.Host ?? parsed.Host,
+            source.Identity);
+        var token = await tokenProvider.GetTokenAsync(ct);
+        var apiBase = parsed.Platform == PrPlatform.GitHub
+            ? "https://api.github.com"
+            : $"https://{parsed.Host}/api/v3";
+        var encodedPath = string.Join(
+            "/",
+            path.Replace('\\', '/')
+                .Split('/', StringSplitOptions.RemoveEmptyEntries)
+                .Select(Uri.EscapeDataString));
+        var requestUri =
+            $"{apiBase}/repos/{Uri.EscapeDataString(parsed.Owner)}/" +
+            $"{Uri.EscapeDataString(parsed.Repo)}/contents/{encodedPath}" +
+            $"?ref={Uri.EscapeDataString(headSha)}";
+
+        using var request = new HttpRequestMessage(HttpMethod.Get, requestUri);
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        request.Headers.Accept.Add(
+            new MediaTypeWithQualityHeaderValue("application/vnd.github.raw+json"));
+        request.Headers.UserAgent.ParseAdd("pr-inbox-local-review/1.0");
+
+        var client = _httpFactory.CreateClient("review-patch");
+        using var response = await client.SendAsync(
+            request,
+            HttpCompletionOption.ResponseHeadersRead,
+            ct);
+        if (!response.IsSuccessStatusCode)
+        {
+            var detail = await ReadAtMostAsync(
+                await response.Content.ReadAsStreamAsync(ct),
+                4_096,
+                ct);
+            return new PostChangeFileResult(
+                null,
+                false,
+                $"GitHub file request failed ({(int)response.StatusCode} " +
+                $"{response.ReasonPhrase}): {detail.Text}");
+        }
+
+        var result = await ReadAtMostAsync(
+            await response.Content.ReadAsStreamAsync(ct),
+            maxCharacters,
+            ct);
+        return new PostChangeFileResult(
+            result.Text,
+            result.ExceededLimit,
+            result.ExceededLimit
+                ? $"Post-change file exceeds {maxCharacters:N0} characters."
+                : null);
     }
 
     private static async Task<(string Text, bool ExceededLimit)> ReadAtMostAsync(
@@ -504,6 +596,352 @@ internal sealed class FoundryLocalEndpointResolver : ILocalModelEndpointResolver
     }
 }
 
+public interface ILocalFindingVerifier
+{
+    Task<LocalReviewParseResult> VerifyAsync(
+        Uri requestUri,
+        string model,
+        PullRequestRow pr,
+        string headSha,
+        string patch,
+        IReadOnlyList<Finding> candidates,
+        int contextLength,
+        string transcriptPath,
+        int reviewPass,
+        CancellationToken ct);
+}
+
+public sealed class LocalFindingVerifier : ILocalFindingVerifier
+{
+    private const int MaxFileCharacters = 1_000_000;
+    private const int VerificationOutputTokens = 512;
+
+    private readonly IReviewPatchProvider _files;
+    private readonly IHttpClientFactory _httpFactory;
+
+    public LocalFindingVerifier(
+        IReviewPatchProvider files,
+        IHttpClientFactory httpFactory)
+    {
+        _files = files;
+        _httpFactory = httpFactory;
+    }
+
+    public async Task<LocalReviewParseResult> VerifyAsync(
+        Uri requestUri,
+        string model,
+        PullRequestRow pr,
+        string headSha,
+        string patch,
+        IReadOnlyList<Finding> candidates,
+        int contextLength,
+        string transcriptPath,
+        int reviewPass,
+        CancellationToken ct)
+    {
+        var verified = new List<Finding>();
+        var warnings = new List<string>();
+        var files = new Dictionary<string, PostChangeFileResult>(
+            StringComparer.OrdinalIgnoreCase);
+        var addedLines = LocalReviewDiffIndex.BuildAddedLineMap(patch);
+
+        for (var index = 0; index < candidates.Count; index++)
+        {
+            var candidate = candidates[index];
+            if (!files.TryGetValue(candidate.File, out var file))
+            {
+                file = await _files.GetPostChangeFileAsync(
+                    pr,
+                    candidate.File,
+                    headSha,
+                    MaxFileCharacters,
+                    ct);
+                files[candidate.File] = file;
+            }
+
+            if (file.Content is null || file.ExceededLimit)
+            {
+                warnings.Add(
+                    $"Dropped local finding '{candidate.Title}': could not load " +
+                    $"the complete post-change file ({file.Error ?? "unknown error"}).");
+                continue;
+            }
+
+            var sourceBudget = Math.Max(
+                4_000,
+                LocalReviewRunner.CalculateChunkCharacterBudget(contextLength) - 4_000);
+            var source = BuildNumberedSourceWindow(
+                file.Content,
+                candidate.Line ?? 1,
+                sourceBudget);
+            var userPrompt = BuildVerificationPrompt(candidate, source);
+
+            await File.AppendAllTextAsync(
+                transcriptPath,
+                $"""
+
+                === VERIFICATION pass {reviewPass}, candidate {index + 1}/{candidates.Count} ===
+                endpoint: {requestUri}
+                model: {model}
+                context_length: {contextLength}
+                max_tokens: {VerificationOutputTokens}
+                temperature: 0
+
+                --- SYSTEM PROMPT ---
+                {VerificationSystemPrompt}
+
+                --- USER PROMPT ---
+                {userPrompt}
+
+                """,
+                ct);
+
+            using var request = new HttpRequestMessage(HttpMethod.Post, requestUri)
+            {
+                Content = JsonContent.Create(new
+                {
+                    model,
+                    temperature = 0,
+                    max_tokens = VerificationOutputTokens,
+                    messages = new object[]
+                    {
+                        new { role = "system", content = VerificationSystemPrompt },
+                        new { role = "user", content = userPrompt },
+                    },
+                }),
+            };
+
+            HttpResponseMessage response;
+            string responseText;
+            try
+            {
+                response = await _httpFactory.CreateClient("local-review")
+                    .SendAsync(request, ct);
+                responseText = await response.Content.ReadAsStringAsync(ct);
+            }
+            catch (Exception ex)
+            {
+                await File.AppendAllTextAsync(
+                    transcriptPath,
+                    $"\n--- VERIFICATION REQUEST ERROR ---\n{ex}\n",
+                    CancellationToken.None);
+                if (LocalReviewRunner.IsConnectionReset(ex))
+                {
+                    throw new LocalTransportResetException(ex);
+                }
+                throw;
+            }
+
+            using (response)
+            {
+                await File.AppendAllTextAsync(
+                    transcriptPath,
+                    $"""
+
+                    --- RAW VERIFICATION RESPONSE ---
+                    HTTP {(int)response.StatusCode} {response.ReasonPhrase}
+                    {responseText}
+
+                    """,
+                    ct);
+                if (!response.IsSuccessStatusCode)
+                {
+                    if ((int)response.StatusCode == 400
+                        && LocalReviewRunner.TryParseEffectiveContextLength(
+                            responseText,
+                            out var effectiveContext))
+                    {
+                        throw new LocalContextLengthExceededException(
+                            effectiveContext,
+                            responseText);
+                    }
+                    warnings.Add(
+                        $"Dropped local finding '{candidate.Title}': verification " +
+                        $"request failed ({(int)response.StatusCode} {response.ReasonPhrase}).");
+                    continue;
+                }
+            }
+
+            LocalFindingVerification decision;
+            try
+            {
+                decision = ParseVerification(
+                    LocalReviewRunner.ExtractChatContent(responseText));
+            }
+            catch (Exception ex)
+            {
+                warnings.Add(
+                    $"Dropped local finding '{candidate.Title}': malformed " +
+                    $"verification response ({ex.Message}).");
+                continue;
+            }
+
+            if (!decision.Keep)
+            {
+                warnings.Add(
+                    $"Verifier dropped local finding '{candidate.Title}': " +
+                    decision.Reason);
+                continue;
+            }
+
+            var path = candidate.File.Replace('\\', '/');
+            if (decision.EvidenceLine is not { } evidenceLine
+                || !addedLines.TryGetValue(path, out var fileAddedLines)
+                || !fileAddedLines.Contains(evidenceLine)
+                || !EvidenceMatches(file.Content, evidenceLine, decision.Evidence))
+            {
+                warnings.Add(
+                    $"Dropped local finding '{candidate.Title}': verifier did " +
+                    "not provide exact evidence from an added post-change line.");
+                continue;
+            }
+
+            verified.Add(candidate with
+            {
+                Line = evidenceLine,
+                DiffAnchorable = true,
+            });
+        }
+
+        return new LocalReviewParseResult(verified, warnings);
+    }
+
+    internal static LocalFindingVerification ParseVerification(string text)
+    {
+        var json = LocalReviewResponseParser.ExtractJsonObject(text);
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+        if (!root.TryGetProperty("keep", out var keep)
+            || keep.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
+        {
+            throw new FormatException("'keep' boolean is required.");
+        }
+        var reason = root.TryGetProperty("reason", out var reasonElement)
+            && reasonElement.ValueKind == JsonValueKind.String
+            ? reasonElement.GetString() ?? string.Empty
+            : string.Empty;
+        int? line = root.TryGetProperty("evidence_line", out var lineElement)
+                    && lineElement.ValueKind == JsonValueKind.Number
+                    && lineElement.TryGetInt32(out var value)
+            ? value
+            : null;
+        var evidence = root.TryGetProperty("evidence", out var evidenceElement)
+                       && evidenceElement.ValueKind == JsonValueKind.String
+            ? evidenceElement.GetString()
+            : null;
+        return new LocalFindingVerification(
+            keep.GetBoolean(),
+            reason,
+            line,
+            evidence);
+    }
+
+    internal static string BuildNumberedSourceWindow(
+        string content,
+        int centerLine,
+        int maxCharacters)
+    {
+        var lines = content.Replace("\r\n", "\n").Split('\n');
+        var center = Math.Clamp(centerLine - 1, 0, Math.Max(0, lines.Length - 1));
+        var start = center;
+        var end = center;
+        var length = lines[center].Length + 16;
+        while (length < maxCharacters && (start > 0 || end < lines.Length - 1))
+        {
+            if (start > 0)
+            {
+                var next = lines[start - 1].Length + 16;
+                if (length + next > maxCharacters) break;
+                start--;
+                length += next;
+            }
+            if (end < lines.Length - 1)
+            {
+                var next = lines[end + 1].Length + 16;
+                if (length + next > maxCharacters) break;
+                end++;
+                length += next;
+            }
+        }
+
+        var builder = new StringBuilder();
+        if (start > 0) builder.AppendLine($"... lines 1-{start} omitted ...");
+        for (var index = start; index <= end; index++)
+        {
+            builder.Append(index + 1).Append(": ").AppendLine(lines[index]);
+        }
+        if (end < lines.Length - 1)
+        {
+            builder.AppendLine(
+                $"... lines {end + 2}-{lines.Length} omitted ...");
+        }
+        return builder.ToString();
+    }
+
+    private static string BuildVerificationPrompt(
+        Finding candidate,
+        string source) => $"""
+        Verify this candidate finding against the exact post-change file at the
+        reviewed HEAD. Do not search for new issues.
+
+        CANDIDATE
+        =========
+        file: {candidate.File}
+        line: {candidate.Line}
+        severity: {candidate.Severity}
+        title: {candidate.Title}
+        body: {candidate.Body}
+
+        POST-CHANGE SOURCE (numbered)
+        =============================
+        {source}
+
+        Return keep=false when the candidate describes the old behavior that
+        this patch fixes, when a guard/test/error path already handles it, or
+        when the supplied source is insufficient to prove it.
+
+        If keep=true, evidence_line must be an added line from the original
+        patch and evidence must be the exact trimmed text at that line.
+        """;
+
+    private static bool EvidenceMatches(
+        string content,
+        int line,
+        string? evidence)
+    {
+        if (string.IsNullOrWhiteSpace(evidence)) return false;
+        var lines = content.Replace("\r\n", "\n").Split('\n');
+        return line >= 1
+               && line <= lines.Length
+               && string.Equals(
+                   lines[line - 1].Trim(),
+                   evidence.Trim(),
+                   StringComparison.Ordinal);
+    }
+
+    private const string VerificationSystemPrompt = """
+        You verify one candidate code-review finding against exact post-change
+        source. Return exactly one JSON object and no markdown:
+
+        {
+          "keep": true,
+          "reason": "short evidence-based judgment",
+          "evidence_line": 123,
+          "evidence": "exact trimmed source text at that line"
+        }
+
+        Use keep=false unless the bug demonstrably remains in the shown
+        post-change source. Comments and tests describing the old defect are
+        not evidence that it remains.
+        """;
+}
+
+internal sealed record LocalFindingVerification(
+    bool Keep,
+    string Reason,
+    int? EvidenceLine,
+    string? Evidence);
+
 public sealed class LocalReviewRunner : ILocalReviewRunner
 {
     private readonly PrInboxConfig _config;
@@ -511,6 +949,7 @@ public sealed class LocalReviewRunner : ILocalReviewRunner
     private readonly IReviewPatchProvider _patchProvider;
     private readonly IFoundryLocalRuntime _foundryRuntime;
     private readonly ILocalModelEndpointResolver _endpointResolver;
+    private readonly ILocalFindingVerifier _verifier;
     private readonly IHttpClientFactory _httpFactory;
     private readonly LocalReviewArtifactStore _artifacts;
     private readonly ILogger<LocalReviewRunner> _log;
@@ -521,6 +960,7 @@ public sealed class LocalReviewRunner : ILocalReviewRunner
         IReviewPatchProvider patchProvider,
         IFoundryLocalRuntime foundryRuntime,
         ILocalModelEndpointResolver endpointResolver,
+        ILocalFindingVerifier verifier,
         IHttpClientFactory httpFactory,
         LocalReviewArtifactStore artifacts,
         ILogger<LocalReviewRunner> log)
@@ -530,6 +970,7 @@ public sealed class LocalReviewRunner : ILocalReviewRunner
         _patchProvider = patchProvider;
         _foundryRuntime = foundryRuntime;
         _endpointResolver = endpointResolver;
+        _verifier = verifier;
         _httpFactory = httpFactory;
         _artifacts = artifacts;
         _log = log;
@@ -826,7 +1267,19 @@ public sealed class LocalReviewRunner : ILocalReviewRunner
                 Id = $"local-{index + 1:00}",
             })
             .ToList();
-        return new AggregatedLocalReview(findings, warnings);
+        var verified = await _verifier.VerifyAsync(
+            requestUri,
+            model,
+            pr,
+            headSha,
+            patch,
+            findings,
+            contextLength,
+            transcriptPath,
+            reviewPass,
+            ct);
+        warnings.AddRange(verified.Warnings);
+        return new AggregatedLocalReview(verified.Findings, warnings);
     }
 
     private async Task<LocalReviewParseResult> ReviewChunkAsync(
@@ -1395,7 +1848,7 @@ internal static class LocalReviewPatchChunker
     }
 }
 
-internal sealed record LocalReviewParseResult(
+public sealed record LocalReviewParseResult(
     IReadOnlyList<Finding> Findings,
     IReadOnlyList<string> Warnings);
 
@@ -1568,7 +2021,7 @@ internal static class LocalReviewResponseParser
         return new LocalReviewParseResult(findings, warnings);
     }
 
-    private static string ExtractJsonObject(string text)
+    internal static string ExtractJsonObject(string text)
     {
         var trimmed = text.Trim();
         if (trimmed.StartsWith("```", StringComparison.Ordinal))

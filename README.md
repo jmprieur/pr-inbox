@@ -350,6 +350,13 @@ mechanically and drops findings that do not anchor to an added new-file line;
 this filters common false positives where a model restates the defect that the
 PR itself is fixing.
 
+Candidates that survive that first filter receive a second verification pass.
+PR Inbox itself fetches the complete post-change file from GitHub/GHE at the
+exact reviewed HEAD using the source's existing delegated `gh` identity. The
+local model receives the source text but no credential, network access, or
+repository tool. It must return an exact quoted source line from an added line;
+unverifiable candidates are dropped. Azure DevOps remains unsupported.
+
 ---
 
 ## Configuration
