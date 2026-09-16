@@ -696,7 +696,7 @@ public sealed class LocalReviewRunnerTests
                 new StubFoundryRuntime(contextLength),
                 new StubEndpointResolver(),
                 new StubHttpClientFactory(handler),
-                store,
+                new LocalReviewArtifactStore(store),
                 NullLogger<LocalReviewRunner>.Instance);
 
             return new RunnerFixture(

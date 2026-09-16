@@ -133,7 +133,18 @@ else
                 <strong>Local shadow review · @local.Model</strong>
                 <span class="muted">diff-only · informational · never published</span>
             </div>
-            @if (local.Status == LocalReviewStatus.Running)
+            @if (local.Status == LocalReviewStatus.Queued)
+            {
+                <p>
+                    Queued
+                    @if (local.QueuePosition is { } position)
+                    {
+                        <text> · position <strong>@position</strong></text>
+                    }
+                    . Local reviews run one at a time to avoid model and memory contention.
+                </p>
+            }
+            else if (local.Status == LocalReviewStatus.Running)
             {
                 <p>Running against the local OpenAI-compatible endpoint…</p>
             }

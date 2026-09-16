@@ -284,6 +284,11 @@ Use **Rerun local** on the Review page to repeat only this pass while tuning
 the model or settings; it reuses the current immutable run and does not reopen
 the cloud review.
 
+Local model work is serialized through a single queue because Foundry Local is
+optimized for one interactive inference stream, not concurrent server loads.
+Each Review page shows `Queued` plus its live position; cloud review windows
+continue to run in parallel.
+
 The review launcher passes each generated run directory to Copilot with
 `--add-dir`. This trusts that specific app-generated directory for the session
 and avoids a new folder-trust prompt for every timestamped run. The separate

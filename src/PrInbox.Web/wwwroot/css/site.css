@@ -355,6 +355,10 @@ button.review:hover { background: rgba(93,164,255,0.12); }
     border-left-color: #5da4ff;
 }
 
+.local-review-queued {
+    border-left-color: #8b7bb8;
+}
+
 .local-review-failed,
 .local-review-skipped {
     border-left-color: #d6a100;

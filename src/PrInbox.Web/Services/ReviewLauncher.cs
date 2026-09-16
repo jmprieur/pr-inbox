@@ -47,22 +47,19 @@ public sealed class ReviewLauncher : IReviewLauncher, IAsyncDisposable
     private readonly ILoggerFactory _logFactory;
     private readonly PrInboxConfig _config;
     private readonly ConsoleWindowRegistry _consoles;
-    private readonly ILocalReviewRunner _localReviewer;
-    private readonly IHostApplicationLifetime _lifetime;
+    private readonly ILocalReviewQueue _localQueue;
     private readonly ConcurrentDictionary<string, FindingsWatcher> _watchers = new(StringComparer.OrdinalIgnoreCase);
-    private readonly ConcurrentDictionary<string, byte> _localReviews = new(StringComparer.OrdinalIgnoreCase);
 
     public ReviewLauncher(ReviewRunStore runs, ILogger<ReviewLauncher> log, ILoggerFactory logFactory,
         PrInboxConfig config, ConsoleWindowRegistry consoles,
-        ILocalReviewRunner localReviewer, IHostApplicationLifetime lifetime)
+        ILocalReviewQueue localQueue)
     {
         _runs = runs;
         _log = log;
         _logFactory = logFactory;
         _config = config;
         _consoles = consoles;
-        _localReviewer = localReviewer;
-        _lifetime = lifetime;
+        _localQueue = localQueue;
     }
 
     public async Task<string> LaunchAsync(string prUrl, CancellationToken ct)
@@ -105,13 +102,17 @@ public sealed class ReviewLauncher : IReviewLauncher, IAsyncDisposable
         }
 
         StartWatcher(brief.PrUrl, brief.RunDirectory, brief.RunId, brief.HeadSha);
+        LocalReviewEnqueueResult? localQueueResult = null;
         if (_config.LocalReviewer.Enabled)
         {
-            TryStartLocalReview(brief);
+            localQueueResult = await _localQueue.EnqueueAsync(brief, ct);
         }
         SpawnConsole(brief.RunDirectory, tabTitle, brief.RunId);
 
-        return $"Review run #{brief.RunId} opened in a new window. Findings will land in {brief.RunDirectory}\\findings.yaml.";
+        var message = $"Review run #{brief.RunId} opened in a new window. Findings will land in {brief.RunDirectory}\\findings.yaml.";
+        return localQueueResult is null
+            ? message
+            : $"{message} {localQueueResult.Message}";
     }
 
     public async Task<string> RerunLocalAsync(string prUrl, CancellationToken ct)
@@ -154,39 +155,8 @@ public sealed class ReviewLauncher : IReviewLauncher, IAsyncDisposable
             metadataPath,
             run.HeadSha,
             run.PrUrl);
-        return TryStartLocalReview(brief)
-            ? $"Local shadow review restarted with {_config.LocalReviewer.Model}."
-            : "The local shadow review is already running.";
-    }
-
-    private bool TryStartLocalReview(BriefResult brief)
-    {
-        if (!_localReviews.TryAdd(brief.RunDirectory, 0))
-        {
-            return false;
-        }
-        _ = RunLocalReviewAsync(brief);
-        return true;
-    }
-
-    private async Task RunLocalReviewAsync(BriefResult brief)
-    {
-        try
-        {
-            await _localReviewer.RunAsync(brief, _lifetime.ApplicationStopping);
-        }
-        catch (OperationCanceledException) when (_lifetime.ApplicationStopping.IsCancellationRequested)
-        {
-            _log.LogDebug("Local shadow review cancelled during shutdown for {PrUrl}.", brief.PrUrl);
-        }
-        catch (Exception ex)
-        {
-            _log.LogError(ex, "Unexpected local shadow review failure for {PrUrl}.", brief.PrUrl);
-        }
-        finally
-        {
-            _localReviews.TryRemove(brief.RunDirectory, out _);
-        }
+        var result = await _localQueue.EnqueueAsync(brief, ct);
+        return result.Message;
     }
 
     /// <summary>
@@ -336,6 +306,19 @@ public sealed class ReviewLauncher : IReviewLauncher, IAsyncDisposable
             foreach (var (prUrl, info) in latestByPr)
             {
                 StartWatcher(prUrl, info.runDir, info.runId, info.head, startedAtUtc: info.created);
+                if (_config.LocalReviewer.Enabled
+                    && _runs.Get(prUrl)?.LocalReview?.Status
+                        is LocalReviewStatus.Queued or LocalReviewStatus.Running)
+                {
+                    var brief = new BriefResult(
+                        info.runId,
+                        info.runDir,
+                        Path.Combine(info.runDir, "brief.md"),
+                        Path.Combine(info.runDir, "metadata.json"),
+                        info.head,
+                        prUrl);
+                    _ = _localQueue.EnqueueAsync(brief, CancellationToken.None);
+                }
             }
             _log.LogInformation("Rehydrated {Count} review run(s) from {Root}", latestByPr.Count, reviewsRoot);
         }

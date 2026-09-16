@@ -618,6 +618,10 @@ Use **Rerun local** in the Review-page toolbar to repeat only the local pass
 after changing its model, timeout, or patch cap. It reuses the current run and
 refuses if the PR HEAD has moved; in that case, launch a new full review.
 
+Local reviews are processed one at a time. When another PR is using Foundry,
+the local panel shows **Queued** and its live queue position. This does not
+serialize or delay the normal cloud review.
+
 Configure it under **Settings → Local shadow reviewer**:
 
 - Enable or disable it independently of the normal review launcher.

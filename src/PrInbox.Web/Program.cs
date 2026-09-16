@@ -28,7 +28,13 @@ builder.Services.AddSingleton<IReviewPatchProvider, GitHubReviewPatchProvider>()
 builder.Services.AddSingleton<IFoundryCliRunner, FoundryCliRunner>();
 builder.Services.AddSingleton<IFoundryLocalRuntime, FoundryLocalRuntime>();
 builder.Services.AddSingleton<ILocalModelEndpointResolver, FoundryLocalEndpointResolver>();
+builder.Services.AddSingleton<LocalReviewArtifactStore>();
 builder.Services.AddSingleton<ILocalReviewRunner, LocalReviewRunner>();
+builder.Services.AddSingleton<LocalReviewQueue>();
+builder.Services.AddSingleton<ILocalReviewQueue>(
+    sp => sp.GetRequiredService<LocalReviewQueue>());
+builder.Services.AddHostedService(
+    sp => sp.GetRequiredService<LocalReviewQueue>());
 builder.Services.AddSingleton<IReviewLauncher, ReviewLauncher>();
 builder.Services.AddSingleton<InboxSyncHostedService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<InboxSyncHostedService>());

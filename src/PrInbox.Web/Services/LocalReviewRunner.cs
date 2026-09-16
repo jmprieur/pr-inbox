@@ -15,6 +15,7 @@ namespace PrInbox.Web.Services;
 
 public enum LocalReviewStatus
 {
+    Queued,
     Running,
     Completed,
     Failed,
@@ -35,6 +36,7 @@ public sealed record LocalReviewArtifact
     public string HeadSha { get; init; } = string.Empty;
     public DateTimeOffset GeneratedAtUtc { get; init; }
     public long? DurationMs { get; init; }
+    public int? QueuePosition { get; init; }
     public string? Error { get; init; }
     public IReadOnlyList<string> Warnings { get; init; } = Array.Empty<string>();
     public IReadOnlyList<Finding> Findings { get; init; } = Array.Empty<Finding>();
@@ -509,7 +511,7 @@ public sealed class LocalReviewRunner : ILocalReviewRunner
     private readonly IFoundryLocalRuntime _foundryRuntime;
     private readonly ILocalModelEndpointResolver _endpointResolver;
     private readonly IHttpClientFactory _httpFactory;
-    private readonly ReviewRunStore _runs;
+    private readonly LocalReviewArtifactStore _artifacts;
     private readonly ILogger<LocalReviewRunner> _log;
 
     public LocalReviewRunner(
@@ -519,7 +521,7 @@ public sealed class LocalReviewRunner : ILocalReviewRunner
         IFoundryLocalRuntime foundryRuntime,
         ILocalModelEndpointResolver endpointResolver,
         IHttpClientFactory httpFactory,
-        ReviewRunStore runs,
+        LocalReviewArtifactStore artifacts,
         ILogger<LocalReviewRunner> log)
     {
         _config = config;
@@ -528,7 +530,7 @@ public sealed class LocalReviewRunner : ILocalReviewRunner
         _foundryRuntime = foundryRuntime;
         _endpointResolver = endpointResolver;
         _httpFactory = httpFactory;
-        _runs = runs;
+        _artifacts = artifacts;
         _log = log;
     }
 
@@ -538,7 +540,7 @@ public sealed class LocalReviewRunner : ILocalReviewRunner
         if (!settings.Enabled) return;
 
         var started = Stopwatch.StartNew();
-        await SaveAndPublishAsync(brief, new LocalReviewArtifact
+        await _artifacts.WriteAsync(brief, new LocalReviewArtifact
         {
             Status = LocalReviewStatus.Running,
             Model = settings.Model,
@@ -555,7 +557,7 @@ public sealed class LocalReviewRunner : ILocalReviewRunner
                 pr, settings.MaxPatchCharacters, ct);
             if (patch.Patch is null)
             {
-                await SaveAndPublishAsync(brief, new LocalReviewArtifact
+                await _artifacts.WriteAsync(brief, new LocalReviewArtifact
                 {
                     Status = LocalReviewStatus.Skipped,
                     Model = settings.Model,
@@ -613,7 +615,7 @@ public sealed class LocalReviewRunner : ILocalReviewRunner
                 };
             }
 
-            await SaveAndPublishAsync(brief, new LocalReviewArtifact
+            await _artifacts.WriteAsync(brief, new LocalReviewArtifact
             {
                 Status = LocalReviewStatus.Completed,
                 Model = settings.Model,
@@ -638,7 +640,7 @@ public sealed class LocalReviewRunner : ILocalReviewRunner
         }
         catch (LocalModelNotCachedException ex)
         {
-            await SaveAndPublishAsync(brief, new LocalReviewArtifact
+            await _artifacts.WriteAsync(brief, new LocalReviewArtifact
             {
                 Status = LocalReviewStatus.Skipped,
                 Model = settings.Model,
@@ -663,7 +665,7 @@ public sealed class LocalReviewRunner : ILocalReviewRunner
         string error,
         CancellationToken ct)
     {
-        await SaveAndPublishAsync(brief, new LocalReviewArtifact
+        await _artifacts.WriteAsync(brief, new LocalReviewArtifact
         {
             Status = LocalReviewStatus.Failed,
             Model = model,
@@ -801,19 +803,6 @@ public sealed class LocalReviewRunner : ILocalReviewRunner
             ExtractChatContent(responseText),
             model);
         return LocalReviewDiffIndex.FilterToAddedLines(parsed, patchChunk);
-    }
-
-    private async Task SaveAndPublishAsync(
-        BriefResult brief,
-        LocalReviewArtifact artifact,
-        CancellationToken ct)
-    {
-        var path = Path.Combine(brief.RunDirectory, LocalReviewArtifact.FileName);
-        var tempPath = path + ".tmp";
-        var json = JsonSerializer.Serialize(artifact, LocalReviewArtifact.JsonOptions);
-        await File.WriteAllTextAsync(tempPath, json, ct);
-        File.Move(tempPath, path, overwrite: true);
-        _runs.UpdateLocalReview(brief.PrUrl, brief.RunDirectory, artifact);
     }
 
     internal static Uri BuildChatCompletionsUri(string endpoint)
