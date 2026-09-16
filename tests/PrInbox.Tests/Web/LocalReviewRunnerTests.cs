@@ -443,6 +443,16 @@ public sealed class LocalReviewRunnerTests
         File.Exists(Path.Combine(
             fixture.Brief.RunDirectory,
             LocalReviewArtifact.FileName)).Should().BeTrue();
+        var transcript = File.ReadAllText(Path.Combine(
+            fixture.Brief.RunDirectory,
+            LocalReviewArtifact.TranscriptFileName));
+        transcript.Should().Contain("LOCAL SHADOW REVIEW TRANSCRIPT");
+        transcript.Should().Contain("--- SYSTEM PROMPT ---");
+        transcript.Should().Contain("--- USER PROMPT ---");
+        transcript.Should().Contain("return input.Trim()");
+        transcript.Should().Contain("--- RAW RESPONSE ---");
+        transcript.Should().Contain("HTTP 200 OK");
+        transcript.Should().Contain("Null dereference");
 
         fixture.Handler.RequestBody.Should().Contain("return input.Trim()");
         fixture.Handler.RequestBody.Should().Contain("removed old code");
@@ -466,6 +476,12 @@ public sealed class LocalReviewRunnerTests
         run.Findings.Should().BeNull();
         run.LocalReview!.Status.Should().Be(LocalReviewStatus.Failed);
         run.LocalReview.Error.Should().Contain("Local model request failed");
+        var transcript = File.ReadAllText(Path.Combine(
+            fixture.Brief.RunDirectory,
+            LocalReviewArtifact.TranscriptFileName));
+        transcript.Should().Contain("HTTP 500 Internal Server Error");
+        transcript.Should().Contain("model failed");
+        transcript.Should().Contain("=== REVIEW FAILED ===");
     }
 
     [Fact]
@@ -538,6 +554,12 @@ public sealed class LocalReviewRunnerTests
         run.LocalReview.Warnings.Should().Contain(
             warning => warning.Contains("2 chunks")
                        && warning.Contains("8,192-token"));
+        var transcript = File.ReadAllText(Path.Combine(
+            fixture.Brief.RunDirectory,
+            LocalReviewArtifact.TranscriptFileName));
+        transcript.Should().Contain("REQUEST pass 1, chunk 1/1");
+        transcript.Should().Contain("HTTP 400 Bad Request");
+        transcript.Should().Contain("REQUEST pass 2, chunk 1/2");
     }
 
     [Fact]

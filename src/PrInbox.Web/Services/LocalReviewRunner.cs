@@ -42,6 +42,7 @@ public sealed record LocalReviewArtifact
     public IReadOnlyList<Finding> Findings { get; init; } = Array.Empty<Finding>();
 
     internal const string FileName = "local-review.json";
+    internal const string TranscriptFileName = "local-review-transcript.txt";
 
     internal static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
@@ -540,6 +541,14 @@ public sealed class LocalReviewRunner : ILocalReviewRunner
         if (!settings.Enabled) return;
 
         var started = Stopwatch.StartNew();
+        var transcriptPath = Path.Combine(
+            brief.RunDirectory,
+            LocalReviewArtifact.TranscriptFileName);
+        await InitializeTranscriptAsync(
+            transcriptPath,
+            brief,
+            settings.Model,
+            ct);
         await _artifacts.WriteAsync(brief, new LocalReviewArtifact
         {
             Status = LocalReviewStatus.Running,
@@ -557,6 +566,10 @@ public sealed class LocalReviewRunner : ILocalReviewRunner
                 pr, settings.MaxPatchCharacters, ct);
             if (patch.Patch is null)
             {
+                await AppendTranscriptAsync(
+                    transcriptPath,
+                    $"\n=== SKIPPED ===\n{patch.SkipReason}\n",
+                    ct);
                 await _artifacts.WriteAsync(brief, new LocalReviewArtifact
                 {
                     Status = LocalReviewStatus.Skipped,
@@ -591,6 +604,8 @@ public sealed class LocalReviewRunner : ILocalReviewRunner
                     brief.HeadSha,
                     patch.Patch,
                     contextLength,
+                    transcriptPath,
+                    reviewPass: 1,
                     timeout.Token);
             }
             catch (LocalContextLengthExceededException ex)
@@ -603,6 +618,8 @@ public sealed class LocalReviewRunner : ILocalReviewRunner
                     brief.HeadSha,
                     patch.Patch,
                     ex.ContextLength,
+                    transcriptPath,
+                    reviewPass: 2,
                     timeout.Token);
                 review = review with
                 {
@@ -634,12 +651,16 @@ public sealed class LocalReviewRunner : ILocalReviewRunner
         catch (OperationCanceledException)
         {
             await SaveFailureAsync(
-                brief, settings.Model, started,
+                brief, settings.Model, started, transcriptPath,
                 $"Local review exceeded the configured {settings.TimeoutSeconds}-second timeout.",
                 CancellationToken.None);
         }
         catch (LocalModelNotCachedException ex)
         {
+            await AppendTranscriptAsync(
+                transcriptPath,
+                $"\n=== SKIPPED ===\n{ex.Message}\n",
+                CancellationToken.None);
             await _artifacts.WriteAsync(brief, new LocalReviewArtifact
             {
                 Status = LocalReviewStatus.Skipped,
@@ -654,7 +675,12 @@ public sealed class LocalReviewRunner : ILocalReviewRunner
         {
             _log.LogWarning(ex, "Local shadow review failed for {PrUrl}", brief.PrUrl);
             await SaveFailureAsync(
-                brief, settings.Model, started, ex.Message, CancellationToken.None);
+                brief,
+                settings.Model,
+                started,
+                transcriptPath,
+                ex.Message,
+                CancellationToken.None);
         }
     }
 
@@ -662,9 +688,14 @@ public sealed class LocalReviewRunner : ILocalReviewRunner
         BriefResult brief,
         string model,
         Stopwatch started,
+        string transcriptPath,
         string error,
         CancellationToken ct)
     {
+        await AppendTranscriptAsync(
+            transcriptPath,
+            $"\n=== REVIEW FAILED ===\n{error}\n",
+            ct);
         await _artifacts.WriteAsync(brief, new LocalReviewArtifact
         {
             Status = LocalReviewStatus.Failed,
@@ -683,6 +714,8 @@ public sealed class LocalReviewRunner : ILocalReviewRunner
         string headSha,
         string patch,
         int contextLength,
+        string transcriptPath,
+        int reviewPass,
         CancellationToken ct)
     {
         var chunkCharacterBudget = CalculateChunkCharacterBudget(contextLength);
@@ -707,6 +740,9 @@ public sealed class LocalReviewRunner : ILocalReviewRunner
                 chunks[index],
                 index + 1,
                 chunks.Count,
+                contextLength,
+                transcriptPath,
+                reviewPass,
                 ct);
 
             warnings.AddRange(parsed.Warnings.Select(
@@ -751,8 +787,37 @@ public sealed class LocalReviewRunner : ILocalReviewRunner
         string patchChunk,
         int chunkNumber,
         int chunkCount,
+        int contextLength,
+        string transcriptPath,
+        int reviewPass,
         CancellationToken ct)
     {
+        var userPrompt = BuildReviewPrompt(
+            pr,
+            headSha,
+            patchChunk,
+            chunkNumber,
+            chunkCount);
+        await AppendTranscriptAsync(
+            transcriptPath,
+            $"""
+
+            === REQUEST pass {reviewPass}, chunk {chunkNumber}/{chunkCount} ===
+            endpoint: {requestUri}
+            model: {model}
+            context_length: {contextLength}
+            max_tokens: {OutputTokenBudget}
+            temperature: 0
+
+            --- SYSTEM PROMPT ---
+            {LocalReviewerSystemPrompt}
+
+            --- USER PROMPT ---
+            {userPrompt}
+
+            """,
+            ct);
+
         using var request = new HttpRequestMessage(HttpMethod.Post, requestUri)
         {
             Content = JsonContent.Create(new
@@ -770,33 +835,55 @@ public sealed class LocalReviewRunner : ILocalReviewRunner
                     new
                     {
                         role = "user",
-                        content = BuildReviewPrompt(
-                            pr,
-                            headSha,
-                            patchChunk,
-                            chunkNumber,
-                            chunkCount),
+                        content = userPrompt,
                     },
                 },
             }),
         };
 
         var client = _httpFactory.CreateClient("local-review");
-        using var response = await client.SendAsync(request, ct);
-        var responseText = await response.Content.ReadAsStringAsync(ct);
-        if (!response.IsSuccessStatusCode)
+        HttpResponseMessage response;
+        string responseText;
+        try
         {
-            if ((int)response.StatusCode == 400
-                && TryParseEffectiveContextLength(responseText, out var effectiveContext))
+            response = await client.SendAsync(request, ct);
+            responseText = await response.Content.ReadAsStringAsync(ct);
+        }
+        catch (Exception ex)
+        {
+            await AppendTranscriptAsync(
+                transcriptPath,
+                $"\n--- REQUEST ERROR ---\n{ex}\n",
+                CancellationToken.None);
+            throw;
+        }
+        using (response)
+        {
+            await AppendTranscriptAsync(
+                transcriptPath,
+                $"""
+
+                --- RAW RESPONSE ---
+                HTTP {(int)response.StatusCode} {response.ReasonPhrase}
+                {responseText}
+
+                """,
+                ct);
+
+            if (!response.IsSuccessStatusCode)
             {
-                throw new LocalContextLengthExceededException(
-                    effectiveContext,
-                    responseText);
+                if ((int)response.StatusCode == 400
+                    && TryParseEffectiveContextLength(responseText, out var effectiveContext))
+                {
+                    throw new LocalContextLengthExceededException(
+                        effectiveContext,
+                        responseText);
+                }
+                throw new HttpRequestException(
+                    $"Local model request failed for patch chunk {chunkNumber}/{chunkCount} " +
+                    $"({(int)response.StatusCode} {response.ReasonPhrase}): " +
+                    BuildProviderErrorDetail(model, responseText));
             }
-            throw new HttpRequestException(
-                $"Local model request failed for patch chunk {chunkNumber}/{chunkCount} " +
-                $"({(int)response.StatusCode} {response.ReasonPhrase}): " +
-                BuildProviderErrorDetail(model, responseText));
         }
 
         var parsed = LocalReviewResponseParser.Parse(
@@ -804,6 +891,31 @@ public sealed class LocalReviewRunner : ILocalReviewRunner
             model);
         return LocalReviewDiffIndex.FilterToAddedLines(parsed, patchChunk);
     }
+
+    private static Task InitializeTranscriptAsync(
+        string transcriptPath,
+        BriefResult brief,
+        string model,
+        CancellationToken ct)
+    {
+        var header = $"""
+            LOCAL SHADOW REVIEW TRANSCRIPT
+            This file contains private PR diff content. Do not publish it.
+
+            generated_at_utc: {DateTimeOffset.UtcNow:O}
+            pr_url: {brief.PrUrl}
+            head_sha: {brief.HeadSha}
+            model: {model}
+
+            """;
+        return File.WriteAllTextAsync(transcriptPath, header, ct);
+    }
+
+    private static Task AppendTranscriptAsync(
+        string transcriptPath,
+        string text,
+        CancellationToken ct) =>
+        File.AppendAllTextAsync(transcriptPath, text, ct);
 
     internal static Uri BuildChatCompletionsUri(string endpoint)
     {

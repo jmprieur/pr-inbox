@@ -75,6 +75,18 @@
                 title="Re-run only the local shadow reviewer for this review run.">
             @(_localRerunBusy ? "Starting local…" : "Rerun local")
         </button>
+        @if (File.Exists(Path.Combine(
+            _run.RunDirectory,
+            LocalReviewArtifact.TranscriptFileName)))
+        {
+            <span>&nbsp;·&nbsp;</span>
+            <button type="button"
+                    class="link-like"
+                    @onclick="OnOpenLocalTranscript"
+                    title="Open the exact local-model prompts and raw responses.">
+                Open local transcript
+            </button>
+        }
     }
 </div>
 
@@ -818,6 +830,27 @@ else
         catch (Exception ex)
         {
             Log.LogWarning(ex, "Failed to open findings.yaml at {Path}", path);
+        }
+    }
+
+    private void OnOpenLocalTranscript()
+    {
+        if (_run is null) return;
+        var path = Path.Combine(
+            _run.RunDirectory,
+            LocalReviewArtifact.TranscriptFileName);
+        if (!File.Exists(path)) return;
+        try
+        {
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = path,
+                UseShellExecute = true,
+            });
+        }
+        catch (Exception ex)
+        {
+            Log.LogWarning(ex, "Failed to open local transcript at {Path}", path);
         }
     }
 

@@ -284,6 +284,12 @@ Use **Rerun local** on the Review page to repeat only this pass while tuning
 the model or settings; it reuses the current immutable run and does not reopen
 the cloud review.
 
+For diagnostics, **Open local transcript** opens
+`local-review-transcript.txt` from the private run directory. It contains each
+chunk's exact system/user prompts, request parameters, HTTP status, and raw
+provider response, including failed attempts and context-limit retries. The
+transcript includes private PR code and must not be published.
+
 Local model work is serialized through a single queue because Foundry Local is
 optimized for one interactive inference stream, not concurrent server loads.
 Each Review page shows `Queued` plus its live position; cloud review windows

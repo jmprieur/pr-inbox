@@ -618,6 +618,11 @@ Use **Rerun local** in the Review-page toolbar to repeat only the local pass
 after changing its model, timeout, or patch cap. It reuses the current run and
 refuses if the PR HEAD has moved; in that case, launch a new full review.
 
+Use **Open local transcript** to inspect the exact prompts sent for every
+chunk and the raw endpoint responses. The transcript is
+`local-review-transcript.txt` beside `local-review.json` in the private run
+directory. It contains private diff content; do not attach or publish it.
+
 Local reviews are processed one at a time. When another PR is using Foundry,
 the local panel shows **Queued** and its live queue position. This does not
 serialize or delay the normal cloud review.
