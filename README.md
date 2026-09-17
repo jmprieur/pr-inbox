@@ -373,6 +373,13 @@ local model receives the source text but no credential, network access, or
 repository tool. It must return an exact quoted source line from an added line;
 unverifiable candidates are dropped. Azure DevOps remains unsupported.
 
+Before verification, candidates pointing to the same file and added line are
+collapsed to the strongest severity/confidence representative. PR Inbox then
+verifies at most two candidates per file and eight per review, ranked by
+severity and confidence. This prevents a noisy small model from turning one
+repeated hypothesis into dozens of sequential verification calls. The
+transcript records generated, collapsed, selected, and deferred counts.
+
 Foundry models marked with the `reasoning` capability receive a larger
 4,096-token output budget and a Qwen-compatible `/no_think` control. Requests
 also ask for OpenAI JSON mode. Some reasoning models still emit visible

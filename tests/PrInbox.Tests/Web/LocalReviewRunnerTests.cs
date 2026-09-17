@@ -905,6 +905,68 @@ public sealed class LocalReviewRunnerTests
                            "not anchored to an added post-change line"));
     }
 
+    [Fact]
+    public void CandidateCurator_CollapsesLocationsAndCapsVerificationWork()
+    {
+        var candidates = new List<Finding>
+        {
+            Candidate("src/a.cs", 10, "Weak duplicate", FindingSeverity.Medium,
+                FindingConfidence.Medium, "short"),
+            Candidate("src/a.cs", 10, "Strong duplicate", FindingSeverity.High,
+                FindingConfidence.High, "more complete explanation"),
+            Candidate("src/a.cs", 20, "Second A", FindingSeverity.High),
+            Candidate("src/a.cs", 30, "Third A deferred", FindingSeverity.High),
+            Candidate("src/b.cs", 1, "B1", FindingSeverity.Critical),
+            Candidate("src/b.cs", 2, "B2", FindingSeverity.High),
+            Candidate("src/b.cs", 3, "B3 deferred", FindingSeverity.High),
+            Candidate("src/c.cs", 1, "C1", FindingSeverity.High),
+            Candidate("src/d.cs", 1, "D1", FindingSeverity.Medium),
+            Candidate("src/e.cs", 1, "E1", FindingSeverity.Medium),
+            Candidate("src/f.cs", 1, "F1 deferred overall", FindingSeverity.Low),
+            Candidate("src/g.cs", 1, "G1 deferred overall", FindingSeverity.Low),
+        };
+
+        var result = LocalReviewCandidateCurator.Curate(candidates);
+
+        result.Candidates.Should().HaveCount(
+            LocalReviewCandidateCurator.MaxCandidates);
+        result.Candidates.Should().ContainSingle(candidate =>
+            candidate.File == "src/a.cs"
+            && candidate.Line == 10
+            && candidate.Title == "Strong duplicate");
+        result.Candidates.Count(candidate => candidate.File == "src/a.cs")
+            .Should().Be(LocalReviewCandidateCurator.MaxCandidatesPerFile);
+        result.Candidates.Count(candidate => candidate.File == "src/b.cs")
+            .Should().Be(LocalReviewCandidateCurator.MaxCandidatesPerFile);
+        result.Candidates[0].Title.Should().Be("B1");
+        result.Warnings.Should().Contain(
+            warning => warning.Contains("Collapsed 2 local candidates")
+                       && warning.Contains("src/a.cs:10"));
+        result.Warnings.Should().Contain(
+            warning => warning.Contains("at most 2 candidates per file"));
+        result.Warnings.Should().Contain(
+            warning => warning.Contains("at most 8 candidates"));
+    }
+
+    private static Finding Candidate(
+        string file,
+        int line,
+        string title,
+        FindingSeverity severity,
+        FindingConfidence confidence = FindingConfidence.High,
+        string body = "body") => new()
+    {
+        Id = title,
+        Severity = severity,
+        Confidence = confidence,
+        FoundBy = ["local"],
+        File = file,
+        Line = line,
+        DiffAnchorable = true,
+        Title = title,
+        Body = body,
+    };
+
     private sealed class RunnerFixture : IAsyncDisposable
     {
         private readonly Microsoft.Data.Sqlite.SqliteConnection _keepAlive;

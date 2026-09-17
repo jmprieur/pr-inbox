@@ -1390,13 +1390,23 @@ public sealed class LocalReviewRunner : ILocalReviewRunner
             }
         }
 
-        if (allFindings.Count > MaxAggregatedFindings)
-        {
-            warnings.Add(
-                $"Only the first {MaxAggregatedFindings} local findings were retained.");
-        }
-        var findings = allFindings
-            .Take(MaxAggregatedFindings)
+        var curated = LocalReviewCandidateCurator.Curate(allFindings);
+        warnings.AddRange(curated.Warnings);
+        await AppendTranscriptAsync(
+            transcriptPath,
+            $"""
+
+            === CANDIDATE CURATION ===
+            generated: {allFindings.Count}
+            selected_for_verification: {curated.Candidates.Count}
+            per_file_limit: {LocalReviewCandidateCurator.MaxCandidatesPerFile}
+            overall_limit: {LocalReviewCandidateCurator.MaxCandidates}
+            {string.Join(Environment.NewLine, curated.Warnings.Select(
+                warning => "- " + warning))}
+
+            """,
+            ct);
+        var findings = curated.Candidates
             .Select((finding, index) => finding with
             {
                 Id = $"local-{index + 1:00}",
@@ -1791,7 +1801,6 @@ public sealed class LocalReviewRunner : ILocalReviewRunner
     private const double ConservativeCharactersPerToken = 0.85;
     private const int MinimumChunkCharacters = 8_000;
     private const int MaximumChunkCharacters = 120_000;
-    private const int MaxAggregatedFindings = 50;
     private const int MaxProviderResetRetries = 3;
     private const int CpuReasoningContextCap = 32_768;
     private const int MinimumRuntimeContextLength = 8_192;
@@ -1877,6 +1886,128 @@ internal sealed class LocalMemoryAllocationException : Exception
     public LocalMemoryAllocationException(string response)
         : base(response)
     {
+    }
+}
+
+internal sealed record LocalReviewCandidateCuration(
+    IReadOnlyList<Finding> Candidates,
+    IReadOnlyList<string> Warnings);
+
+internal static class LocalReviewCandidateCurator
+{
+    internal const int MaxCandidates = 8;
+    internal const int MaxCandidatesPerFile = 2;
+
+    public static LocalReviewCandidateCuration Curate(
+        IReadOnlyList<Finding> candidates)
+    {
+        var warnings = new List<string>();
+        var collapsed = candidates
+            .GroupBy(
+                candidate => (
+                    File: NormalizePath(candidate.File),
+                    candidate.Line),
+                CandidateLocationComparer.Instance)
+            .Select(group =>
+            {
+                var ordered = group
+                    .OrderByDescending(candidate => SeverityRank(candidate.Severity))
+                    .ThenByDescending(candidate => ConfidenceRank(candidate.Confidence))
+                    .ThenByDescending(candidate => candidate.Body?.Length ?? 0)
+                    .ThenBy(candidate => candidate.Title, StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+                if (ordered.Count > 1)
+                {
+                    warnings.Add(
+                        $"Collapsed {ordered.Count} local candidates at " +
+                        $"{group.Key.File}:{group.Key.Line?.ToString() ?? "?"} " +
+                        $"into '{ordered[0].Title}'.");
+                }
+                return ordered[0] with { File = group.Key.File };
+            })
+            .OrderByDescending(candidate => SeverityRank(candidate.Severity))
+            .ThenByDescending(candidate => ConfidenceRank(candidate.Confidence))
+            .ThenBy(candidate => candidate.File, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(candidate => candidate.Line)
+            .ThenBy(candidate => candidate.Title, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        var selected = new List<Finding>();
+        var perFile = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        var deferredPerFile = 0;
+        var deferredOverall = 0;
+        foreach (var candidate in collapsed)
+        {
+            if (selected.Count >= MaxCandidates)
+            {
+                deferredOverall++;
+                continue;
+            }
+            var count = perFile.GetValueOrDefault(candidate.File);
+            if (count >= MaxCandidatesPerFile)
+            {
+                deferredPerFile++;
+                continue;
+            }
+            selected.Add(candidate);
+            perFile[candidate.File] = count + 1;
+        }
+
+        if (deferredPerFile > 0)
+        {
+            warnings.Add(
+                $"Deferred {deferredPerFile} local candidate(s) because at most " +
+                $"{MaxCandidatesPerFile} candidates per file are verified.");
+        }
+        if (deferredOverall > 0)
+        {
+            warnings.Add(
+                $"Deferred {deferredOverall} local candidate(s) because at most " +
+                $"{MaxCandidates} candidates are verified per review.");
+        }
+        return new LocalReviewCandidateCuration(selected, warnings);
+    }
+
+    private static string NormalizePath(string path)
+    {
+        var normalized = path.Trim().Replace('\\', '/');
+        return normalized.StartsWith("b/", StringComparison.Ordinal)
+            ? normalized[2..]
+            : normalized;
+    }
+
+    private static int SeverityRank(FindingSeverity severity) => severity switch
+    {
+        FindingSeverity.Critical => 4,
+        FindingSeverity.High => 3,
+        FindingSeverity.Medium => 2,
+        FindingSeverity.Low => 1,
+        _ => 0,
+    };
+
+    private static int ConfidenceRank(FindingConfidence confidence) => confidence switch
+    {
+        FindingConfidence.High => 3,
+        FindingConfidence.Medium => 2,
+        FindingConfidence.Low => 1,
+        _ => 0,
+    };
+
+    private sealed class CandidateLocationComparer
+        : IEqualityComparer<(string File, int? Line)>
+    {
+        public static CandidateLocationComparer Instance { get; } = new();
+
+        public bool Equals(
+            (string File, int? Line) x,
+            (string File, int? Line) y) =>
+            string.Equals(x.File, y.File, StringComparison.OrdinalIgnoreCase)
+            && x.Line == y.Line;
+
+        public int GetHashCode((string File, int? Line) obj) =>
+            HashCode.Combine(
+                StringComparer.OrdinalIgnoreCase.GetHashCode(obj.File),
+                obj.Line);
     }
 }
 

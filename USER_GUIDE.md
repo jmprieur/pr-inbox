@@ -690,6 +690,11 @@ It must quote exact evidence from an added line. Fetch failures, oversized
 files, malformed verification responses, and unsupported Azure DevOps files
 all fail closed by dropping the candidate with a warning.
 
+Candidates at the same file and added line are collapsed before verification.
+The strongest candidate is retained, with a limit of two candidates per file
+and eight per review. Deferred candidates and curation counts are visible in
+the warnings and local transcript.
+
 Reasoning-capable local models receive a larger output allowance and
 `/no_think` instruction. If they still print visible analysis, PR Inbox reads
 the final contract-shaped JSON object. Provider responses that stop with
