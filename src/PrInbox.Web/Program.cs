@@ -24,6 +24,18 @@ builder.Services.AddRazorComponents()
 builder.Services.AddSingleton<InboxState>();
 builder.Services.AddSingleton<ReviewRunStore>();
 builder.Services.AddSingleton<ConsoleWindowRegistry>();
+builder.Services.AddSingleton<IReviewPatchProvider, GitHubReviewPatchProvider>();
+builder.Services.AddSingleton<IFoundryCliRunner, FoundryCliRunner>();
+builder.Services.AddSingleton<IFoundryLocalRuntime, FoundryLocalRuntime>();
+builder.Services.AddSingleton<ILocalModelEndpointResolver, FoundryLocalEndpointResolver>();
+builder.Services.AddSingleton<LocalReviewArtifactStore>();
+builder.Services.AddSingleton<ILocalFindingVerifier, LocalFindingVerifier>();
+builder.Services.AddSingleton<ILocalReviewRunner, LocalReviewRunner>();
+builder.Services.AddSingleton<LocalReviewQueue>();
+builder.Services.AddSingleton<ILocalReviewQueue>(
+    sp => sp.GetRequiredService<LocalReviewQueue>());
+builder.Services.AddHostedService(
+    sp => sp.GetRequiredService<LocalReviewQueue>());
 builder.Services.AddSingleton<IReviewLauncher, ReviewLauncher>();
 builder.Services.AddSingleton<InboxSyncHostedService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<InboxSyncHostedService>());
@@ -64,6 +76,14 @@ builder.Services.AddSingleton<IGitHubRateLimitProbe, GhCliRateLimitProbe>();
 builder.Services.AddSingleton<DoctorService>();
 
 builder.Services.AddHttpClient("publisher", c => c.Timeout = TimeSpan.FromSeconds(30));
+builder.Services.AddHttpClient("review-patch", c => c.Timeout = TimeSpan.FromSeconds(60));
+builder.Services.AddHttpClient("local-review", c => c.Timeout = Timeout.InfiniteTimeSpan)
+    .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
+    {
+        // The endpoint is constrained to loopback. Do not permit a local
+        // service to redirect a private PR patch to a remote origin.
+        AllowAutoRedirect = false,
+    });
 builder.Services.AddSingleton<IPublisherSelector>(sp =>
 {
     var cfg = sp.GetRequiredService<PrInboxConfig>();

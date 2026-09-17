@@ -21,8 +21,33 @@ public sealed record FindingsDocument
 
     public DateTimeOffset GeneratedAtUtc { get; init; }
 
-    /// <summary>Model identifiers used by the review (e.g. claude-opus-4.8, gpt-5.6-terra).</summary>
+    /// <summary>
+    /// Legacy combined model list. New producers should use
+    /// <see cref="PrimaryModels"/> and <see cref="ShadowModels"/>.
+    /// </summary>
     public IReadOnlyList<string> Models { get; init; } = Array.Empty<string>();
+
+    /// <summary>
+    /// The Opus + GPT reviewers whose independent reports determine findings and asymmetry.
+    /// </summary>
+    public IReadOnlyList<string> PrimaryModels { get; init; } = Array.Empty<string>();
+
+    /// <summary>
+    /// Supplemental reviewers whose output is informational and never counts toward quorum.
+    /// </summary>
+    public IReadOnlyList<string> ShadowModels { get; init; } = Array.Empty<string>();
+
+    /// <summary>
+    /// Completeness of the primary review pair. Null means a legacy schema-v1 document.
+    /// </summary>
+    public ReviewCompleteness? ReviewStatus { get; init; }
+
+    /// <summary>Required explanation when <see cref="ReviewStatus"/> is incomplete.</summary>
+    public string? IncompleteReason { get; init; }
+
+    /// <summary>Primary models, falling back to the legacy combined list.</summary>
+    public IReadOnlyList<string> EffectivePrimaryModels =>
+        PrimaryModels.Count > 0 ? PrimaryModels : Models;
 
     /// <summary>Diagnostic breakdown of model agreement; free-shape map for forward compatibility.</summary>
     public AsymmetryStats? Asymmetry { get; init; }
@@ -36,6 +61,7 @@ public sealed record AsymmetryStats
     public int BothFound { get; init; }
     public int? OpusOnly { get; init; }
     public int? GptOnly { get; init; }
+    public int? SingleModel { get; init; }
 }
 
 /// <summary>One actionable finding in the document.</summary>
@@ -86,6 +112,13 @@ public enum FindingConfidence
     Low,
 }
 
+public enum ReviewCompleteness
+{
+    Complete,
+    Degraded,
+    Incomplete,
+}
+
 /// <summary>
 /// Helpers for converting <see cref="FindingSeverity"/> and
 /// <see cref="FindingConfidence"/> to/from the lowercase string form used
@@ -125,5 +158,21 @@ public static class FindingEnumExtensions
         "medium" => FindingConfidence.Medium,
         "low" => FindingConfidence.Low,
         _ => throw new FormatException($"Unknown finding confidence '{value}'."),
+    };
+
+    public static string ToYamlValue(this ReviewCompleteness status) => status switch
+    {
+        ReviewCompleteness.Complete => "complete",
+        ReviewCompleteness.Degraded => "degraded",
+        ReviewCompleteness.Incomplete => "incomplete",
+        _ => throw new ArgumentOutOfRangeException(nameof(status), status, null),
+    };
+
+    public static ReviewCompleteness ParseReviewCompleteness(string value) => value?.ToLowerInvariant() switch
+    {
+        "complete" => ReviewCompleteness.Complete,
+        "degraded" => ReviewCompleteness.Degraded,
+        "incomplete" => ReviewCompleteness.Incomplete,
+        _ => throw new FormatException($"Unknown review status '{value}'."),
     };
 }

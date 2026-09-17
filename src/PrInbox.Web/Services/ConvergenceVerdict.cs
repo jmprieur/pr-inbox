@@ -5,7 +5,7 @@ namespace PrInbox.Web.Services;
 /// <summary>
 /// Derives a convergence verdict for a findings-bearing review run — the
 /// findings-counts analogue of <see cref="CleanVerdict"/>. Tells the user
-/// at scan-distance whether both reviewer models agree on every finding
+/// at scan-distance whether both primary reviewer models agree on every finding
 /// (high confidence) or one model flagged things the other did not.
 /// </summary>
 /// <remarks>
@@ -13,7 +13,7 @@ namespace PrInbox.Web.Services;
 /// <list type="bullet">
 ///   <item><c>Findings.Count == 0</c> -> <see cref="ConvergenceState.Hidden"/>.
 ///         The clean-pill already handles that case.</item>
-///   <item><c>Models.Count &lt; 2</c> -> <see cref="ConvergenceState.Hidden"/>.
+///   <item>Fewer than two effective primary models -> <see cref="ConvergenceState.Hidden"/>.
 ///         You cannot converge with one reviewer.</item>
 ///   <item>No <see cref="AsymmetryStats"/> block, or all three counters
 ///         are zero -> <see cref="ConvergenceState.Hidden"/>. No claim.</item>
@@ -35,7 +35,8 @@ public static class ConvergenceVerdict
     public static ConvergenceBadge Compute(FindingsDocument doc)
     {
         if (doc.Findings.Count == 0) return Hidden;
-        if (doc.Models.Count < 2)    return Hidden;
+        if (doc.ReviewStatus is ReviewCompleteness.Degraded or ReviewCompleteness.Incomplete) return Hidden;
+        if (doc.EffectivePrimaryModels.Count < 2) return Hidden;
         if (doc.Asymmetry is null)   return Hidden;
 
         var both     = doc.Asymmetry.BothFound;
@@ -68,7 +69,8 @@ public static class ConvergenceVerdict
 
     private static string BuildConvergedTooltip(FindingsDocument doc, int both)
     {
-        var modelsStr = doc.Models.Count > 0 ? string.Join(" + ", doc.Models) : null;
+        var primaryModels = doc.EffectivePrimaryModels;
+        var modelsStr = primaryModels.Count > 0 ? string.Join(" + ", primaryModels) : null;
         var part = $"Both reviewers flagged every finding · {both} agreed";
         if (modelsStr is not null) part += $" · {modelsStr}";
         return part;
@@ -81,10 +83,11 @@ public static class ConvergenceVerdict
         // not invalid).
         string opusLabel = "Opus only";
         string gptLabel  = "GPT only";
-        if (doc.Models.Count == 2)
+        var primaryModels = doc.EffectivePrimaryModels;
+        if (primaryModels.Count == 2)
         {
-            opusLabel = $"{doc.Models[0]} only";
-            gptLabel  = $"{doc.Models[1]} only";
+            opusLabel = $"{primaryModels[0]} only";
+            gptLabel  = $"{primaryModels[1]} only";
         }
         return $"Asymmetric · both: {both} · {opusLabel}: {opusOnly} · {gptLabel}: {gptOnly} — review per-finding attribution";
     }

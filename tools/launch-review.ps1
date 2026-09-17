@@ -206,7 +206,7 @@ $cmdTokens = @($resolvedCommand -split '\s+' | Where-Object { $_ })
 $cmdExe    = $cmdTokens[0]
 $cmdArgs   = if ($cmdTokens.Count -gt 1) { $cmdTokens[1..($cmdTokens.Count - 1)] } else { @() }
 
-# Forward unknown flags (-i, --allow-all-paths, --yolo) straight to copilot. Empirical:
+# Forward Copilot flags (-i, --add-dir, --allow-all-paths, --yolo). Empirical:
 # agency's clap config treats unknown flags as pass-through to the
 # engine. Importantly, do NOT use the `--` separator: when present,
 # agency includes it in the args it spawns copilot with and copilot
@@ -218,6 +218,12 @@ $cmdArgs   = if ($cmdTokens.Count -gt 1) { $cmdTokens[1..($cmdTokens.Count - 1)]
 # directory (set by wt's `-d "<runDir>"` on the parent terminal), so
 # `brief.md` is a bare-filename Read away.
 $passThrough = @()
+# The current working directory is a unique immutable run directory, so
+# Copilot's startup folder-trust prompt would otherwise appear for every
+# review. --add-dir explicitly trusts this generated directory for the
+# session without broadening tool or URL permissions.
+$passThrough += '--add-dir'
+$passThrough += $RunDirectory
 if ($autoSend) {
     $passThrough += '-i'
     $passThrough += 'Read brief.md and proceed.'

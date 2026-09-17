@@ -595,12 +595,131 @@ Persisted settings that take effect on the **next** review you launch
 | **Tab colour** | Colours the Windows Terminal tab for every review so it stands out from ordinary terminals. Accepts a hex like `#5da4ff`; leave blank to disable. |
 | **One tab per review** *(experimental)* | On: each review opens as a tab in one shared window (`pr-inbox-reviews`) instead of its own window — less desktop clutter when several run at once. Trade-off: the Inbox's per-review window controls don't apply in tab mode, and closing the shared window closes every review tab. Off (default): one window per review. |
 
+Every generated review-run directory is also passed as a session-scoped
+`--add-dir`. This handles Copilot CLI's separate startup folder-trust gate, so
+the unique timestamped run folder should not require confirmation on every
+launch. It does not auto-approve tools or URLs.
+
 The review orchestrator model defaults to `gpt-5.6-sol`. This is distinct
 from the independent reviewer pair, which defaults to `claude-opus-4.8`
 and `gpt-5.6-terra`.
 
 If you need fancier overrides (different model, different plugin),
 use the env vars in [§ Review launcher overrides](README.md#review-launcher-overrides).
+
+### Local shadow reviewer
+
+The optional local shadow reviewer runs in parallel with the normal
+dual-model review and appears in a separate, read-only panel on the Review
+page. It is deliberately diff-only and does not affect convergence, selection,
+or publishing.
+
+It is on-demand: enabling the feature adds **Run local** to Review pages but
+does not start local inference when the normal Review button is clicked.
+
+Use **Rerun local** in the Review-page toolbar to repeat only the local pass
+after changing its model, timeout, or patch cap. It reuses the current run and
+refuses if the PR HEAD has moved; in that case, launch a new full review.
+
+Use **Open local transcript** to inspect the exact prompts sent for every
+chunk and the raw endpoint responses. The transcript is
+`local-review-transcript.txt` beside `local-review.json` in the private run
+directory. It contains private diff content; do not attach or publish it.
+
+When Foundry closes the transport connection mid-request, PR Inbox re-prepares
+the runtime and resumes from successful in-memory chunk checkpoints. It allows
+up to three daemon recoveries per review. The transcript records each reset,
+reused chunk, and provider request.
+
+Local reviews are processed one at a time. When another PR is using Foundry,
+the local panel shows **Queued** and its live queue position. This does not
+serialize or delay the normal cloud review.
+
+The Inbox also shows a global **Local review queue** panel while any local work
+is running or waiting. It links each queue entry to its Review page and updates
+positions live as jobs complete.
+
+During execution, both surfaces show the current phase and unit progress:
+preparing the runtime, finding candidates by chunk (`n/m`), curating the raw
+candidates, and verifying the selected candidates (`n/m`). The Review page
+also renders a progress bar.
+
+Configure it under **Settings → Local shadow reviewer**:
+
+- Enable or disable it independently of the normal review launcher.
+- Leave the endpoint blank to auto-discover Foundry Local, or enter an
+  OpenAI-compatible loopback endpoint.
+- Choose the local model alias or exact variant. The default and currently
+  recommended variant is `qwen3.5-9b-generic-cpu:3`; use
+  `qwen2.5-coder-7b` as a faster Qualcomm NPU fallback.
+- Set a maximum total patch size and inference timeout. The patch-size value
+  is a workload cap, not the model context window. `200000` is the recommended
+  starting point; accepted patches are chunked automatically.
+
+With endpoint auto-discovery, PR Inbox starts Foundry Local and loads the
+configured model automatically. It intentionally does not download missing
+models. A missing model produces a **Skipped** local result with setup
+instructions rather than starting a large download from the Review button.
+
+The runner sends the real unified GitHub/GHE patch to the model. If the patch
+is too large, the endpoint is unavailable, the response is malformed, or the
+PR is hosted on Azure DevOps, the local panel reports that state without
+interrupting the authoritative review.
+
+For Foundry Local, PR Inbox reads the selected model's reported context length.
+Patches that fit the configured overall size limit but not one model request
+are split at file and hunk boundaries. Each chunk is reviewed independently,
+then findings are combined and de-duplicated. The Review page explicitly
+reports how many chunks were used.
+
+For high-context CPU reasoning models, PR Inbox caps the initial operational
+context at 32K even when the model advertises more. If the provider still
+reports an ONNX allocation failure, PR Inbox rechunks at 16K and then 8K.
+This is a memory-safety operating policy, not a claim that the model
+architecture lacks the larger advertised window.
+
+Some Foundry variants advertise a larger architectural context than their
+current execution provider actually serves. When the endpoint returns the
+effective context limit in a 400 response, PR Inbox automatically rechunks
+the complete patch to that lower limit and retries once.
+
+The local pass reports only issues anchored to added `+` lines. Its prompt
+requires the issue to survive in the post-change code, and PR Inbox rejects
+candidates anchored to deleted, unchanged, or old-side line numbers. Rejected
+candidates appear as warnings in `local-review.json`, not publishable findings.
+
+PR Inbox then verifies each remaining candidate against the complete
+post-change file fetched at the reviewed HEAD. The fetch uses PR Inbox's
+existing delegated GitHub/GHE credential; the model receives source text only.
+It must quote exact evidence from an added line. Fetch failures, oversized
+files, malformed verification responses, and unsupported Azure DevOps files
+all fail closed by dropping the candidate with a warning.
+
+Candidates at the same file and added line are collapsed before verification.
+The strongest candidate is retained, with a limit of two candidates per file
+and eight per review. Deferred candidates and curation counts are visible in
+the warnings and local transcript.
+
+Reasoning-capable local models receive a larger output allowance and
+`/no_think` instruction. If they still print visible analysis, PR Inbox reads
+the final contract-shaped JSON object. Provider responses that stop with
+`finish_reason: length` are rejected explicitly as truncated.
+
+For a `stop` response with a malformed final findings array, PR Inbox can
+recover complete finding objects only from the final post-reasoning section.
+Incomplete trailing objects are ignored and recovered candidates still pass
+all normal verification gates; illustrative JSON inside reasoning is rejected.
+
+Before downloading a large local model, move Foundry Local's global cache off
+a constrained system drive if necessary:
+
+```powershell
+foundry cache cd D:\FoundryLocal\models
+foundry cache location
+foundry model download qwen3.5-9b-generic-cpu:3
+foundry server start
+foundry model load qwen3.5-9b-generic-cpu:3
+```
 
 ### Where things live
 
