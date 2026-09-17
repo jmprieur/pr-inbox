@@ -348,11 +348,12 @@ complete ADO patch provider is available. Oversized patches are also skipped
 rather than truncated, because a partial review must not look complete.
 Within that configured overall limit, PR Inbox reads Foundry's reported
 `contextLength`, splits the patch into conservative file/hunk-aligned chunks,
-reviews every chunk, and de-duplicates the combined findings. This lets both
-large-context reasoning models and smaller 32K coding models review larger PRs
-without pretending a truncated prompt was complete. Custom OpenAI-compatible
-endpoints use a conservative 32K default because they do not expose Foundry
-catalog metadata.
+reviews every chunk, and de-duplicates the combined findings. High-context CPU
+reasoning models start with a conservative 32K operational cap rather than
+assuming the advertised maximum is safe in available RAM. If ONNX reports an
+allocation failure, PR Inbox halves the context to 16K and then 8K, rechunking
+and retrying at each step. Custom OpenAI-compatible endpoints use a
+conservative 32K default because they do not expose Foundry catalog metadata.
 If a runtime enforces a lower limit than its catalog metadata (currently
 observed with the `gpt-oss-20b` WebGPU variant advertising 131K but serving
 8K), PR Inbox reads the effective limit from the 400 response, rechunks the
@@ -373,7 +374,7 @@ repository tool. It must return an exact quoted source line from an added line;
 unverifiable candidates are dropped. Azure DevOps remains unsupported.
 
 Foundry models marked with the `reasoning` capability receive a larger
-8,192-token output budget and a Qwen-compatible `/no_think` control. Requests
+4,096-token output budget and a Qwen-compatible `/no_think` control. Requests
 also ask for OpenAI JSON mode. Some reasoning models still emit visible
 analysis; PR Inbox safely selects the final valid JSON object with the expected
 contract. A response ending with `finish_reason: length` is treated as

@@ -69,7 +69,7 @@ public sealed class LocalReviewRunnerTests
                 ""),
             new FoundryCliResult(
                 0,
-                """{"model":{"alias":"qwen2.5-coder-7b","id":"qwen2.5-coder-7b-instruct-qnn-npu:1","contextLength":32768}}""",
+                """{"model":{"alias":"qwen2.5-coder-7b","id":"qwen2.5-coder-7b-instruct-qnn-npu:1","device":"Npu","contextLength":32768}}""",
                 ""),
             new FoundryCliResult(0, """{"variants":[]}""", ""),
             new FoundryCliResult(0, "loaded", ""));
@@ -104,7 +104,7 @@ public sealed class LocalReviewRunnerTests
                 ""),
             new FoundryCliResult(
                 0,
-                """{"model":{"alias":"qwen3.5-9b","id":"qwen3.5-9b-generic-cpu:3","contextLength":262144,"capabilities":"reasoning,tool-calling"}}""",
+                """{"model":{"alias":"qwen3.5-9b","id":"qwen3.5-9b-generic-cpu:3","device":"Cpu","contextLength":262144,"capabilities":"reasoning,tool-calling"}}""",
                 ""),
             new FoundryCliResult(0, """{"variants":[]}""", ""),
             new FoundryCliResult(0, "loaded", ""));
@@ -118,6 +118,8 @@ public sealed class LocalReviewRunnerTests
 
         result.ContextLength.Should().Be(262_144);
         result.IsReasoning.Should().BeTrue();
+        result.Device.Should().Be("Cpu");
+        LocalReviewRunner.SelectInitialContextLength(result).Should().Be(32_768);
     }
 
     [Fact]
@@ -132,7 +134,7 @@ public sealed class LocalReviewRunnerTests
                 ""),
             new FoundryCliResult(
                 0,
-                """{"model":{"alias":"gpt-oss-20b","id":"gpt-oss-20b-generic-cpu:1","contextLength":131072}}""",
+                """{"model":{"alias":"gpt-oss-20b","id":"gpt-oss-20b-generic-cpu:1","device":"Cpu","contextLength":131072}}""",
                 ""),
             new FoundryCliResult(
                 0,
@@ -329,6 +331,17 @@ public sealed class LocalReviewRunnerTests
         detail.Should().Contain("exceeded available system memory");
         detail.Should().Contain("60.0 GiB buffer");
         detail.Should().Contain("qwen2.5-coder-7b NPU");
+    }
+
+    [Fact]
+    public void MemoryAllocationDetector_RecognizesOnnxFailures()
+    {
+        LocalReviewRunner.IsMemoryAllocationFailure(
+            "GroupQueryAttention Status Message: bad allocation").Should().BeTrue();
+        LocalReviewRunner.IsMemoryAllocationFailure(
+            "Failed to allocate memory for requested buffer of size 123").Should().BeTrue();
+        LocalReviewRunner.IsMemoryAllocationFailure(
+            "ordinary model error").Should().BeFalse();
     }
 
     [Fact]
@@ -615,8 +628,43 @@ public sealed class LocalReviewRunnerTests
 
         await fixture.Runner.RunAsync(fixture.Brief, CancellationToken.None);
 
-        fixture.Handler.RequestBody.Should().Contain("\"max_tokens\":8192");
+        fixture.Handler.RequestBody.Should().Contain("\"max_tokens\":4096");
         fixture.Handler.RequestBody.Should().Contain("/no_think");
+    }
+
+    [Fact]
+    public async Task Runner_HalvesContextAfterBadAllocation()
+    {
+        var patch = BuildFileDiff("src/first.cs", 6_000);
+        await using var fixture = await RunnerFixture.CreateAsync(
+            [
+                new StubResponse(
+                    HttpStatusCode.InternalServerError,
+                    """{"error":{"message":"GroupQueryAttention Status Message: bad allocation"}}"""),
+                new StubResponse(
+                    HttpStatusCode.OK,
+                    ChatResponse("First bug", "src/first.cs", 1)),
+            ],
+            patch,
+            contextLength: 262_144,
+            isReasoning: true,
+            device: "Cpu");
+
+        await fixture.Runner.RunAsync(fixture.Brief, CancellationToken.None);
+
+        var transcript = File.ReadAllText(Path.Combine(
+            fixture.Brief.RunDirectory,
+            LocalReviewArtifact.TranscriptFileName));
+        transcript.Should().Contain("context_length: 32768");
+        transcript.Should().Contain("=== MEMORY BACKOFF ===");
+        transcript.Should().Contain("context 16,384");
+        var run = fixture.Store.Get(fixture.Brief.PrUrl)!;
+        run.LocalReview!.Status.Should().Be(LocalReviewStatus.Completed);
+        run.LocalReview.Warnings.Should().Contain(
+            warning => warning.Contains("capped this CPU reasoning run at 32,768"));
+        run.LocalReview.Warnings.Should().Contain(
+            warning => warning.Contains("allocation failed at 32,768")
+                       && warning.Contains("16,384"));
     }
 
     [Fact]
@@ -707,8 +755,8 @@ public sealed class LocalReviewRunnerTests
         run.LocalReview.Findings.Select(finding => finding.Title)
             .Should().Equal("First chunk bug", "Second chunk bug");
         run.LocalReview.Warnings.Should().Contain(
-            warning => warning.Contains("catalog reported 131,072")
-                       && warning.Contains("runtime enforced 8,192"));
+            warning => warning.Contains("8,192-token runtime limit")
+                       && warning.Contains("instead of 131,072"));
         run.LocalReview.Warnings.Should().Contain(
             warning => warning.Contains("2 chunks")
                        && warning.Contains("8,192-token"));
@@ -895,7 +943,8 @@ public sealed class LocalReviewRunnerTests
             IReadOnlyList<StubResponse> responses,
             string patch,
             int contextLength,
-            bool isReasoning = false)
+            bool isReasoning = false,
+            string? device = null)
         {
             var connString = PrInboxDb.InMemoryConnectionString(
                 $"local-review-{Guid.NewGuid():N}");
@@ -958,7 +1007,7 @@ public sealed class LocalReviewRunnerTests
                 config,
                 prRepo,
                 new StubPatchProvider(patch),
-                new StubFoundryRuntime(contextLength, isReasoning),
+                new StubFoundryRuntime(contextLength, isReasoning, device),
                 new StubEndpointResolver(),
                 new StubFindingVerifier(),
                 new StubHttpClientFactory(handler),
@@ -1023,11 +1072,16 @@ public sealed class LocalReviewRunnerTests
     {
         private readonly int _contextLength;
         private readonly bool _isReasoning;
+        private readonly string? _device;
 
-        public StubFoundryRuntime(int contextLength, bool isReasoning = false)
+        public StubFoundryRuntime(
+            int contextLength,
+            bool isReasoning = false,
+            string? device = null)
         {
             _contextLength = contextLength;
             _isReasoning = isReasoning;
+            _device = device;
         }
 
         public Task<LocalModelRuntimeInfo> PrepareAsync(
@@ -1037,7 +1091,8 @@ public sealed class LocalReviewRunnerTests
             CancellationToken ct) =>
             Task.FromResult(new LocalModelRuntimeInfo(
                 _contextLength,
-                _isReasoning));
+                _isReasoning,
+                _device));
     }
 
     private sealed class StubFindingVerifier : ILocalFindingVerifier

@@ -667,6 +667,12 @@ are split at file and hunk boundaries. Each chunk is reviewed independently,
 then findings are combined and de-duplicated. The Review page explicitly
 reports how many chunks were used.
 
+For high-context CPU reasoning models, PR Inbox caps the initial operational
+context at 32K even when the model advertises more. If the provider still
+reports an ONNX allocation failure, PR Inbox rechunks at 16K and then 8K.
+This is a memory-safety operating policy, not a claim that the model
+architecture lacks the larger advertised window.
+
 Some Foundry variants advertise a larger architectural context than their
 current execution provider actually serves. When the endpoint returns the
 effective context limit in a 400 response, PR Inbox automatically rechunks

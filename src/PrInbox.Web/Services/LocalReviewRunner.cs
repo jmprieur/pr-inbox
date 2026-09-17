@@ -347,7 +347,8 @@ public interface IFoundryLocalRuntime
 
 public sealed record LocalModelRuntimeInfo(
     int? ContextLength,
-    bool IsReasoning = false);
+    bool IsReasoning = false,
+    string? Device = null);
 
 public sealed class LocalModelNotCachedException : Exception
 {
@@ -428,7 +429,8 @@ public sealed class FoundryLocalRuntime : IFoundryLocalRuntime
             ct);
         return new LocalModelRuntimeInfo(
             ParseContextLength(modelInfo.StandardOutput),
-            selectedModel.IsReasoning);
+            selectedModel.IsReasoning,
+            selectedModel.Device);
     }
 
     internal static bool IsServerRunning(string json)
@@ -485,6 +487,9 @@ public sealed class FoundryLocalRuntime : IFoundryLocalRuntime
         var id = model.TryGetProperty("id", out var idElement)
             ? idElement.GetString()
             : null;
+        var device = model.TryGetProperty("device", out var deviceElement)
+            ? deviceElement.GetString()
+            : null;
         if (string.IsNullOrWhiteSpace(alias) || string.IsNullOrWhiteSpace(id))
         {
             throw new FormatException("Foundry model info did not contain an alias and id.");
@@ -492,7 +497,8 @@ public sealed class FoundryLocalRuntime : IFoundryLocalRuntime
         return new FoundryModelSelection(
             alias,
             id,
-            HasCapability(model, "reasoning"));
+            HasCapability(model, "reasoning"),
+            device);
     }
 
     private static bool HasCapability(JsonElement model, string capability)
@@ -1090,61 +1096,88 @@ public sealed class LocalReviewRunner : ILocalReviewRunner
             var chunkCache = new Dictionary<string, LocalReviewParseResult>(
                 StringComparer.Ordinal);
             int? effectiveContextOverride = null;
+            var providerWarnings = new List<string>();
             async Task<AggregatedLocalReview> ReviewWithContextFallbackAsync(
                 Uri uri,
                 int advertisedContextLength)
             {
                 var selectedContextLength =
                     effectiveContextOverride ?? advertisedContextLength;
-                try
+                var fallbackWarnings = new List<string>();
+                while (true)
                 {
-                    return await ReviewPatchAsync(
-                        uri,
-                        settings.Model,
-                        pr,
-                        brief.HeadSha,
-                        patch.Patch,
-                        selectedContextLength,
-                        outputTokenBudget,
-                        runtimeInfo.IsReasoning,
-                        transcriptPath,
-                        reviewPass: ++reviewPass,
-                        chunkCache,
-                        timeout.Token);
-                }
-                catch (LocalContextLengthExceededException ex)
-                    when (ex.ContextLength > 0
-                          && ex.ContextLength < selectedContextLength)
-                {
-                    effectiveContextOverride = ex.ContextLength;
-                    var fallbackReview = await ReviewPatchAsync(
-                        uri,
-                        settings.Model,
-                        pr,
-                        brief.HeadSha,
-                        patch.Patch,
-                        ex.ContextLength,
-                        outputTokenBudget,
-                        runtimeInfo.IsReasoning,
-                        transcriptPath,
-                        reviewPass: ++reviewPass,
-                        chunkCache,
-                        timeout.Token);
-                    return fallbackReview with
+                    try
                     {
-                        Warnings =
-                        [
-                            $"Foundry catalog reported {selectedContextLength:N0} tokens, but the " +
-                            $"loaded runtime enforced {ex.ContextLength:N0}. Rechunked and retried.",
-                            .. fallbackReview.Warnings,
-                        ],
-                    };
+                        var result = await ReviewPatchAsync(
+                            uri,
+                            settings.Model,
+                            pr,
+                            brief.HeadSha,
+                            patch.Patch,
+                            selectedContextLength,
+                            outputTokenBudget,
+                            runtimeInfo.IsReasoning,
+                            transcriptPath,
+                            reviewPass: ++reviewPass,
+                            chunkCache,
+                            timeout.Token);
+                        return fallbackWarnings.Count == 0
+                            ? result
+                            : result with
+                            {
+                                Warnings = [.. fallbackWarnings, .. result.Warnings],
+                            };
+                    }
+                    catch (LocalContextLengthExceededException ex)
+                        when (ex.ContextLength > 0
+                              && ex.ContextLength < selectedContextLength)
+                    {
+                        fallbackWarnings.Add(
+                            $"Foundry reported a {ex.ContextLength:N0}-token runtime " +
+                            $"limit instead of {selectedContextLength:N0}. Rechunked and retried.");
+                        selectedContextLength = ex.ContextLength;
+                        effectiveContextOverride = selectedContextLength;
+                    }
+                    catch (LocalMemoryAllocationException ex)
+                        when (selectedContextLength > MinimumRuntimeContextLength)
+                    {
+                        var reduced = Math.Max(
+                            MinimumRuntimeContextLength,
+                            selectedContextLength / 2);
+                        await AppendTranscriptAsync(
+                            transcriptPath,
+                            $"""
+
+                            === MEMORY BACKOFF ===
+                            The provider could not allocate attention memory at
+                            context {selectedContextLength:N0}. Rechunking with
+                            context {reduced:N0}.
+                            {ex.Message}
+
+                            """,
+                            CancellationToken.None);
+                        fallbackWarnings.Add(
+                            $"Local model memory allocation failed at " +
+                            $"{selectedContextLength:N0} tokens. Rechunked at " +
+                            $"{reduced:N0} and retried.");
+                        selectedContextLength = reduced;
+                        effectiveContextOverride = selectedContextLength;
+                        chunkCache.Clear();
+                    }
                 }
             }
 
-            var contextLength = runtimeInfo.ContextLength ?? DefaultContextLength;
+            var reportedContextLength =
+                runtimeInfo.ContextLength ?? DefaultContextLength;
+            var contextLength = SelectInitialContextLength(runtimeInfo);
+            if (contextLength < reportedContextLength)
+            {
+                providerWarnings.Add(
+                    $"The model advertises {reportedContextLength:N0} tokens, but " +
+                    $"PR Inbox capped this CPU reasoning run at {contextLength:N0} " +
+                    "to reduce memory pressure.");
+            }
             AggregatedLocalReview review;
-            var providerWarnings = new List<string>();
             var providerResetCount = 0;
             while (true)
             {
@@ -1185,8 +1218,7 @@ public sealed class LocalReviewRunner : ILocalReviewRunner
                     requestUri = BuildChatCompletionsUri(endpoint);
                     contextLength =
                         effectiveContextOverride
-                        ?? runtimeInfo.ContextLength
-                        ?? DefaultContextLength;
+                        ?? SelectInitialContextLength(runtimeInfo);
                     outputTokenBudget = runtimeInfo.IsReasoning
                         ? ReasoningOutputTokenBudget
                         : OutputTokenBudget;
@@ -1494,6 +1526,10 @@ public sealed class LocalReviewRunner : ILocalReviewRunner
                         effectiveContext,
                         responseText);
                 }
+                if (IsMemoryAllocationFailure(responseText))
+                {
+                    throw new LocalMemoryAllocationException(responseText);
+                }
                 throw new HttpRequestException(
                     $"Local model request failed for patch chunk {chunkNumber}/{chunkCount} " +
                     $"({(int)response.StatusCode} {response.ReasonPhrase}): " +
@@ -1621,6 +1657,14 @@ public sealed class LocalReviewRunner : ILocalReviewRunner
         return false;
     }
 
+    internal static bool IsMemoryAllocationFailure(string responseText)
+        => responseText.Contains(
+               "bad allocation",
+               StringComparison.OrdinalIgnoreCase)
+           || responseText.Contains(
+               "Failed to allocate memory for requested buffer",
+               StringComparison.OrdinalIgnoreCase);
+
     internal static string BuildProviderErrorDetail(
         string model,
         string responseText)
@@ -1673,6 +1717,15 @@ public sealed class LocalReviewRunner : ILocalReviewRunner
             (int)(usableTokens * ConservativeCharactersPerToken),
             MinimumChunkCharacters,
             MaximumChunkCharacters);
+    }
+
+    internal static int SelectInitialContextLength(LocalModelRuntimeInfo runtimeInfo)
+    {
+        var reported = runtimeInfo.ContextLength ?? DefaultContextLength;
+        return runtimeInfo.IsReasoning
+               && string.Equals(runtimeInfo.Device, "Cpu", StringComparison.OrdinalIgnoreCase)
+            ? Math.Min(reported, CpuReasoningContextCap)
+            : reported;
     }
 
     private static LocalReviewerSettings SnapshotSettings(LocalReviewerSettings source) => new()
@@ -1733,13 +1786,15 @@ public sealed class LocalReviewRunner : ILocalReviewRunner
 
     private const int DefaultContextLength = 32_768;
     private const int OutputTokenBudget = 2_048;
-    private const int ReasoningOutputTokenBudget = 8_192;
+    private const int ReasoningOutputTokenBudget = 4_096;
     private const int PromptTokenReserve = 2_048;
     private const double ConservativeCharactersPerToken = 0.85;
     private const int MinimumChunkCharacters = 8_000;
     private const int MaximumChunkCharacters = 120_000;
     private const int MaxAggregatedFindings = 50;
     private const int MaxProviderResetRetries = 3;
+    private const int CpuReasoningContextCap = 32_768;
+    private const int MinimumRuntimeContextLength = 8_192;
     private static readonly Regex ContextLengthErrorPattern = new(
         @"maximum context length (?:of|is) (?<length>[\d,]+) tokens",
         RegexOptions.Compiled | RegexOptions.IgnoreCase);
@@ -1781,7 +1836,8 @@ internal sealed record AggregatedLocalReview(
 internal sealed record FoundryModelSelection(
     string Alias,
     string Id,
-    bool IsReasoning);
+    bool IsReasoning,
+    string? Device);
 
 internal sealed record LocalChatCompletion(
     string Content,
@@ -1812,6 +1868,14 @@ internal sealed class LocalOutputTruncatedException : Exception
         : base(
             $"The local model exhausted its {outputTokenBudget:N0}-token output " +
             "budget before returning a complete JSON result.")
+    {
+    }
+}
+
+internal sealed class LocalMemoryAllocationException : Exception
+{
+    public LocalMemoryAllocationException(string response)
+        : base(response)
     {
     }
 }
