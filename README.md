@@ -314,12 +314,17 @@ The review launcher passes each generated run directory to Copilot with
 and avoids a new folder-trust prompt for every timestamped run. The separate
 **Allow all paths** setting still controls broader path authorization.
 
-The default model is `qwen2.5-coder-7b`, which is a practical first choice on
-developer-class NPU/GPU hardware. The runner accepts any
-OpenAI-compatible loopback endpoint. Leave the endpoint blank to discover
-the current Foundry Local server with `foundry server status --output json`.
-Non-loopback URLs are rejected so a private PR patch cannot accidentally be
-sent to a remote endpoint.
+The default and currently recommended model is
+`qwen3.5-9b-generic-cpu:3`. In testing on Windows on Arm it has produced the
+most useful review reasoning while avoiding the Adreno WebGPU failures seen
+with larger GPU models. It is a reasoning model, so PR Inbox uses the larger
+output budget, final-JSON extraction, and verification path described below.
+`qwen2.5-coder-7b` remains a faster Qualcomm NPU fallback.
+
+The runner accepts any OpenAI-compatible loopback endpoint. Leave the endpoint
+blank to discover the current Foundry Local server with
+`foundry server status --output json`. Non-loopback URLs are rejected so a
+private PR patch cannot accidentally be sent to a remote endpoint.
 
 When endpoint discovery is selected, PR Inbox starts Foundry Local and loads
 the configured model automatically for each review. It never downloads a
@@ -332,9 +337,9 @@ Foundry Local model storage is configured globally, outside pr-inbox:
 ```powershell
 foundry cache cd D:\FoundryLocal\models
 foundry cache location
-foundry model download qwen2.5-coder-7b
+foundry model download qwen3.5-9b-generic-cpu:3
 foundry server start
-foundry model load qwen2.5-coder-7b
+foundry model load qwen3.5-9b-generic-cpu:3
 ```
 
 The shadow reviewer currently obtains unified patches from GitHub.com and
@@ -343,10 +348,11 @@ complete ADO patch provider is available. Oversized patches are also skipped
 rather than truncated, because a partial review must not look complete.
 Within that configured overall limit, PR Inbox reads Foundry's reported
 `contextLength`, splits the patch into conservative file/hunk-aligned chunks,
-reviews every chunk, and de-duplicates the combined findings. This lets the
-current 32K Qwen2.5 Coder variants review larger PRs without pretending a
-truncated prompt was complete. Custom OpenAI-compatible endpoints use a
-conservative 32K default because they do not expose Foundry catalog metadata.
+reviews every chunk, and de-duplicates the combined findings. This lets both
+large-context reasoning models and smaller 32K coding models review larger PRs
+without pretending a truncated prompt was complete. Custom OpenAI-compatible
+endpoints use a conservative 32K default because they do not expose Foundry
+catalog metadata.
 If a runtime enforces a lower limit than its catalog metadata (currently
 observed with the `gpt-oss-20b` WebGPU variant advertising 131K but serving
 8K), PR Inbox reads the effective limit from the 400 response, rechunks the

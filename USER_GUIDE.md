@@ -644,10 +644,12 @@ Configure it under **Settings → Local shadow reviewer**:
 - Enable or disable it independently of the normal review launcher.
 - Leave the endpoint blank to auto-discover Foundry Local, or enter an
   OpenAI-compatible loopback endpoint.
-- Choose the local model alias (default: `qwen2.5-coder-7b`).
+- Choose the local model alias or exact variant. The default and currently
+  recommended variant is `qwen3.5-9b-generic-cpu:3`; use
+  `qwen2.5-coder-7b` as a faster Qualcomm NPU fallback.
 - Set a maximum total patch size and inference timeout. The patch-size value
   is a workload cap, not the model context window. `200000` is the recommended
-  starting point for Qwen 7B; accepted patches are chunked automatically.
+  starting point; accepted patches are chunked automatically.
 
 With endpoint auto-discovery, PR Inbox starts Foundry Local and loads the
 configured model automatically. It intentionally does not download missing
@@ -698,9 +700,9 @@ a constrained system drive if necessary:
 ```powershell
 foundry cache cd D:\FoundryLocal\models
 foundry cache location
-foundry model download qwen2.5-coder-7b
+foundry model download qwen3.5-9b-generic-cpu:3
 foundry server start
-foundry model load qwen2.5-coder-7b
+foundry model load qwen3.5-9b-generic-cpu:3
 ```
 
 ### Where things live

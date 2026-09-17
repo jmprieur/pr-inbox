@@ -19,7 +19,7 @@ public class PrInboxConfigTests
         config.ReviewLauncher.AllowAllPaths.Should().BeFalse();
         config.LocalReviewer.Enabled.Should().BeFalse();
         config.LocalReviewer.Endpoint.Should().BeEmpty();
-        config.LocalReviewer.Model.Should().Be("qwen2.5-coder-7b");
+        config.LocalReviewer.Model.Should().Be("qwen3.5-9b-generic-cpu:3");
         config.LocalReviewer.MaxPatchCharacters.Should().Be(200_000);
         config.LocalReviewer.TimeoutSeconds.Should().Be(1_200);
     }

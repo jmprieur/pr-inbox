@@ -366,7 +366,7 @@ public sealed class LocalReviewerSettings
     public string Endpoint { get; set; } = string.Empty;
 
     /// <summary>Model alias or id exposed by the local endpoint.</summary>
-    public string Model { get; set; } = "qwen2.5-coder-7b";
+    public string Model { get; set; } = "qwen3.5-9b-generic-cpu:3";
 
     /// <summary>
     /// Maximum total unified-diff size accepted for a local review. This is a

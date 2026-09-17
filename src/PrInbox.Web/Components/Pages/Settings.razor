@@ -501,7 +501,7 @@ else
                 <span class="muted">Foundry Local alias or model id.</span>
                 <input type="text"
                        @bind="_localReviewerModel"
-                       placeholder="qwen2.5-coder-7b"
+                       placeholder="qwen3.5-9b-generic-cpu:3"
                        disabled="@_busy"
                        style="grid-column: 1 / -1; width: 100%; margin-top: .35rem;" />
             </label>
@@ -565,7 +565,7 @@ else
     private string _launchCommand = string.Empty;
     private bool _localReviewerEnabled;
     private string _localReviewerEndpoint = string.Empty;
-    private string _localReviewerModel = "qwen2.5-coder-7b";
+    private string _localReviewerModel = "qwen3.5-9b-generic-cpu:3";
     private int _localReviewerMaxPatchCharacters = 200_000;
     private int _localReviewerTimeoutSeconds = 1_200;
 
