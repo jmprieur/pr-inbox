@@ -80,6 +80,7 @@ public sealed class LocalFindingVerifierTests : IDisposable
             isReasoning: false,
             transcriptPath: transcript,
             reviewPass: 1,
+            progress: null,
             ct: CancellationToken.None);
 
         result.Findings.Should().BeEmpty();
@@ -139,6 +140,7 @@ public sealed class LocalFindingVerifierTests : IDisposable
             isReasoning: false,
             transcriptPath: transcript,
             reviewPass: 1,
+            progress: null,
             ct: CancellationToken.None);
 
         result.Findings.Should().ContainSingle();

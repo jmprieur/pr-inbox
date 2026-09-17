@@ -614,6 +614,29 @@ public sealed class LocalReviewRunnerTests
     }
 
     [Fact]
+    public async Task Runner_PublishesLivePhaseProgress()
+    {
+        await using var fixture = await RunnerFixture.CreateAsync(
+            HttpStatusCode.OK,
+            ChatResponse("Null dereference", "src/a.cs", 1));
+        var phases = new List<LocalReviewPhase?>();
+        fixture.Store.Changed += () =>
+        {
+            phases.Add(fixture.Store.Get(fixture.Brief.PrUrl)?
+                .LocalReview?.Phase);
+        };
+
+        await fixture.Runner.RunAsync(fixture.Brief, CancellationToken.None);
+
+        phases.Should().ContainInOrder(
+            LocalReviewPhase.Preparing,
+            LocalReviewPhase.FindingCandidates,
+            LocalReviewPhase.CuratingCandidates,
+            LocalReviewPhase.VerifyingCandidates,
+            LocalReviewPhase.Completed);
+    }
+
+    [Fact]
     public async Task Runner_UsesLargerOutputBudgetForReasoningModel()
     {
         await using var fixture = await RunnerFixture.CreateAsync(
@@ -1170,10 +1193,30 @@ public sealed class LocalReviewRunnerTests
             bool isReasoning,
             string transcriptPath,
             int reviewPass,
+            Func<int, int, string, CancellationToken, Task>? progress,
             CancellationToken ct) =>
-            Task.FromResult(new LocalReviewParseResult(
+            VerifyCoreAsync(candidates, progress, ct);
+
+        private static async Task<LocalReviewParseResult> VerifyCoreAsync(
+            IReadOnlyList<Finding> candidates,
+            Func<int, int, string, CancellationToken, Task>? progress,
+            CancellationToken ct)
+        {
+            for (var index = 0; index < candidates.Count; index++)
+            {
+                if (progress is not null)
+                {
+                    await progress(
+                        index + 1,
+                        candidates.Count,
+                        $"Verifying candidate {index + 1}/{candidates.Count}.",
+                        ct);
+                }
+            }
+            return new LocalReviewParseResult(
                 candidates,
-                Array.Empty<string>()));
+                Array.Empty<string>());
+        }
     }
 
     private sealed class StubFoundryCliRunner : IFoundryCliRunner

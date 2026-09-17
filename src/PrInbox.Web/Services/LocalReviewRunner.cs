@@ -22,6 +22,18 @@ public enum LocalReviewStatus
     Skipped,
 }
 
+public enum LocalReviewPhase
+{
+    Queued,
+    Preparing,
+    FindingCandidates,
+    CuratingCandidates,
+    VerifyingCandidates,
+    Completed,
+    Failed,
+    Skipped,
+}
+
 /// <summary>
 /// Persisted output of the optional local shadow reviewer. This artifact is
 /// intentionally separate from findings.yaml: it is informational and cannot
@@ -37,6 +49,10 @@ public sealed record LocalReviewArtifact
     public DateTimeOffset GeneratedAtUtc { get; init; }
     public long? DurationMs { get; init; }
     public int? QueuePosition { get; init; }
+    public LocalReviewPhase? Phase { get; init; }
+    public int? ProgressCurrent { get; init; }
+    public int? ProgressTotal { get; init; }
+    public string? ProgressDetail { get; init; }
     public string? Error { get; init; }
     public IReadOnlyList<string> Warnings { get; init; } = Array.Empty<string>();
     public IReadOnlyList<Finding> Findings { get; init; } = Array.Empty<Finding>();
@@ -646,6 +662,7 @@ public interface ILocalFindingVerifier
         bool isReasoning,
         string transcriptPath,
         int reviewPass,
+        Func<int, int, string, CancellationToken, Task>? progress,
         CancellationToken ct);
 }
 
@@ -676,6 +693,7 @@ public sealed class LocalFindingVerifier : ILocalFindingVerifier
         bool isReasoning,
         string transcriptPath,
         int reviewPass,
+        Func<int, int, string, CancellationToken, Task>? progress,
         CancellationToken ct)
     {
         var verified = new List<Finding>();
@@ -686,6 +704,14 @@ public sealed class LocalFindingVerifier : ILocalFindingVerifier
 
         for (var index = 0; index < candidates.Count; index++)
         {
+            if (progress is not null)
+            {
+                await progress(
+                    index + 1,
+                    candidates.Count,
+                    $"Verifying candidate {index + 1}/{candidates.Count}.",
+                    ct);
+            }
             var candidate = candidates[index];
             if (!files.TryGetValue(candidate.File, out var file))
             {
@@ -1051,6 +1077,8 @@ public sealed class LocalReviewRunner : ILocalReviewRunner
             Model = settings.Model,
             HeadSha = brief.HeadSha,
             GeneratedAtUtc = DateTimeOffset.UtcNow,
+            Phase = LocalReviewPhase.Preparing,
+            ProgressDetail = "Preparing local runtime and fetching the PR patch.",
         }, ct);
 
         try
@@ -1074,6 +1102,8 @@ public sealed class LocalReviewRunner : ILocalReviewRunner
                     GeneratedAtUtc = DateTimeOffset.UtcNow,
                     DurationMs = started.ElapsedMilliseconds,
                     Error = patch.SkipReason,
+                    Phase = LocalReviewPhase.Skipped,
+                    ProgressDetail = patch.SkipReason,
                 }, ct);
                 return;
             }
@@ -1120,6 +1150,7 @@ public sealed class LocalReviewRunner : ILocalReviewRunner
                             transcriptPath,
                             reviewPass: ++reviewPass,
                             chunkCache,
+                            brief,
                             timeout.Token);
                         return fallbackWarnings.Count == 0
                             ? result
@@ -1242,6 +1273,8 @@ public sealed class LocalReviewRunner : ILocalReviewRunner
                 DurationMs = started.ElapsedMilliseconds,
                 Warnings = review.Warnings,
                 Findings = review.Findings,
+                Phase = LocalReviewPhase.Completed,
+                ProgressDetail = $"{review.Findings.Count} verified finding(s).",
             }, ct);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -1269,6 +1302,8 @@ public sealed class LocalReviewRunner : ILocalReviewRunner
                 GeneratedAtUtc = DateTimeOffset.UtcNow,
                 DurationMs = started.ElapsedMilliseconds,
                 Error = ex.Message,
+                Phase = LocalReviewPhase.Skipped,
+                ProgressDetail = ex.Message,
             }, CancellationToken.None);
         }
         catch (Exception ex)
@@ -1304,6 +1339,8 @@ public sealed class LocalReviewRunner : ILocalReviewRunner
             GeneratedAtUtc = DateTimeOffset.UtcNow,
             DurationMs = started.ElapsedMilliseconds,
             Error = error,
+            Phase = LocalReviewPhase.Failed,
+            ProgressDetail = error,
         }, ct);
     }
 
@@ -1319,6 +1356,7 @@ public sealed class LocalReviewRunner : ILocalReviewRunner
         string transcriptPath,
         int reviewPass,
         IDictionary<string, LocalReviewParseResult> chunkCache,
+        BriefResult brief,
         CancellationToken ct)
     {
         var chunkCharacterBudget = CalculateChunkCharacterBudget(
@@ -1337,6 +1375,13 @@ public sealed class LocalReviewRunner : ILocalReviewRunner
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         for (var index = 0; index < chunks.Count; index++)
         {
+            await WriteProgressAsync(
+                brief,
+                LocalReviewPhase.FindingCandidates,
+                index + 1,
+                chunks.Count,
+                $"Finding candidates: chunk {index + 1}/{chunks.Count}.",
+                ct);
             LocalReviewParseResult parsed;
             if (chunkCache.TryGetValue(chunks[index], out var cached))
             {
@@ -1392,6 +1437,14 @@ public sealed class LocalReviewRunner : ILocalReviewRunner
 
         var curated = LocalReviewCandidateCurator.Curate(allFindings);
         warnings.AddRange(curated.Warnings);
+        await WriteProgressAsync(
+            brief,
+            LocalReviewPhase.CuratingCandidates,
+            curated.Candidates.Count,
+            allFindings.Count,
+            $"Curating candidates: selected {curated.Candidates.Count} of " +
+            $"{allFindings.Count} for verification.",
+            ct);
         await AppendTranscriptAsync(
             transcriptPath,
             $"""
@@ -1423,10 +1476,37 @@ public sealed class LocalReviewRunner : ILocalReviewRunner
             isReasoning,
             transcriptPath,
             reviewPass,
+            (current, total, detail, progressCt) =>
+                WriteProgressAsync(
+                    brief,
+                    LocalReviewPhase.VerifyingCandidates,
+                    current,
+                    total,
+                    detail,
+                    progressCt),
             ct);
         warnings.AddRange(verified.Warnings);
         return new AggregatedLocalReview(verified.Findings, warnings);
     }
+
+    private Task WriteProgressAsync(
+        BriefResult brief,
+        LocalReviewPhase phase,
+        int? current,
+        int? total,
+        string detail,
+        CancellationToken ct) =>
+        _artifacts.WriteAsync(brief, new LocalReviewArtifact
+        {
+            Status = LocalReviewStatus.Running,
+            Model = _config.LocalReviewer.Model,
+            HeadSha = brief.HeadSha,
+            GeneratedAtUtc = DateTimeOffset.UtcNow,
+            Phase = phase,
+            ProgressCurrent = current,
+            ProgressTotal = total,
+            ProgressDetail = detail,
+        }, ct);
 
     private async Task<LocalReviewParseResult> ReviewChunkAsync(
         Uri requestUri,

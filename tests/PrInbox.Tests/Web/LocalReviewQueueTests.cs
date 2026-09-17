@@ -38,6 +38,7 @@ public sealed class LocalReviewQueueTests : IAsyncLifetime
         var queue = new LocalReviewQueue(
             runner,
             new LocalReviewArtifactStore(store),
+            store,
             config,
             NullLogger<LocalReviewQueue>.Instance);
         var changedCount = 0;
@@ -62,7 +63,11 @@ public sealed class LocalReviewQueueTests : IAsyncLifetime
                     first.HeadSha,
                     "qwen2.5-coder-14b",
                     LocalReviewQueueItemStatus.Running,
-                    Position: 1));
+                    Position: 1,
+                    Phase: LocalReviewPhase.Queued,
+                    ProgressCurrent: 1,
+                    ProgressTotal: 1,
+                    ProgressDetail: "Queued at position 1."));
 
             var secondResult = await queue.EnqueueAsync(
                 second,

@@ -639,6 +639,11 @@ The Inbox also shows a global **Local review queue** panel while any local work
 is running or waiting. It links each queue entry to its Review page and updates
 positions live as jobs complete.
 
+During execution, both surfaces show the current phase and unit progress:
+preparing the runtime, finding candidates by chunk (`n/m`), curating the raw
+candidates, and verifying the selected candidates (`n/m`). The Review page
+also renders a progress bar.
+
 Configure it under **Settings → Local shadow reviewer**:
 
 - Enable or disable it independently of the normal review launcher.

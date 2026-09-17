@@ -46,7 +46,11 @@ public sealed record LocalReviewQueueItem(
     string HeadSha,
     string Model,
     LocalReviewQueueItemStatus Status,
-    int Position);
+    int Position,
+    LocalReviewPhase? Phase,
+    int? ProgressCurrent,
+    int? ProgressTotal,
+    string? ProgressDetail);
 
 public interface ILocalReviewQueue
 {
@@ -74,6 +78,7 @@ public sealed class LocalReviewQueue : BackgroundService, ILocalReviewQueue
     private readonly SemaphoreSlim _signal = new(0);
     private readonly ILocalReviewRunner _runner;
     private readonly LocalReviewArtifactStore _artifacts;
+    private readonly ReviewRunStore _runs;
     private readonly PrInboxConfig _config;
     private readonly ILogger<LocalReviewQueue> _log;
     private BriefResult? _active;
@@ -83,11 +88,13 @@ public sealed class LocalReviewQueue : BackgroundService, ILocalReviewQueue
     public LocalReviewQueue(
         ILocalReviewRunner runner,
         LocalReviewArtifactStore artifacts,
+        ReviewRunStore runs,
         PrInboxConfig config,
         ILogger<LocalReviewQueue> log)
     {
         _runner = runner;
         _artifacts = artifacts;
+        _runs = runs;
         _config = config;
         _log = log;
     }
@@ -242,13 +249,21 @@ public sealed class LocalReviewQueue : BackgroundService, ILocalReviewQueue
     private LocalReviewQueueItem ToQueueItem(
         BriefResult brief,
         LocalReviewQueueItemStatus status,
-        int position) => new(
+        int position)
+    {
+        var progress = _runs.Get(brief.PrUrl)?.LocalReview;
+        return new LocalReviewQueueItem(
             brief.PrUrl,
             brief.RunDirectory,
             brief.HeadSha,
             _config.LocalReviewer.Model,
             status,
-            position);
+            position,
+            progress?.Phase,
+            progress?.ProgressCurrent,
+            progress?.ProgressTotal,
+            progress?.ProgressDetail);
+    }
 
     private List<(BriefResult Brief, int Position)> SnapshotQueuedPositionsLocked()
     {
@@ -274,6 +289,11 @@ public sealed class LocalReviewQueue : BackgroundService, ILocalReviewQueue
                 HeadSha = item.Brief.HeadSha,
                 GeneratedAtUtc = DateTimeOffset.UtcNow,
                 QueuePosition = item.Position,
+                Phase = LocalReviewPhase.Queued,
+                ProgressCurrent = item.Position,
+                ProgressTotal = positions.Count + (_active is null ? 0 : 1),
+                ProgressDetail =
+                    $"Queued at position {item.Position}.",
             }, ct);
         }
     }

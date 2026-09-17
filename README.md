@@ -309,6 +309,11 @@ It lists the running PR, every waiting PR in order, live positions, model, HEAD,
 and links back to each Review page. The panel disappears when the queue is
 empty.
 
+Both the Review page and global queue expose live pipeline progress:
+**Preparing**, **Finding candidates (chunk n/m)**, **Curating candidates**, and
+**Verifying candidates (n/m)**. Progress is persisted in `local-review.json`,
+so the UI can show the current step rather than only a generic Running state.
+
 The review launcher passes each generated run directory to Copilot with
 `--add-dir`. This trusts that specific app-generated directory for the session
 and avoids a new folder-trust prompt for every timestamped run. The separate

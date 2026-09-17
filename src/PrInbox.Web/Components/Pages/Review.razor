@@ -160,7 +160,22 @@ else
             }
             else if (local.Status == LocalReviewStatus.Running)
             {
-                <p>Running against the local OpenAI-compatible endpoint…</p>
+                <p>
+                    @(local.ProgressDetail ?? "Running against the local OpenAI-compatible endpoint…")
+                    @if (local.ProgressCurrent is { } current
+                         && local.ProgressTotal is { } total)
+                    {
+                        <text> · <strong>@current/@total</strong></text>
+                    }
+                </p>
+                @if (local.ProgressCurrent is { } progressCurrent
+                     && local.ProgressTotal is { } progressTotal
+                     && progressTotal > 0)
+                {
+                    <progress class="local-review-progress"
+                              value="@progressCurrent"
+                              max="@progressTotal"></progress>
+                }
             }
             else if (local.Status is LocalReviewStatus.Failed or LocalReviewStatus.Skipped)
             {
