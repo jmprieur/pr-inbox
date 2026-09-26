@@ -85,9 +85,9 @@ public sealed class ReviewPublishOrchestrator
             // Fall back to the URL-only selection if no exact match.
         }
 
-        // 2. Filter out findings whose id or fingerprint already exists in
-        //    posted_reviews. Skip set fed back into the result.
-        var (postedIds, postedFps) = await _postedRepo.GetPostedFindingsForPrAsync(prRow.Identity, ct);
+        // 2. IDs are run-local; fingerprints detect repeats across runs.
+        var (postedIds, postedFps) = await _postedRepo.GetPostedFindingsForPrAsync(
+            prRow.Identity, request.RunId, ct);
         var freshFindings = new List<FindingToPost>(request.Findings.Count);
         var skipped = 0;
         foreach (var f in request.Findings)

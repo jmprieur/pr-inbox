@@ -99,12 +99,14 @@ public sealed class PostedReviewRepository
     }
 
     /// <summary>
-    /// Return the set of finding ids and fingerprints that have already been
-    /// posted for this PR (across all runs). The publisher uses this to skip
-    /// findings whose id or fingerprint is already present.
+    /// Return finding ids posted in this run and fingerprints posted across
+    /// all runs of the PR. Finding ids are only unique within a review run.
+    /// A null run id yields no ids; fingerprints still prevent cross-run
+    /// duplicates.
     /// </summary>
     public async Task<(HashSet<string> Ids, HashSet<string> Fingerprints)> GetPostedFindingsForPrAsync(
         PrIdentity identity,
+        long? reviewRunId,
         CancellationToken ct)
     {
         var ids = new HashSet<string>(StringComparer.Ordinal);
@@ -113,7 +115,7 @@ public sealed class PostedReviewRepository
         await using var conn = await _db.OpenAsync(ct);
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = """
-            SELECT finding_ids_json, finding_fingerprints_json
+            SELECT review_run_id, finding_ids_json, finding_fingerprints_json
             FROM posted_reviews
             WHERE pr_identity = $id;
             """;
@@ -121,8 +123,11 @@ public sealed class PostedReviewRepository
         await using var reader = await cmd.ExecuteReaderAsync(ct);
         while (await reader.ReadAsync(ct))
         {
-            AddJsonArrayInto(reader.GetString(0), ids);
-            AddJsonArrayInto(reader.GetString(1), fps);
+            if (reviewRunId.HasValue && !reader.IsDBNull(0) && reader.GetInt64(0) == reviewRunId.Value)
+            {
+                AddJsonArrayInto(reader.GetString(1), ids);
+            }
+            AddJsonArrayInto(reader.GetString(2), fps);
         }
         return (ids, fps);
     }

@@ -357,8 +357,10 @@ Each finding row is editable inline:
   saving refreshes the page. **✓ Mark done & back** posts nothing but
   snoozes the PR and returns you to the Inbox.
 
-Per-finding idempotency: posting the same finding twice is a no-op.
-If you re-post after editing, the publisher posts the diff.
+Per-finding idempotency: posting the same finding twice in one review run
+is a no-op, even if you edit it after posting. On a later run, a finding
+with the same file, line, and title is also skipped, but a reused finding
+ID for a different issue does not block the new comment.
 
 > **You own what you publish.** A standing notice above the **Post**
 > controls is a reminder that the review is AI-assisted but the comments
@@ -661,7 +663,7 @@ about your PRs, you can poke at the local DB directly.
 | `pr_snapshots` | Append-only per-sync snapshot of each PR's state |
 | `observed_threads` | Append-only per-comment row — replies share `platform_thread_node_id` |
 | `review_runs` | One row per Review click; immutable |
-| `posted_reviews` | One row per published finding; idempotency key |
+| `posted_reviews` | One row per successful publish call; run-local finding IDs and cross-run fingerprints for idempotency |
 | `ui_preferences` | The Web UI's toggle state (source chips, denylists, AutoSend/Yolo, etc.) |
 | `sync_runs` | One row per sync attempt; status, duration, source breakdown |
 

@@ -10,8 +10,8 @@ namespace PrInbox.Publishers.Tests;
 /// <summary>
 /// End-to-end test for <see cref="ReviewPublishOrchestrator"/> + an in-memory
 /// SQLite-backed <see cref="PostedReviewRepository"/>. Verifies dry-run does
-/// NOT touch posted_reviews, live mode does, and a second publish of the
-/// same findings skips them via per-finding idempotency.
+/// NOT touch posted_reviews and live posts are deduplicated by run-local id
+/// or cross-run fingerprint.
 /// </summary>
 public class ReviewPublishOrchestratorTests : IAsyncLifetime
 {
@@ -68,6 +68,7 @@ public class ReviewPublishOrchestratorTests : IAsyncLifetime
     [Fact]
     public async Task Live_post_writes_posted_reviews_then_second_post_skips_duplicates()
     {
+        var runId = await CreateRunAsync();
         var publisher = new RecordingPublisher(returnPosted: true, reviewId: "999", reviewUrl: "https://gh/r/999");
         var selector = new FixedSelector(publisher);
         var orch = new ReviewPublishOrchestrator(
@@ -76,7 +77,7 @@ public class ReviewPublishOrchestratorTests : IAsyncLifetime
 
         var r1 = await orch.PublishAsync(MakeRequest(
             dryRun: false,
-            findings: new[] { MakeFinding("f01"), MakeFinding("f02") }), CancellationToken.None);
+            findings: new[] { MakeFinding("f01"), MakeFinding("f02") }, runId: runId), CancellationToken.None);
 
         r1.Posted.Should().BeTrue();
         r1.PlatformReviewId.Should().Be("999");
@@ -92,11 +93,112 @@ public class ReviewPublishOrchestratorTests : IAsyncLifetime
         // Second post — same finding ids, plus one new one.
         var r2 = await orch.PublishAsync(MakeRequest(
             dryRun: false,
-            findings: new[] { MakeFinding("f01"), MakeFinding("f02"), MakeFinding("f03") }), CancellationToken.None);
+            findings: new[] { MakeFinding("f01"), MakeFinding("f02"), MakeFinding("f03") }, runId: runId), CancellationToken.None);
 
         r2.SkippedAsAlreadyPosted.Should().Be(2, "f01 and f02 are already in posted_reviews");
         publisher.LastRequest!.Findings.Should().HaveCount(1, "only f03 should reach the publisher");
         publisher.LastRequest.Findings[0].Id.Should().Be("f03");
+
+        var r3 = await orch.PublishAsync(MakeRequest(
+            dryRun: false,
+            findings: new[] { MakeFinding("f01", file: "src/Edited.cs") }, runId: runId), CancellationToken.None);
+
+        r3.SkippedAsAlreadyPosted.Should().Be(1, "the id was already posted in this run even though its fingerprint changed");
+        publisher.LastRequest.Findings[0].Id.Should().Be("f03", "no third post should reach the publisher");
+    }
+
+    [Fact]
+    public async Task New_run_reuses_id_for_different_finding_but_skips_matching_fingerprint()
+    {
+        var firstRun = await CreateRunAsync();
+        var publisher = new RecordingPublisher(returnPosted: true);
+        var orch = new ReviewPublishOrchestrator(
+            new FixedSelector(publisher), _prRepo, _postedRepo,
+            NullLogger<ReviewPublishOrchestrator>.Instance);
+
+        var original = MakeFinding("f01");
+        (await orch.PublishAsync(MakeRequest(false, new[] { original }, firstRun), CancellationToken.None))
+            .Posted.Should().BeTrue();
+
+        var secondRun = await CreateRunAsync();
+        var newFinding = MakeFinding("f01", file: "src/Other.cs", line: 20);
+        var next = await orch.PublishAsync(MakeRequest(false, new[] { newFinding }, secondRun), CancellationToken.None);
+
+        next.Posted.Should().BeTrue();
+        next.SkippedAsAlreadyPosted.Should().Be(0);
+        publisher.LastRequest!.Findings.Should().ContainSingle().Which.Should().Be(newFinding);
+        (await _postedRepo.ListForPrAsync(SampleIdentity(), CancellationToken.None))
+            .Should().HaveCount(2);
+
+        var sameIssueNewId = original with { Id = "f02" };
+        var duplicate = await orch.PublishAsync(MakeRequest(false, new[] { sameIssueNewId }, secondRun), CancellationToken.None);
+        duplicate.Posted.Should().BeFalse();
+        duplicate.SkippedAsAlreadyPosted.Should().Be(1, "the file, line, and title match an earlier run");
+        publisher.LastRequest.Findings.Should().ContainSingle().Which.Should().Be(newFinding);
+    }
+
+    [Fact]
+    public async Task Posts_without_a_run_id_use_fingerprints_not_unscoped_ids()
+    {
+        var publisher = new RecordingPublisher(returnPosted: true);
+        var orch = new ReviewPublishOrchestrator(
+            new FixedSelector(publisher), _prRepo, _postedRepo,
+            NullLogger<ReviewPublishOrchestrator>.Instance);
+        (await orch.PublishAsync(MakeRequest(false, new[] { MakeFinding("f01") }), CancellationToken.None))
+            .Posted.Should().BeTrue();
+
+        var distinct = MakeFinding("f01", file: "src/Other.cs");
+        var result = await orch.PublishAsync(MakeRequest(false, new[] { distinct }), CancellationToken.None);
+        result.Posted.Should().BeTrue();
+        result.SkippedAsAlreadyPosted.Should().Be(0);
+        publisher.LastRequest!.Findings.Should().ContainSingle().Which.Should().Be(distinct);
+
+        var duplicate = await orch.PublishAsync(MakeRequest(false, new[] { distinct }), CancellationToken.None);
+        duplicate.SkippedAsAlreadyPosted.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task Persisted_history_does_not_suppress_reused_id_after_restart()
+    {
+        var file = Path.Combine(Path.GetTempPath(), $"pr-inbox-post-{Guid.NewGuid():N}.db");
+        try
+        {
+            var connection = $"Data Source={file}";
+            await new MigrationRunner().MigrateAsync(connection);
+            var db = new PrInboxDb(connection);
+            var prs = new PullRequestRepository(db);
+            await prs.UpsertAsync(SamplePrRow(), CancellationToken.None);
+            var runs = new ReviewRunRepository(db);
+            var firstRun = await InsertRunAsync(runs);
+            var publisher = new RecordingPublisher(returnPosted: true);
+            var beforeRestart = new ReviewPublishOrchestrator(
+                new FixedSelector(publisher), prs, new PostedReviewRepository(db),
+                NullLogger<ReviewPublishOrchestrator>.Instance);
+            (await beforeRestart.PublishAsync(MakeRequest(false, new[] { MakeFinding("f01") }, firstRun), CancellationToken.None))
+                .Posted.Should().BeTrue();
+
+            // Reopen the file-backed database with new repository/orchestrator instances.
+            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+            var reopenedDb = new PrInboxDb(connection);
+            var secondRun = await InsertRunAsync(new ReviewRunRepository(reopenedDb));
+            var afterRestart = new ReviewPublishOrchestrator(
+                new FixedSelector(publisher), new PullRequestRepository(reopenedDb),
+                new PostedReviewRepository(reopenedDb),
+                NullLogger<ReviewPublishOrchestrator>.Instance);
+            var result = await afterRestart.PublishAsync(
+                MakeRequest(false, new[] { MakeFinding("f01", file: "src/New.cs") }, secondRun),
+                CancellationToken.None);
+
+            result.Posted.Should().BeTrue();
+            result.SkippedAsAlreadyPosted.Should().Be(0);
+            (await new PostedReviewRepository(reopenedDb).ListForPrAsync(SampleIdentity(), CancellationToken.None))
+                .Should().HaveCount(2);
+        }
+        finally
+        {
+            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+            if (File.Exists(file)) File.Delete(file);
+        }
     }
 
     [Fact]
@@ -139,10 +241,18 @@ public class ReviewPublishOrchestratorTests : IAsyncLifetime
         LastReviewRunHeadSha: null,
         LastPostedReviewHeadSha: null);
 
-    private static PublishRequest MakeRequest(bool dryRun, IReadOnlyList<FindingToPost> findings) =>
+    private Task<long> CreateRunAsync() => InsertRunAsync(new ReviewRunRepository(_db));
+
+    private static Task<long> InsertRunAsync(ReviewRunRepository runs) =>
+        runs.InsertAsync(
+            SampleIdentity(), DateTimeOffset.UtcNow, "brief.md",
+            $"run-{Guid.NewGuid():N}", "deadbeef", "base",
+            ReviewRunStatus.Generated, null, CancellationToken.None);
+
+    private static PublishRequest MakeRequest(bool dryRun, IReadOnlyList<FindingToPost> findings, long? runId = null) =>
         new(
             PrUrl: Url,
-            RunId: null,
+            RunId: runId,
             HeadShaAtAuthoring: "deadbeef",
             ReviewBodyHeader: "**review**",
             Findings: findings,
