@@ -92,6 +92,17 @@ listed within a few seconds:
 For GHE and ADO sources, use the **+ Add GitHub Enterprise…** and
 **+ Add Azure DevOps project…** buttons below.
 
+- **GitHub Enterprise:** enter the exact host from your PR URLs (separate
+  instances such as `microsoft.ghe.com` and `msft.ghe.com` each need their
+  own source). **Detect logins** lists your `gh` accounts for that host so
+  you can bind the source to one.
+- **Azure DevOps reviewer groups:** ADO only returns PRs that name *you*
+  as a reviewer. If PRs are assigned to a team or group you belong to,
+  click **Groups…** on the project row, then **Discover my groups** (it
+  samples recent active PRs, taking ~15 s) and tick the groups you want.
+  Each shows how many active PRs it reviews — skip broad ones like
+  "all FTEs" unless you want all of those PRs in your inbox.
+
 When you arrive on the page with no sources yet (truly fresh clone),
 **Doctor runs automatically** as soon as you add the first source —
 look at the per-source table for `Last sync`, `Open PRs`, and

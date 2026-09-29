@@ -180,6 +180,35 @@ public sealed class ConfigService : IConfigService
     }
 
     /// <inheritdoc />
+    public async Task<bool> SetAdoReviewerGroupsAsync(
+        string org,
+        string project,
+        IReadOnlyList<AdoReviewerGroup> groups,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(org) || string.IsNullOrWhiteSpace(project)) return false;
+
+        var cfg = await PrInboxConfig.LoadAsync(_configPath, ct);
+        var entry = cfg.Ado.Projects.FirstOrDefault(p =>
+            string.Equals(p.Org, org, StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(p.Project, project, StringComparison.OrdinalIgnoreCase));
+        if (entry is null) return false;
+
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        entry.ReviewerGroups.Clear();
+        foreach (var g in groups)
+        {
+            var id = g.Id?.Trim();
+            if (string.IsNullOrEmpty(id) || !seen.Add(id)) continue;
+            var name = string.IsNullOrWhiteSpace(g.Name) ? null : g.Name.Trim();
+            entry.ReviewerGroups.Add(new AdoReviewerGroup { Id = id, Name = name });
+        }
+
+        await SaveAndRefreshAsync(cfg, ct);
+        return true;
+    }
+
+    /// <inheritdoc />
     public async Task SetIgnoredReposAsync(IReadOnlyList<string> patterns, CancellationToken ct = default)
     {
         var cfg = await PrInboxConfig.LoadAsync(_configPath, ct);

@@ -61,6 +61,7 @@ builder.Services.AddSingleton<IConfigService>(sp =>
 builder.Services.AddSingleton<IGhCliRunner, GhCliRunner>();
 builder.Services.AddSingleton<IGitHubAuthDiscovery, GhCliGitHubAuthDiscovery>();
 builder.Services.AddSingleton<IGitHubRateLimitProbe, GhCliRateLimitProbe>();
+builder.Services.AddSingleton(_ => new PrInbox.Sources.AzureDevOps.AdoReviewerGroupDiscovery());
 builder.Services.AddSingleton<DoctorService>();
 
 builder.Services.AddHttpClient("publisher", c => c.Timeout = TimeSpan.FromSeconds(30));

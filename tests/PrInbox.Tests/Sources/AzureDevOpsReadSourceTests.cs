@@ -151,6 +151,69 @@ public class AzureDevOpsReadSourceTests
     }
 
     [Fact]
+    public async Task ListAssignedFastAsync_Also_Queries_ReviewerGroups_And_Dedupes()
+    {
+        var handler = new RecordingHandler();
+        handler.Enqueue("""{ "id": "self-id" }""");
+        handler.Enqueue(BuildPrPageJson(itemCount: 2, startId: 1));   // self: PRs 1, 2
+        handler.Enqueue(BuildPrPageJson(itemCount: 2, startId: 2));   // group A: PRs 2, 3
+        handler.Enqueue(BuildPrPageJson(itemCount: 1, startId: 10));  // group B: PR 10
+
+        var source = new AzureDevOpsReadSource(
+            "ado:fabrikam/Context", "fabrikam", "Context", new FakeTokenProvider("ado:fabrikam/Context"),
+            http: new HttpClient(handler),
+            reviewerGroupIds: new[] { "group-a", " ", "GROUP-A", "self-id", "group-b" });
+
+        var results = new List<RemotePullRequest>();
+        await foreach (var pr in source.ListAssignedFastAsync(CancellationToken.None))
+        {
+            results.Add(pr);
+        }
+
+        results.Select(r => r.Number).Should().Equal(1, 2, 3, 10);
+        handler.Requests.Should().HaveCount(4, "profile + self + one query per distinct group other than self");
+        handler.Requests[2].RequestUri!.Query.Should().Contain("searchCriteria.reviewerId=group-a");
+        handler.Requests[3].RequestUri!.Query.Should().Contain("searchCriteria.reviewerId=group-b");
+    }
+
+    [Fact]
+    public async Task ReviewerGroupDiscovery_Returns_Only_Groups_User_Belongs_To()
+    {
+        var handler = new RecordingHandler();
+        handler.Enqueue("""{ "id": "self-id" }""");
+        handler.Enqueue("""
+            { "count": 3, "value": [
+                { "pullRequestId": 1, "reviewers": [
+                    { "id": "g-mine", "displayName": "[P]\\Mine", "isContainer": true },
+                    { "id": "g-other", "displayName": "[P]\\Other", "isContainer": true },
+                    { "id": "person", "displayName": "Bob" } ] },
+                { "pullRequestId": 2, "reviewers": [
+                    { "id": "g-mine", "displayName": "[P]\\Mine", "isContainer": true } ] },
+                { "pullRequestId": 3, "reviewers": [] }
+            ] }
+            """);
+        handler.Enqueue("""{ "count": 1, "value": [{ "id": "self-id", "descriptor": "d-self", "memberOf": ["d-mine"] }] }""");
+        handler.Enqueue("""
+            { "count": 2, "value": [
+                { "id": "g-mine", "descriptor": "d-mine", "providerDisplayName": "[P]\\Mine", "isContainer": true },
+                { "id": "g-other", "descriptor": "d-other", "providerDisplayName": "[P]\\Other", "isContainer": true }
+            ] }
+            """);
+
+        var http = new HttpClient(handler);
+        var discovery = new AdoReviewerGroupDiscovery(
+            org => new AdoApiClient(org, new FakeTokenProvider("ado:fabrikam"), http));
+
+        var found = await discovery.DiscoverAsync("fabrikam", "Context");
+
+        found.Should().ContainSingle();
+        found[0].Should().Be(new AdoReviewerGroupCandidate("g-mine", "[P]\\Mine", 2));
+        handler.Requests[1].RequestUri!.Query.Should().NotContain("reviewerId").And.Contain("$top=1000");
+        handler.Requests[2].RequestUri!.ToString().Should()
+            .Contain("vssps.dev.azure.com/fabrikam/_apis/identities").And.Contain("queryMembership=Expanded");
+    }
+
+    [Fact]
     public async Task ListAssignedFastAsync_Pages_Until_Short_Page()
     {
         var handler = new RecordingHandler();

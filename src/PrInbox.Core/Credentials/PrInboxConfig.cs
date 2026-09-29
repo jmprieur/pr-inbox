@@ -162,6 +162,25 @@ public sealed class AdoProjectConfig
 {
     public required string Org { get; init; }
     public required string Project { get; init; }
+
+    /// <summary>
+    /// Reviewer groups (ADO teams / security groups) whose review requests
+    /// should also land in the inbox. ADO's reviewer search only matches
+    /// the identity listed on the PR, so a PR that names a group you belong
+    /// to — but not you — is invisible without this. Opt-in per group
+    /// because broad groups (e.g. "all FTEs") would flood the inbox.
+    /// </summary>
+    public List<AdoReviewerGroup> ReviewerGroups { get; init; } = new();
+}
+
+/// <summary>
+/// One ADO reviewer group. <see cref="Id"/> is the identity GUID used as
+/// <c>searchCriteria.reviewerId</c>; <see cref="Name"/> is display-only.
+/// </summary>
+public sealed class AdoReviewerGroup
+{
+    public required string Id { get; init; }
+    public string? Name { get; init; }
 }
 
 /// <summary>

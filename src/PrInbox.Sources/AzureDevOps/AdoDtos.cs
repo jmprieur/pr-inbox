@@ -82,6 +82,19 @@ internal static class AdoDtos
         [JsonPropertyName("vote")] public int Vote { get; init; }
 
         [JsonPropertyName("isRequired")] public bool IsRequired { get; init; }
+
+        /// <summary>True when the reviewer is a group/team rather than a person.</summary>
+        [JsonPropertyName("isContainer")] public bool IsContainer { get; init; }
+    }
+
+    /// <summary>Identity record from <c>vssps.dev.azure.com/{org}/_apis/identities</c>.</summary>
+    public sealed class IdentityRecord
+    {
+        [JsonPropertyName("id")] public string Id { get; init; } = string.Empty;
+        [JsonPropertyName("descriptor")] public string? Descriptor { get; init; }
+        [JsonPropertyName("providerDisplayName")] public string? ProviderDisplayName { get; init; }
+        [JsonPropertyName("isContainer")] public bool IsContainer { get; init; }
+        [JsonPropertyName("memberOf")] public List<string> MemberOf { get; init; } = new();
     }
 
     public sealed class Repository

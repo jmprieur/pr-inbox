@@ -73,10 +73,11 @@ internal sealed class AdoApiClient
 
     private async IAsyncEnumerable<AdoDtos.PullRequest> ListPullRequestsByCriterionAsync(
         string project,
-        string criterion,
-        string value,
+        string? criterion,
+        string? value,
         int pageSize,
-        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct,
+        int maxResults = 5000)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(project);
 
@@ -84,9 +85,11 @@ internal sealed class AdoApiClient
         while (true)
         {
             ct.ThrowIfCancellationRequested();
+            var filter = criterion is null
+                ? string.Empty
+                : $"searchCriteria.{criterion}={Uri.EscapeDataString(value!)}&";
             var url = $"https://dev.azure.com/{Uri.EscapeDataString(_org)}/{Uri.EscapeDataString(project)}/_apis/git/pullrequests" +
-                      $"?searchCriteria.{criterion}={Uri.EscapeDataString(value)}" +
-                      "&searchCriteria.status=active" +
+                      $"?{filter}searchCriteria.status=active" +
                       $"&$top={pageSize}&$skip={skip}" +
                       $"&api-version={ApiVersion}";
 
@@ -101,12 +104,50 @@ internal sealed class AdoApiClient
                 yield break;
             }
             skip += pageSize;
-            if (skip > 5000)
+            if (skip >= maxResults)
             {
-                _logger.LogWarning("ADO list reached safety cap at skip={Skip} for project {Project}", skip, project);
+                if (maxResults >= 5000)
+                {
+                    _logger.LogWarning("ADO list reached safety cap at skip={Skip} for project {Project}", skip, project);
+                }
                 yield break;
             }
         }
+    }
+
+    /// <summary>
+    /// List the most recent active PRs in <paramref name="project"/>
+    /// regardless of reviewer, capped at <paramref name="maxResults"/>.
+    /// Used for reviewer-group discovery only — not by sync.
+    /// </summary>
+    public IAsyncEnumerable<AdoDtos.PullRequest> ListActivePullRequestsAsync(
+        string project,
+        int maxResults,
+        CancellationToken ct = default)
+        => ListPullRequestsByCriterionAsync(project, criterion: null, value: null, pageSize: 1000, ct, maxResults);
+
+    /// <summary>
+    /// Read identities by id from the org's identity service. When
+    /// <paramref name="expandedMembership"/> is true each identity's
+    /// <c>memberOf</c> carries the descriptors of every group it belongs
+    /// to, transitively.
+    /// </summary>
+    public async Task<IReadOnlyList<AdoDtos.IdentityRecord>> GetIdentitiesAsync(
+        IReadOnlyList<string> ids,
+        bool expandedMembership,
+        CancellationToken ct)
+    {
+        var result = new List<AdoDtos.IdentityRecord>();
+        foreach (var batch in ids.Chunk(50))
+        {
+            var url = $"https://vssps.dev.azure.com/{Uri.EscapeDataString(_org)}/_apis/identities" +
+                      $"?identityIds={string.Join(',', batch.Select(Uri.EscapeDataString))}" +
+                      $"&queryMembership={(expandedMembership ? "Expanded" : "None")}" +
+                      $"&api-version={ApiVersion}";
+            var page = await GetJsonAsync<AdoDtos.ListResponse<AdoDtos.IdentityRecord>>(url, ct);
+            result.AddRange(page.Value.Where(v => v is not null));
+        }
+        return result;
     }
 
     public async Task<AdoDtos.PullRequest> GetPullRequestAsync(string project, string repoId, int prId, CancellationToken ct)
