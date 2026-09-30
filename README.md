@@ -294,7 +294,7 @@ Example:
     "projects": [
       { "org": "mseng", "project": "Context" },
       {
-        "org": "mseng", "project": "AzureDevOps",
+        "org": "fabrikam", "project": "Widgets",
         "reviewerGroups": [
           { "id": "00000000-0000-0000-0000-000000000000", "name": "[TEAM FOUNDATION]\\My Team" }
         ]
@@ -323,7 +323,7 @@ groups** button lists the groups reviewing recent active PRs that you're
 a member of, with a PR count so you can skip overly broad ones.
 
 GitHub Enterprise instances are matched by exact host: e.g.
-`microsoft.ghe.com` and `msft.ghe.com` are separate instances and each
+`contoso.ghe.com` and `fabrikam.ghe.com` are separate instances and each
 needs its own source.
 
 ---
