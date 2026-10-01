@@ -77,36 +77,39 @@ internal sealed class AdoApiClient
         string? value,
         int pageSize,
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct,
-        int maxResults = 5000)
+        int maxResults = SafetyCap)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(project);
+        if (maxResults <= 0) yield break;
 
         var skip = 0;
         while (true)
         {
             ct.ThrowIfCancellationRequested();
+            // Never request (or yield) past maxResults.
+            var top = Math.Min(pageSize, maxResults - skip);
             var filter = criterion is null
                 ? string.Empty
                 : $"searchCriteria.{criterion}={Uri.EscapeDataString(value!)}&";
             var url = $"https://dev.azure.com/{Uri.EscapeDataString(_org)}/{Uri.EscapeDataString(project)}/_apis/git/pullrequests" +
                       $"?{filter}searchCriteria.status=active" +
-                      $"&$top={pageSize}&$skip={skip}" +
+                      $"&$top={top}&$skip={skip}" +
                       $"&api-version={ApiVersion}";
 
             var page = await GetJsonAsync<AdoDtos.ListResponse<AdoDtos.PullRequest>>(url, ct);
-            foreach (var pr in page.Value)
+            foreach (var pr in page.Value.Take(top))
             {
                 yield return pr;
             }
 
-            if (page.Value.Count < pageSize)
+            if (page.Value.Count < top)
             {
                 yield break;
             }
-            skip += pageSize;
+            skip += top;
             if (skip >= maxResults)
             {
-                if (maxResults >= 5000)
+                if (maxResults >= SafetyCap)
                 {
                     _logger.LogWarning("ADO list reached safety cap at skip={Skip} for project {Project}", skip, project);
                 }
@@ -114,6 +117,9 @@ internal sealed class AdoApiClient
             }
         }
     }
+
+    /// <summary>Upper bound on rows returned by any single PR-list enumeration.</summary>
+    private const int SafetyCap = 5000;
 
     /// <summary>
     /// List the most recent active PRs in <paramref name="project"/>

@@ -214,6 +214,43 @@ public class AzureDevOpsReadSourceTests
     }
 
     [Fact]
+    public async Task ReviewerGroupDiscovery_Never_Samples_More_Than_SampleSize()
+    {
+        var handler = new RecordingHandler();
+        handler.Enqueue("""{ "id": "self-id" }""");
+        handler.Enqueue(BuildPrPageJson(itemCount: 3, startId: 1)); // server over-returns for $top=2
+
+        var http = new HttpClient(handler);
+        var discovery = new AdoReviewerGroupDiscovery(
+            org => new AdoApiClient(org, new FakeTokenProvider("ado:fabrikam"), http));
+
+        var found = await discovery.DiscoverAsync("fabrikam", "Context", sampleSize: 2);
+
+        found.Should().BeEmpty();
+        handler.Requests.Should().HaveCount(2, "profile + exactly one capped page; no group reviewers so no identity calls");
+        handler.Requests[1].RequestUri!.Query.Should().Contain("$top=2").And.Contain("$skip=0");
+    }
+
+    [Fact]
+    public async Task ReviewerGroupDiscovery_Last_Page_Requests_Only_The_Remainder()
+    {
+        var handler = new RecordingHandler();
+        handler.Enqueue("""{ "id": "self-id" }""");
+        handler.Enqueue(BuildPrPageJson(itemCount: 1000, startId: 1));
+        handler.Enqueue(BuildPrPageJson(itemCount: 500, startId: 1001));
+
+        var http = new HttpClient(handler);
+        var discovery = new AdoReviewerGroupDiscovery(
+            org => new AdoApiClient(org, new FakeTokenProvider("ado:fabrikam"), http));
+
+        await discovery.DiscoverAsync("fabrikam", "Context", sampleSize: 1500);
+
+        handler.Requests.Should().HaveCount(3);
+        handler.Requests[1].RequestUri!.Query.Should().Contain("$top=1000").And.Contain("$skip=0");
+        handler.Requests[2].RequestUri!.Query.Should().Contain("$top=500").And.Contain("$skip=1000");
+    }
+
+    [Fact]
     public async Task ListAssignedFastAsync_Pages_Until_Short_Page()
     {
         var handler = new RecordingHandler();

@@ -147,7 +147,7 @@ else
                 </p>
                 <div class="settings-inline-form-row">
                     <label>Host
-                        <input @bind="_gheHost" placeholder="github.contoso.com" />
+                        <input @bind="_gheHost" @bind:after="OnGheHostChanged" placeholder="github.contoso.com" />
                     </label>
                     <label>Identity (gh login, optional)
                         <input @bind="_gheIdentity" placeholder="default" />
@@ -890,7 +890,10 @@ else
         StateHasChanged();
         try
         {
-            _gheIdentities = await GhAuthDiscovery.ListIdentitiesAsync(host);
+            var found = await GhAuthDiscovery.ListIdentitiesAsync(host);
+            // The host may have been edited while gh was running; drop stale results.
+            if (!IsCurrentGheHost(host)) return;
+            _gheIdentities = found;
             _gheIdentitiesHost = host;
             if (string.IsNullOrWhiteSpace(_gheIdentity) && _gheIdentities.Count == 1)
             {
@@ -900,6 +903,7 @@ else
         catch (Exception ex)
         {
             Log.LogWarning(ex, "gh identity discovery failed for {Host}.", host);
+            if (!IsCurrentGheHost(host)) return;
             _gheIdentities = Array.Empty<GitHubAuthIdentity>();
             _gheIdentitiesHost = host;
         }
@@ -907,6 +911,24 @@ else
         {
             _gheDiscovering = false;
         }
+    }
+
+    private bool IsCurrentGheHost(string host)
+        => string.Equals(_gheHost?.Trim(), host, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Logins detected for one host are meaningless for another: clear the
+    /// detected list and any login picked from it when the host changes.
+    /// A login the user typed by hand is kept.
+    /// </summary>
+    private void OnGheHostChanged()
+    {
+        if (_gheIdentitiesHost is null || IsCurrentGheHost(_gheIdentitiesHost)) return;
+        var pickedFromList = _gheIdentities?.Any(i =>
+            string.Equals(i.Login, _gheIdentity?.Trim(), StringComparison.OrdinalIgnoreCase)) == true;
+        if (pickedFromList) _gheIdentity = string.Empty;
+        _gheIdentities = null;
+        _gheIdentitiesHost = null;
     }
 
     private void CancelGheForm()
