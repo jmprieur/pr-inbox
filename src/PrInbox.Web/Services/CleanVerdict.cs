@@ -9,7 +9,7 @@ namespace PrInbox.Web.Services;
 /// produces the same verdict.
 /// </summary>
 /// <remarks>
-/// Convergence semantics: two or more reviewer models ran and an explicit
+/// Convergence semantics: two primary reviewer models ran and an explicit
 /// <c>asymmetry</c> block reports zero on every counter. That's the
 /// strongest signal the dual-model-review protocol emits — two
 /// structurally-different reviewers independently arrived at "no findings"
@@ -26,7 +26,9 @@ public static class CleanVerdict
     /// </summary>
     public static bool IsConverged(FindingsDocument doc)
     {
-        return doc.Models.Count >= 2
+        var primaryModels = doc.EffectivePrimaryModels;
+        return doc.ReviewStatus is null or ReviewCompleteness.Complete
+            && primaryModels.Count >= 2
             && doc.Asymmetry is { BothFound: 0 } asym
             && (asym.OpusOnly ?? 0) == 0
             && (asym.GptOnly ?? 0) == 0;
@@ -38,25 +40,39 @@ public static class CleanVerdict
     /// <list type="bullet">
     ///   <item>"Reviewed clean 2h ago · 2 reviewers agree · claude-opus-4.8 + gpt-5.6-terra"</item>
     ///   <item>"Reviewed clean 2h ago · 2 reviewers · claude-opus-4.8 + gpt-5.6-terra" (no asymmetry block in the doc)</item>
-    ///   <item>"Reviewed clean 5m ago · claude-opus-4.8" (single reviewer)</item>
+    ///   <item>"Degraded review 5m ago · 1 primary reviewer · gpt-5.6-terra"</item>
+    ///   <item>"Review incomplete 5m ago · Opus reviewer failed"</item>
     ///   <item>"Reviewed clean just now" (no models declared)</item>
     /// </list>
     /// </summary>
     public static string BuildTooltip(FindingsDocument doc, DateTimeOffset nowUtc)
     {
         var when = FormatRelative(nowUtc - doc.GeneratedAtUtc);
-        var modelsStr = doc.Models.Count > 0 ? string.Join(" + ", doc.Models) : null;
+        var primaryModels = doc.EffectivePrimaryModels;
+        var modelsStr = primaryModels.Count > 0 ? string.Join(" + ", primaryModels) : null;
+
+        if (doc.ReviewStatus == ReviewCompleteness.Incomplete)
+        {
+            return $"Review incomplete {when} · {doc.IncompleteReason ?? "primary reviewer missing"}";
+        }
+
+        if (doc.ReviewStatus == ReviewCompleteness.Degraded)
+        {
+            var degraded = $"Degraded review {when} · {primaryModels.Count} primary reviewer";
+            if (modelsStr is not null) degraded += $" · {modelsStr}";
+            return degraded;
+        }
 
         if (IsConverged(doc))
         {
-            var part = $"Reviewed clean {when} · {doc.Models.Count} reviewers agree";
+            var part = $"Reviewed clean {when} · {primaryModels.Count} reviewers agree";
             if (modelsStr is not null) part += $" · {modelsStr}";
             return part;
         }
 
-        if (doc.Models.Count >= 2)
+        if (primaryModels.Count >= 2)
         {
-            var part = $"Reviewed clean {when} · {doc.Models.Count} reviewers";
+            var part = $"Reviewed clean {when} · {primaryModels.Count} reviewers";
             if (modelsStr is not null) part += $" · {modelsStr}";
             return part;
         }

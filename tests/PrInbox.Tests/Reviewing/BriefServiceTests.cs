@@ -285,8 +285,14 @@ public class BriefServiceTests
             priorRuns: Array.Empty<ReviewRunRow>(),
             runDir: @"C:\runs\x");
 
-        Assert.Contains("running **as** the dual-model-review agent", md);
-        Assert.Contains("do not spawn another dual-model-review", md);
+        Assert.Contains("running **as** the dual-model-review orchestrator", md);
+        Assert.Contains("one Opus-family model and one GPT-family model", md);
+        Assert.Contains("Do not spawn another `dual-model-review` orchestrator", md);
+        Assert.Contains("local-review.json", md);
+        Assert.Contains("shadow-only", md);
+        Assert.Contains("review_status: incomplete", md);
+        Assert.Contains("primary_models", md);
+        Assert.Contains("shadow_models", md);
     }
 
     [Fact]

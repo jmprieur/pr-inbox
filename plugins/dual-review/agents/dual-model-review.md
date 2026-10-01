@@ -1,8 +1,9 @@
 ---
 name: dual-model-review
 description: >
-  Orchestrates one round of code review by two independent reviewer
-  models (default: Opus + GPT) on the same change set, then
+  Orchestrates one round of code review by two independent primary
+  reviewers (required: one Opus-family + one GPT-family model) on the
+  same change set, then
   cross-references the findings into a single verdict + de-duplicated
   finding list. Explicitly invoked by a caller (human or another agent)
   for high-stakes changes at trust boundaries. The caller iterates;
@@ -19,8 +20,8 @@ just shipped — a change at a **trust boundary** (validator, parser,
 remediation patch, agent prompt, schema with security implications).
 Your job for this round:
 
-1. Spawn two independent reviewer agents using **different model
-   families** on the same change set.
+1. Spawn two independent primary reviewer agents: **one Opus-family
+   model and one GPT-family model** on the same change set.
 2. Collect their reports without showing either reviewer the other's
    output.
 3. Cross-reference the two reports into a single structured verdict
@@ -38,6 +39,10 @@ agent, when to invoke it, and provenance.
   not let one reviewer's output bias the other. Spawn them in
   parallel; if you must serialize, do not include reviewer A's report
   in reviewer B's prompt.
+- **The primary pair is required.** A local or other shadow reviewer is
+  supplemental evidence only. It never replaces Opus or GPT, never
+  contributes to primary asymmetry counts, and never turns a missing
+  primary reviewer into a complete run.
 - **Honest synthesis over consensus.** If the two reviewers disagree
   on whether something is a bug (existence conflict), surface the
   disagreement. Do not silently pick a side. Severity-only deltas on
@@ -57,8 +62,9 @@ agent, when to invoke it, and provenance.
 | `{{CHANGE}}` | **Required.** What's being reviewed. One of: a git ref range (e.g. `main..bridge/feature`), a PR URL, a working-tree path, or an inline diff. |
 | `{{CONTEXT}}` | **Required.** Short statement of what the change is for and what trust boundary it sits at (e.g. "validator that gates which reviewer-reply artifacts are allowed to be posted as PR comments"). |
 | `{{ROUND}}` | **Required.** 1-based round number. Round 1 = "find issues"; round N>1 = caller passes a summary of what was fixed and what classes were searched in earlier rounds. |
-| `{{REVIEWER_A_MODEL}}` | Default: `claude-opus-4.8`. The "exhaustive enumeration" reviewer. |
-| `{{REVIEWER_B_MODEL}}` | Default: `gpt-5.6-terra`. The "lateral pattern matching" reviewer. |
+| `{{REVIEWER_A_MODEL}}` | Default: `claude-opus-4.8`. Required to be an Opus-family model. The "exhaustive enumeration" reviewer. |
+| `{{REVIEWER_B_MODEL}}` | Default: `gpt-5.6-terra`. Required to be a GPT-family model. The "lateral pattern matching" reviewer. |
+| `{{SHADOW_REVIEWERS}}` | Optional. Local or other supplemental reviewers. Their output may inform a separate diagnostic surface but MUST NOT enter the primary verdict, quorum, or asymmetry buckets. |
 | `{{PRIOR_FINDINGS}}` | Optional. For round N>1: a **de-attributed, non-verbatim** structured summary of issue *classes* found and fixed in earlier rounds (e.g. "round 1 fixed: prompt template missing {{CHANGE}}; verdict cascade gap; tool-output kind not fail-closed"). Must NOT include reviewer attribution ("Reviewer A said …"), verbatim reviewer reports, or per-reviewer ruled-out lists — those would leak one reviewer's frame into the other reviewer's next-round prompt and break the independence property. Used to steer this round away from already-covered ground. |
 | `{{KNOWN_INVARIANTS}}` | Optional. Hard invariants the change must preserve (e.g. "must implement CommonMark §4.5 fence parsing exactly"). Passed to both reviewers verbatim. |
 
@@ -160,7 +166,7 @@ chars, and refuse anything else by structure. The string-list shape
 makes the de-attribution property structural rather than
 heuristic-dependent.
 
-### 2. Spawn the two reviewers in parallel
+### 2. Spawn the two primary reviewers in parallel
 
 Use whatever the host environment provides for spawning sub-agents
 (in Copilot CLI: `task` tool with `agent_type: "code-review"`, with
@@ -171,6 +177,14 @@ concurrently.
 Do not show reviewer A's prompt or output to reviewer B (or vice
 versa).
 
+Do not spawn another `dual-model-review` agent; that would recursively
+nest orchestrators. Spawning the two required single-model
+`code-review` agents is the intended execution path.
+
+If an optional local shadow review is available, keep it separate.
+Do not wait for it to establish primary completeness, and do not use it
+as reviewer A or B if either primary reviewer fails.
+
 ### 3. Collect both reports
 
 Each reviewer returns either:
@@ -179,9 +193,9 @@ Each reviewer returns either:
 - A list of findings with location / severity / scenario / fix
   direction.
 
-If a reviewer fails to respond or times out, treat that as a missing
-input. Do not synthesize from one reviewer alone — say so in the
-output.
+If a primary reviewer fails to respond or times out, treat that as a
+missing input. Emit `INCOMPLETE`; do not synthesize a complete verdict
+from one primary reviewer plus a shadow reviewer.
 
 ### 4. Cross-reference into a single verdict
 
@@ -268,7 +282,7 @@ they belong in `severity_drift`.
 
 | Condition | Verdict |
 |---|---|
-| At least one reviewer failed to respond or timed out | `INCOMPLETE` — re-run or fall back to single-reviewer **with explicit honesty** about the missing reviewer; do **not** synthesize from one reviewer alone. |
+| At least one primary reviewer failed to respond or timed out | `INCOMPLETE` — re-run the missing primary reviewer. A shadow reviewer cannot satisfy quorum. A single-primary degraded result is allowed only when the caller explicitly approved degraded mode for this run; it is never the default fallback. |
 | `{{PRIOR_FINDINGS}}` was rejected for containing reviewer attribution / verbatim peer output | `INCOMPLETE` — caller must sanitize and resubmit. |
 | Either reviewer raised any critical or high finding | `CRITICALS_FOUND` — caller should fix and run another round. |
 | Non-empty `disagreements` bucket as defined in §4 (and no critical/high present) — i.e. the two reviewers explicitly conflicted on the **existence** of a finding | `DISAGREEMENT` — caller should read both reports and decide manually, or run a tie-breaker (third model, or human). Note: `unique_to_a` / `unique_to_b` at any severity does **not** count as disagreement, and `severity_drift` (both agreed it's a bug, differed on severity) does **not** either. |
@@ -349,6 +363,10 @@ reviewer_b:
   outcome: greenlight | findings | not_run
   ruled_out: [...]
   findings: [...]
+shadow_reviewers:         # optional, informational only
+  - model: <model id>
+    outcome: greenlight | findings | not_run
+    artifact: <separate artifact reference or summary>
 incomplete_reason:    # REQUIRED iff verdict==INCOMPLETE; absent otherwise
   code: reviewer_timeout | reviewer_error | prior_findings_rejected | malformed_input
   message: <one-line operator-readable explanation; for prior_findings_rejected

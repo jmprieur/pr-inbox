@@ -37,6 +37,12 @@ public sealed record ReviewRun(
     public IReadOnlyDictionary<string, string> BodyOverrides { get; init; }
         = new Dictionary<string, string>(StringComparer.Ordinal);
 
+    /// <summary>
+    /// Best-effort local-model shadow review. Never feeds the publishing
+    /// workflow; it is displayed separately for comparison.
+    /// </summary>
+    public LocalReviewArtifact? LocalReview { get; init; }
+
     private int CountBy(FindingSeverity s)
         => Findings?.Findings.Count(f => f.Severity == s) ?? 0;
 }
@@ -71,8 +77,38 @@ public sealed class ReviewRunStore
                 run = run with { BodyOverrides = fromDisk };
             }
         }
+        if (run.LocalReview is null)
+        {
+            run = run with
+            {
+                LocalReview = LocalReviewArtifact.ReadFromDisk(run.RunDirectory),
+            };
+        }
         _byPrUrl[run.PrUrl] = run;
         Raise();
+    }
+
+    public void UpdateLocalReview(
+        string prUrl,
+        string runDirectory,
+        LocalReviewArtifact artifact)
+    {
+        var changed = false;
+        _byPrUrl.AddOrUpdate(prUrl,
+            _ => throw new InvalidOperationException("No run for url"),
+            (_, prev) =>
+            {
+                if (!string.Equals(
+                        prev.RunDirectory,
+                        runDirectory,
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    return prev;
+                }
+                changed = true;
+                return prev with { LocalReview = artifact };
+            });
+        if (changed) Raise();
     }
 
     public void UpdateFindings(string prUrl, FindingsDocument? doc, IReadOnlyList<string> errors)

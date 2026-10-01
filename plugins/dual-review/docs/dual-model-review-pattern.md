@@ -25,6 +25,13 @@ ones, but no smaller).
 **Critique-then-fix loop driven by two independent reviewers in
 different model families, run to convergence.**
 
+The primary quorum is exactly one Opus-family reviewer plus one
+GPT-family reviewer. A local reviewer can run alongside them as a
+shadow diagnostic, but it is not a third primary reviewer and cannot
+replace either member of the pair. If Opus or GPT is missing, the
+primary review is incomplete unless the operator explicitly approved a
+degraded single-primary run.
+
 ```
    ┌──────────┐
    │  change  │

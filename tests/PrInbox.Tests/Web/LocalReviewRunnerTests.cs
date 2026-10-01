@@ -1,0 +1,1336 @@
+using System.Net;
+using System.Text;
+using System.Text.Json;
+using Microsoft.Extensions.Logging.Abstractions;
+using PrInbox.Core.Credentials;
+using PrInbox.Core.Findings;
+using PrInbox.Core.Models;
+using PrInbox.Core.Reviewing;
+using PrInbox.Core.Storage;
+using PrInbox.Web.Services;
+
+namespace PrInbox.Tests.Web;
+
+public sealed class LocalReviewRunnerTests
+{
+    [Fact]
+    public void ParseStatusJson_ReturnsLoopbackEndpoint()
+    {
+        var json = """
+            {
+              "running": true,
+              "webUrls": ["http://127.0.0.1:62058"]
+            }
+            """;
+
+        FoundryLocalEndpointResolver.ParseStatusJson(json)
+            .Should().Be("http://127.0.0.1:62058");
+    }
+
+    [Fact]
+    public void FoundryRuntime_RecognizesServerStateAndCachedModelNames()
+    {
+        FoundryLocalRuntime.IsServerRunning(
+            """{"running":true,"state":"ready"}""").Should().BeTrue();
+        FoundryLocalRuntime.IsServerRunning(
+            """{"running":false,"state":"not_running"}""").Should().BeFalse();
+
+        var cached = """
+            {
+              "variants": [
+                {
+                  "alias": "qwen2.5-coder-7b",
+                  "variantName": "qwen2.5-coder-7b-instruct-qnn-npu",
+                  "variantId": "qwen2.5-coder-7b-instruct-qnn-npu:1",
+                  "cached": true
+                }
+              ]
+            }
+            """;
+
+        FoundryLocalRuntime.IsModelCached(
+            cached, "qwen2.5-coder-7b").Should().BeTrue();
+        FoundryLocalRuntime.IsModelCached(
+            cached, "qwen2.5-coder-7b-instruct-qnn-npu").Should().BeTrue();
+        FoundryLocalRuntime.IsModelCached(
+            cached, "qwen2.5-coder-14b").Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task FoundryRuntime_StartsServerAndLoadsCachedModel()
+    {
+        var cli = new StubFoundryCliRunner(
+            new FoundryCliResult(
+                0, """{"running":false,"state":"not_running"}""", ""),
+            new FoundryCliResult(0, "started", ""),
+            new FoundryCliResult(
+                0,
+                """{"variants":[{"alias":"qwen2.5-coder-7b","cached":true}]}""",
+                ""),
+            new FoundryCliResult(
+                0,
+                """{"model":{"alias":"qwen2.5-coder-7b","id":"qwen2.5-coder-7b-instruct-qnn-npu:1","device":"Npu","contextLength":32768}}""",
+                ""),
+            new FoundryCliResult(0, """{"variants":[]}""", ""),
+            new FoundryCliResult(0, "loaded", ""));
+        var runtime = new FoundryLocalRuntime(cli);
+
+        var result = await runtime.PrepareAsync(
+            configuredEndpoint: "",
+            model: "qwen2.5-coder-7b",
+            timeoutSeconds: 600,
+            ct: CancellationToken.None);
+
+        result.ContextLength.Should().Be(32_768);
+        result.IsReasoning.Should().BeFalse();
+        cli.Commands.Should().Equal(
+            "server status --output json",
+            "server start",
+            "model list --cached --variants --output json --limit 500",
+            "model info qwen2.5-coder-7b --output json",
+            "model list --loaded --variants --output json --limit 500",
+            "model load qwen2.5-coder-7b");
+    }
+
+    [Fact]
+    public async Task FoundryRuntime_DetectsReasoningCapability()
+    {
+        var cli = new StubFoundryCliRunner(
+            new FoundryCliResult(
+                0, """{"running":true,"state":"ready"}""", ""),
+            new FoundryCliResult(
+                0,
+                """{"variants":[{"alias":"qwen3.5-9b","variantName":"qwen3.5-9b-generic-cpu","variantId":"qwen3.5-9b-generic-cpu:3","cached":true}]}""",
+                ""),
+            new FoundryCliResult(
+                0,
+                """{"model":{"alias":"qwen3.5-9b","id":"qwen3.5-9b-generic-cpu:3","device":"Cpu","contextLength":262144,"capabilities":"reasoning,tool-calling"}}""",
+                ""),
+            new FoundryCliResult(0, """{"variants":[]}""", ""),
+            new FoundryCliResult(0, "loaded", ""));
+        var runtime = new FoundryLocalRuntime(cli);
+
+        var result = await runtime.PrepareAsync(
+            configuredEndpoint: "",
+            model: "qwen3.5-9b-generic-cpu:3",
+            timeoutSeconds: 600,
+            ct: CancellationToken.None);
+
+        result.ContextLength.Should().Be(262_144);
+        result.IsReasoning.Should().BeTrue();
+        result.Device.Should().Be("Cpu");
+        LocalReviewRunner.SelectInitialContextLength(result).Should().Be(32_768);
+    }
+
+    [Fact]
+    public async Task FoundryRuntime_UnloadsSiblingVariantBeforeExactLoad()
+    {
+        var cli = new StubFoundryCliRunner(
+            new FoundryCliResult(
+                0, """{"running":true,"state":"ready"}""", ""),
+            new FoundryCliResult(
+                0,
+                """{"variants":[{"alias":"gpt-oss-20b","variantId":"gpt-oss-20b-generic-cpu:1","cached":true}]}""",
+                ""),
+            new FoundryCliResult(
+                0,
+                """{"model":{"alias":"gpt-oss-20b","id":"gpt-oss-20b-generic-cpu:1","device":"Cpu","contextLength":131072}}""",
+                ""),
+            new FoundryCliResult(
+                0,
+                """{"variants":[{"alias":"gpt-oss-20b","variantId":"gpt-oss-20b-generic-gpu:1"},{"alias":"gpt-oss-20b","variantId":"gpt-oss-20b-generic-cpu:1"}]}""",
+                ""),
+            new FoundryCliResult(0, "unloaded", ""),
+            new FoundryCliResult(0, "loaded", ""));
+        var runtime = new FoundryLocalRuntime(cli);
+
+        await runtime.PrepareAsync(
+            configuredEndpoint: "",
+            model: "gpt-oss-20b-generic-cpu",
+            timeoutSeconds: 600,
+            ct: CancellationToken.None);
+
+        cli.Commands.Should().ContainInOrder(
+            "model info gpt-oss-20b-generic-cpu --output json",
+            "model list --loaded --variants --output json --limit 500",
+            "model unload gpt-oss-20b-generic-gpu:1",
+            "model load gpt-oss-20b-generic-cpu");
+        cli.Commands.Should().NotContain(
+            "model unload gpt-oss-20b-generic-cpu:1");
+    }
+
+    [Fact]
+    public async Task FoundryRuntime_MissingModelDoesNotDownloadAndShowsInstructions()
+    {
+        var cli = new StubFoundryCliRunner(
+            new FoundryCliResult(
+                0, """{"running":true,"state":"ready"}""", ""),
+            new FoundryCliResult(0, """{"variants":[]}""", ""));
+        var runtime = new FoundryLocalRuntime(cli);
+
+        var act = () => runtime.PrepareAsync(
+            configuredEndpoint: "",
+            model: "qwen2.5-coder-14b",
+            timeoutSeconds: 600,
+            ct: CancellationToken.None);
+
+        var error = await act.Should()
+            .ThrowAsync<LocalModelNotCachedException>();
+        error.Which.Message.Should()
+            .Contain("foundry model download qwen2.5-coder-14b");
+        cli.Commands.Should().NotContain(c => c.Contains("download"));
+    }
+
+    [Fact]
+    public void BuildChatCompletionsUri_HandlesBaseAndV1Endpoints()
+    {
+        LocalReviewRunner.BuildChatCompletionsUri("http://127.0.0.1:62058")
+            .Should().Be(new Uri("http://127.0.0.1:62058/v1/chat/completions"));
+        LocalReviewRunner.BuildChatCompletionsUri("http://localhost:39839/v1")
+            .Should().Be(new Uri("http://localhost:39839/v1/chat/completions"));
+        LocalReviewRunner.BuildChatCompletionsUri(
+                "http://localhost:39839/v1/chat/completions")
+            .Should().Be(new Uri(
+                "http://localhost:39839/v1/chat/completions"));
+    }
+
+    [Theory]
+    [InlineData(32_768, 24_371)]
+    [InlineData(40_960, 31_334)]
+    [InlineData(131_072, 107_929)]
+    public void ChunkBudget_ScalesWithModelContext(
+        int contextLength,
+        int expectedCharacters)
+    {
+        LocalReviewRunner.CalculateChunkCharacterBudget(contextLength)
+            .Should().Be(expectedCharacters);
+    }
+
+    [Fact]
+    public void PatchChunker_SplitsOnFileBoundariesWithinBudget()
+    {
+        var first = BuildFileDiff("src/a.cs", 7_000);
+        var second = BuildFileDiff("src/b.cs", 7_000);
+        var third = BuildFileDiff("src/c.cs", 7_000);
+
+        var chunks = LocalReviewPatchChunker.Chunk(
+            first + second + third,
+            maxCharacters: 15_000);
+
+        chunks.Should().HaveCount(2);
+        chunks.Should().OnlyContain(chunk => chunk.Length <= 15_000);
+        string.Concat(chunks).Should().Be(first + second + third);
+        chunks[0].Should().Contain("src/a.cs").And.Contain("src/b.cs");
+        chunks[1].Should().Contain("src/c.cs");
+    }
+
+    [Fact]
+    public void PatchChunker_SplitsOversizedFileAndRepeatsItsHeader()
+    {
+        var patch = BuildFileDiff("src/large.cs", 30_000);
+
+        var chunks = LocalReviewPatchChunker.Chunk(
+            patch,
+            maxCharacters: 10_000);
+
+        chunks.Should().HaveCountGreaterThan(1);
+        chunks.Should().OnlyContain(chunk => chunk.Length <= 10_000);
+        chunks.Should().OnlyContain(chunk =>
+            chunk.StartsWith("diff --git a/src/large.cs b/src/large.cs"));
+    }
+
+    [Fact]
+    public void ExtractChatContent_ReadsOpenAiResponse()
+    {
+        var response = """
+            {
+              "choices": [
+                {
+                  "message": {
+                    "role": "assistant",
+                    "content": "{\"findings\":[]}"
+                  }
+                }
+              ]
+            }
+            """;
+
+        LocalReviewRunner.ExtractChatContent(response)
+            .Should().Be("{\"findings\":[]}");
+    }
+
+    [Fact]
+    public void ExtractChatCompletion_ReportsOutputTruncation()
+    {
+        var response = """
+            {
+              "choices": [
+                {
+                  "message": { "content": "analysis without final JSON" },
+                  "finish_reason": "length"
+                }
+              ]
+            }
+            """;
+
+        var completion = LocalReviewRunner.ExtractChatCompletion(response);
+
+        completion.Content.Should().Be("analysis without final JSON");
+        completion.FinishReason.Should().Be("length");
+    }
+
+    [Fact]
+    public void ContextErrorParser_ReadsEffectiveRuntimeLimit()
+    {
+        var response = """
+            {"error":{"message":"This request requires 16922 total tokens (14874 input + 2048 output), which exceeds the model's maximum context length of 8192 tokens."}}
+            """;
+
+        LocalReviewRunner.TryParseEffectiveContextLength(
+            response,
+            out var contextLength).Should().BeTrue();
+        contextLength.Should().Be(8_192);
+    }
+
+    [Fact]
+    public void ConnectionResetDetector_ReadsNestedSocketError()
+    {
+        var error = new HttpRequestException(
+            "An error occurred while sending the request.",
+            new IOException(
+                "Unable to read data from the transport connection.",
+                new System.Net.Sockets.SocketException(
+                    (int)System.Net.Sockets.SocketError.ConnectionReset)));
+
+        LocalReviewRunner.IsConnectionReset(error).Should().BeTrue();
+    }
+
+    [Fact]
+    public void ProviderErrorDetail_AddsWebGpuFallbackInstructions()
+    {
+        var detail = LocalReviewRunner.BuildProviderErrorDetail(
+            "gpt-oss-20b",
+            """{"error":{"message":"WebGPU validation failed. binding index 4 not present"}}""");
+
+        detail.Should().Contain("WebGPU variant is incompatible");
+        detail.Should().Contain(
+            "foundry model download gpt-oss-20b-generic-cpu");
+        detail.Should().Contain(
+            "set the local reviewer model to gpt-oss-20b-generic-cpu");
+    }
+
+    [Fact]
+    public void ProviderErrorDetail_ExplainsCpuAllocationFailure()
+    {
+        var detail = LocalReviewRunner.BuildProviderErrorDetail(
+            "gpt-oss-20b-generic-cpu",
+            """
+            {"error":{"message":"BFCArena::AllocateRawInternal Failed to allocate memory for requested buffer of size 64434643968"}}
+            """);
+
+        detail.Should().Contain("exceeded available system memory");
+        detail.Should().Contain("60.0 GiB buffer");
+        detail.Should().Contain("qwen2.5-coder-7b NPU");
+    }
+
+    [Fact]
+    public void MemoryAllocationDetector_RecognizesOnnxFailures()
+    {
+        LocalReviewRunner.IsMemoryAllocationFailure(
+            "GroupQueryAttention Status Message: bad allocation").Should().BeTrue();
+        LocalReviewRunner.IsMemoryAllocationFailure(
+            "Failed to allocate memory for requested buffer of size 123").Should().BeTrue();
+        LocalReviewRunner.IsMemoryAllocationFailure(
+            "ordinary model error").Should().BeFalse();
+    }
+
+    [Fact]
+    public void ResponseParser_AcceptsFencedJsonAndDropsMalformedFindings()
+    {
+        var response = """
+            ```json
+            {
+              "findings": [
+                {
+                  "severity": "high",
+                  "confidence": "high",
+                  "file": "src/example.cs",
+                  "line": 42,
+                  "title": "Null value reaches dereference",
+                  "body": "The new branch permits null and dereferences it."
+                },
+                {
+                  "severity": "medium",
+                  "file": "",
+                  "title": "Malformed"
+                }
+              ]
+            }
+            ```
+            """;
+
+        var parsed = LocalReviewResponseParser.Parse(
+            response, "qwen2.5-coder-7b");
+
+        parsed.Findings.Should().ContainSingle();
+        parsed.Findings[0].Should().BeEquivalentTo(new Finding
+        {
+            Id = "local-01",
+            Severity = FindingSeverity.High,
+            Confidence = FindingConfidence.High,
+            FoundBy = new[] { "qwen2.5-coder-7b" },
+            File = "src/example.cs",
+            Line = 42,
+            DiffAnchorable = true,
+            Title = "Null value reaches dereference",
+            Body = "The new branch permits null and dereferences it.",
+        });
+        parsed.Warnings.Should().ContainSingle()
+            .Which.Should().Contain("Ignored malformed local finding #2");
+    }
+
+    [Fact]
+    public void ResponseParser_AcceptsCommonLocalModelAliases()
+    {
+        var response = """
+            {
+              "findings": [
+                {
+                  "issue": "Potential null dereference",
+                  "description": "Calling Trim on a null input throws.",
+                  "severity": "High",
+                  "location": "a.cs",
+                  "line": 1
+                }
+              ]
+            }
+            """;
+
+        var parsed = LocalReviewResponseParser.Parse(
+            response, "qwen2.5-coder-7b");
+
+        parsed.Warnings.Should().BeEmpty();
+        parsed.Findings.Should().ContainSingle();
+        parsed.Findings[0].Title.Should().Be("Potential null dereference");
+        parsed.Findings[0].Body.Should().Be(
+            "Calling Trim on a null input throws.");
+        parsed.Findings[0].File.Should().Be("a.cs");
+        parsed.Findings[0].Severity.Should().Be(FindingSeverity.High);
+        parsed.Findings[0].Confidence.Should().Be(FindingConfidence.Medium);
+    }
+
+    [Fact]
+    public void ResponseParser_UsesFinalJsonAfterVisibleReasoning()
+    {
+        var response = """
+            I considered this code:
+            { not valid JSON }
+            An illustrative object is {"note":"not the result"}.
+            Final answer:
+            ```json
+            {"findings":[]}
+            ```
+            """;
+
+        var parsed = LocalReviewResponseParser.Parse(
+            response,
+            "qwen3.5-9b-generic-cpu:3");
+
+        parsed.Findings.Should().BeEmpty();
+        parsed.Warnings.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void ResponseParser_RecoversCompleteFindingBeforeIncompleteTail()
+    {
+        var response = """
+            Thinking Process:
+            I considered several possible issues.
+            </think>
+
+            {
+              "findings": [
+                {
+                  "severity": "high",
+                  "confidence": "high",
+                  "file": "src/a.cs",
+                  "line": 2,
+                  "title": "Complete candidate",
+                  "body": "This object is complete."
+                },
+                {
+                  "severity": "medium",
+                  "confidence": "high",
+                  "file": "src/b.cs",
+                  "line": 4,
+                  "title": "Incomplete candidate",
+                  "body": "The model stopped here
+            """;
+
+        var parsed = LocalReviewResponseParser.Parse(
+            response,
+            "qwen3.5-9b-generic-cpu:3");
+
+        parsed.Findings.Should().ContainSingle();
+        parsed.Findings[0].Title.Should().Be("Complete candidate");
+        parsed.Warnings.Should().ContainSingle(
+            warning => warning.Contains("Recovered 1 complete finding")
+                       && warning.Contains("incomplete trailing output"));
+    }
+
+    [Fact]
+    public void ResponseParser_DoesNotRecoverIllustrativeReasoningObject()
+    {
+        var response = """
+            Thinking Process:
+            An example would be {"findings":[{"severity":"high"}]}.
+            The model stopped before producing a final answer.
+            """;
+
+        var act = () => LocalReviewResponseParser.Parse(
+            response,
+            "qwen3.5-9b-generic-cpu:3");
+
+        act.Should().Throw<FormatException>();
+    }
+
+    [Fact]
+    public void ReviewRunStore_RehydratesLocalArtifact()
+    {
+        var runDirectory = Path.Combine(
+            Path.GetTempPath(), $"pr-inbox-local-review-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(runDirectory);
+        try
+        {
+            var artifact = new LocalReviewArtifact
+            {
+                Status = LocalReviewStatus.Completed,
+                Model = "qwen2.5-coder-7b",
+                HeadSha = "abcdef1",
+                GeneratedAtUtc = DateTimeOffset.UtcNow,
+                Findings = Array.Empty<Finding>(),
+            };
+            File.WriteAllText(
+                Path.Combine(runDirectory, LocalReviewArtifact.FileName),
+                JsonSerializer.Serialize(
+                    artifact, LocalReviewArtifact.JsonOptions));
+
+            var store = new ReviewRunStore();
+            store.StartedRun(new ReviewRun(
+                RunId: 1,
+                PrUrl: "https://github.com/owner/repo/pull/1",
+                RunDirectory: runDirectory,
+                HeadSha: "abcdef1",
+                StartedAtUtc: DateTimeOffset.UtcNow,
+                FindingsAtUtc: null,
+                Findings: null,
+                FindingsErrors: Array.Empty<string>()));
+
+            store.Get("https://github.com/owner/repo/pull/1")!
+                .LocalReview.Should().BeEquivalentTo(artifact);
+        }
+        finally
+        {
+            Directory.Delete(runDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void ReviewRunStore_IgnoresLocalResultFromSupersededRun()
+    {
+        var store = new ReviewRunStore();
+        const string url = "https://github.com/owner/repo/pull/1";
+        store.StartedRun(new ReviewRun(
+            RunId: 2,
+            PrUrl: url,
+            RunDirectory: @"D:\reviews\new",
+            HeadSha: "abcdef2",
+            StartedAtUtc: DateTimeOffset.UtcNow,
+            FindingsAtUtc: null,
+            Findings: null,
+            FindingsErrors: Array.Empty<string>()));
+
+        store.UpdateLocalReview(
+            url,
+            @"D:\reviews\old",
+            new LocalReviewArtifact
+            {
+                Status = LocalReviewStatus.Completed,
+                Model = "qwen2.5-coder-7b",
+                HeadSha = "abcdef1",
+                GeneratedAtUtc = DateTimeOffset.UtcNow,
+            });
+
+        store.Get(url)!.LocalReview.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task Runner_WritesCompletedArtifactWithoutChangingAuthoritativeFindings()
+    {
+        await using var fixture = await RunnerFixture.CreateAsync(
+            HttpStatusCode.OK,
+            """
+            {
+              "choices": [
+                {
+                  "message": {
+                    "content": "{\"findings\":[{\"issue\":\"Null dereference\",\"description\":\"Trim throws for null.\",\"severity\":\"high\",\"location\":\"src/a.cs\",\"line\":1}]}"
+                  }
+                }
+              ]
+            }
+            """);
+
+        await fixture.Runner.RunAsync(fixture.Brief, CancellationToken.None);
+
+        var run = fixture.Store.Get(fixture.Brief.PrUrl)!;
+        run.Findings.Should().BeNull(
+            "the local shadow result must not replace findings.yaml");
+        run.LocalReview.Should().NotBeNull();
+        run.LocalReview!.Status.Should().Be(LocalReviewStatus.Completed);
+        run.LocalReview.Findings.Should().ContainSingle()
+            .Which.Title.Should().Be("Null dereference");
+        File.Exists(Path.Combine(
+            fixture.Brief.RunDirectory,
+            LocalReviewArtifact.FileName)).Should().BeTrue();
+        var transcript = File.ReadAllText(Path.Combine(
+            fixture.Brief.RunDirectory,
+            LocalReviewArtifact.TranscriptFileName));
+        transcript.Should().Contain("LOCAL SHADOW REVIEW TRANSCRIPT");
+        transcript.Should().Contain("--- SYSTEM PROMPT ---");
+        transcript.Should().Contain("--- USER PROMPT ---");
+        transcript.Should().Contain("return input.Trim()");
+        transcript.Should().Contain("--- RAW RESPONSE ---");
+        transcript.Should().Contain("HTTP 200 OK");
+        transcript.Should().Contain("Null dereference");
+
+        fixture.Handler.RequestBody.Should().Contain("return input.Trim()");
+        fixture.Handler.RequestBody.Should().Contain(
+            "\"response_format\":{\"type\":\"json_object\"}");
+        fixture.Handler.RequestBody.Should().Contain("removed old code");
+        fixture.Handler.RequestBody.Should().Contain("post-change code");
+        fixture.Handler.RequestBody.Should()
+            .NotContain("triage the existing review threads");
+    }
+
+    [Fact]
+    public async Task Runner_PublishesLivePhaseProgress()
+    {
+        await using var fixture = await RunnerFixture.CreateAsync(
+            HttpStatusCode.OK,
+            ChatResponse("Null dereference", "src/a.cs", 1));
+        var phases = new List<LocalReviewPhase?>();
+        fixture.Store.Changed += () =>
+        {
+            phases.Add(fixture.Store.Get(fixture.Brief.PrUrl)?
+                .LocalReview?.Phase);
+        };
+
+        await fixture.Runner.RunAsync(fixture.Brief, CancellationToken.None);
+
+        phases.Should().ContainInOrder(
+            LocalReviewPhase.Preparing,
+            LocalReviewPhase.FindingCandidates,
+            LocalReviewPhase.CuratingCandidates,
+            LocalReviewPhase.VerifyingCandidates,
+            LocalReviewPhase.Completed);
+    }
+
+    [Fact]
+    public async Task Runner_UsesLargerOutputBudgetForReasoningModel()
+    {
+        await using var fixture = await RunnerFixture.CreateAsync(
+            [
+                new StubResponse(
+                    HttpStatusCode.OK,
+                    ChatResponse("Null dereference", "src/a.cs", 1)),
+            ],
+            StubPatchProvider.DefaultPatch,
+            contextLength: 262_144,
+            isReasoning: true);
+
+        await fixture.Runner.RunAsync(fixture.Brief, CancellationToken.None);
+
+        fixture.Handler.RequestBody.Should().Contain("\"max_tokens\":4096");
+        fixture.Handler.RequestBody.Should().Contain("/no_think");
+    }
+
+    [Fact]
+    public async Task Runner_HalvesContextAfterBadAllocation()
+    {
+        var patch = BuildFileDiff("src/first.cs", 6_000);
+        await using var fixture = await RunnerFixture.CreateAsync(
+            [
+                new StubResponse(
+                    HttpStatusCode.InternalServerError,
+                    """{"error":{"message":"GroupQueryAttention Status Message: bad allocation"}}"""),
+                new StubResponse(
+                    HttpStatusCode.OK,
+                    ChatResponse("First bug", "src/first.cs", 1)),
+            ],
+            patch,
+            contextLength: 262_144,
+            isReasoning: true,
+            device: "Cpu");
+
+        await fixture.Runner.RunAsync(fixture.Brief, CancellationToken.None);
+
+        var transcript = File.ReadAllText(Path.Combine(
+            fixture.Brief.RunDirectory,
+            LocalReviewArtifact.TranscriptFileName));
+        transcript.Should().Contain("context_length: 32768");
+        transcript.Should().Contain("=== MEMORY BACKOFF ===");
+        transcript.Should().Contain("context 16,384");
+        var run = fixture.Store.Get(fixture.Brief.PrUrl)!;
+        run.LocalReview!.Status.Should().Be(LocalReviewStatus.Completed);
+        run.LocalReview.Warnings.Should().Contain(
+            warning => warning.Contains("capped this CPU reasoning run at 32,768"));
+        run.LocalReview.Warnings.Should().Contain(
+            warning => warning.Contains("allocation failed at 32,768")
+                       && warning.Contains("16,384"));
+    }
+
+    [Fact]
+    public async Task Runner_PersistsFailureWithoutThrowingOrChangingAuthoritativeFindings()
+    {
+        await using var fixture = await RunnerFixture.CreateAsync(
+            HttpStatusCode.InternalServerError,
+            """{"error":{"message":"model failed"}}""");
+
+        var act = () => fixture.Runner.RunAsync(
+            fixture.Brief, CancellationToken.None);
+
+        await act.Should().NotThrowAsync();
+        var run = fixture.Store.Get(fixture.Brief.PrUrl)!;
+        run.Findings.Should().BeNull();
+        run.LocalReview!.Status.Should().Be(LocalReviewStatus.Failed);
+        run.LocalReview.Error.Should().Contain("Local model request failed");
+        var transcript = File.ReadAllText(Path.Combine(
+            fixture.Brief.RunDirectory,
+            LocalReviewArtifact.TranscriptFileName));
+        transcript.Should().Contain("HTTP 500 Internal Server Error");
+        transcript.Should().Contain("model failed");
+        transcript.Should().Contain("=== REVIEW FAILED ===");
+    }
+
+    [Fact]
+    public async Task Runner_ChunksLargePatchAndAggregatesFindings()
+    {
+        var patch = BuildFileDiff("src/a.cs", 15_000)
+            + BuildFileDiff("src/b.cs", 15_000);
+        await using var fixture = await RunnerFixture.CreateAsync(
+            [
+                new StubResponse(
+                    HttpStatusCode.OK,
+                    ChatResponse(
+                        "First bug",
+                        "src/a.cs",
+                        1)),
+                new StubResponse(
+                    HttpStatusCode.OK,
+                    ChatResponse(
+                        "Second bug",
+                        "src/b.cs",
+                        1)),
+            ],
+            patch,
+            contextLength: 24_576);
+
+        await fixture.Runner.RunAsync(fixture.Brief, CancellationToken.None);
+
+        fixture.Handler.RequestBodies.Should().HaveCount(2);
+        var run = fixture.Store.Get(fixture.Brief.PrUrl)!;
+        run.LocalReview!.Status.Should().Be(LocalReviewStatus.Completed);
+        run.LocalReview.Findings.Select(finding => finding.Title)
+            .Should().Equal("First bug", "Second bug");
+        run.LocalReview.Findings.Select(finding => finding.Id)
+            .Should().Equal("local-01", "local-02");
+        run.LocalReview.Warnings.Should().ContainSingle(
+            warning => warning.Contains("2 chunks"));
+    }
+
+    [Fact]
+    public async Task Runner_RechunksWhenRuntimeLimitIsLowerThanCatalog()
+    {
+        var patch = BuildFileDiff("src/first.cs", 7_000)
+            + BuildFileDiff("src/second.cs", 7_000);
+        var contextError = """
+            {"error":{"message":"Failed to handle OpenAI completion: This request requires 16922 total tokens (14874 input + 2048 output), which exceeds the model's maximum context length of 8192 tokens."}}
+            """;
+        await using var fixture = await RunnerFixture.CreateAsync(
+            [
+                new StubResponse(HttpStatusCode.BadRequest, contextError),
+                new StubResponse(
+                    HttpStatusCode.OK,
+                    ChatResponse("First chunk bug", "src/first.cs", 1)),
+                new StubResponse(
+                    HttpStatusCode.OK,
+                    ChatResponse("Second chunk bug", "src/second.cs", 1)),
+            ],
+            patch,
+            contextLength: 131_072);
+
+        await fixture.Runner.RunAsync(fixture.Brief, CancellationToken.None);
+
+        fixture.Handler.RequestBodies.Should().HaveCount(3);
+        var run = fixture.Store.Get(fixture.Brief.PrUrl)!;
+        run.LocalReview!.Status.Should().Be(LocalReviewStatus.Completed);
+        run.LocalReview.Findings.Select(finding => finding.Title)
+            .Should().Equal("First chunk bug", "Second chunk bug");
+        run.LocalReview.Warnings.Should().Contain(
+            warning => warning.Contains("8,192-token runtime limit")
+                       && warning.Contains("instead of 131,072"));
+        run.LocalReview.Warnings.Should().Contain(
+            warning => warning.Contains("2 chunks")
+                       && warning.Contains("8,192-token"));
+        var transcript = File.ReadAllText(Path.Combine(
+            fixture.Brief.RunDirectory,
+            LocalReviewArtifact.TranscriptFileName));
+        transcript.Should().Contain("REQUEST pass 1, chunk 1/1");
+        transcript.Should().Contain("HTTP 400 Bad Request");
+        transcript.Should().Contain("REQUEST pass 2, chunk 1/2");
+    }
+
+    [Fact]
+    public async Task Runner_RecoversAfterConnectionReset()
+    {
+        var reset = new HttpRequestException(
+            "An error occurred while sending the request.",
+            new IOException(
+                "Unable to read data from the transport connection.",
+                new System.Net.Sockets.SocketException(
+                    (int)System.Net.Sockets.SocketError.ConnectionReset)));
+        await using var fixture = await RunnerFixture.CreateAsync(
+            [
+                new StubResponse(
+                    HttpStatusCode.ServiceUnavailable,
+                    string.Empty,
+                    reset),
+                new StubResponse(
+                    HttpStatusCode.OK,
+                    ChatResponse("Recovered bug", "src/a.cs", 1)),
+            ],
+            StubPatchProvider.DefaultPatch,
+            contextLength: 32_768);
+
+        await fixture.Runner.RunAsync(fixture.Brief, CancellationToken.None);
+
+        fixture.Handler.RequestBodies.Should().HaveCount(2);
+        var run = fixture.Store.Get(fixture.Brief.PrUrl)!;
+        run.LocalReview!.Status.Should().Be(LocalReviewStatus.Completed);
+        run.LocalReview.Findings.Should().ContainSingle()
+            .Which.Title.Should().Be("Recovered bug");
+        run.LocalReview.Warnings.Should().ContainSingle(
+            warning => warning.Contains("closed the connection")
+                       && warning.Contains("checkpoints"));
+        var transcript = File.ReadAllText(Path.Combine(
+            fixture.Brief.RunDirectory,
+            LocalReviewArtifact.TranscriptFileName));
+        transcript.Should().Contain("REQUEST pass 1, chunk 1/1");
+        transcript.Should().Contain("PROVIDER CONNECTION RESET");
+        transcript.Should().Contain("REQUEST pass 2, chunk 1/1");
+        transcript.Should().Contain("HTTP 200 OK");
+    }
+
+    [Fact]
+    public async Task Runner_ResumesAtFailedChunkAfterConnectionReset()
+    {
+        var reset = new HttpRequestException(
+            "An error occurred while sending the request.",
+            new IOException(
+                "Unable to read data from the transport connection.",
+                new System.Net.Sockets.SocketException(
+                    (int)System.Net.Sockets.SocketError.ConnectionReset)));
+        var patch = BuildFileDiff("src/first.cs", 15_000)
+            + BuildFileDiff("src/second.cs", 15_000);
+        await using var fixture = await RunnerFixture.CreateAsync(
+            [
+                new StubResponse(
+                    HttpStatusCode.OK,
+                    ChatResponse("First bug", "src/first.cs", 1)),
+                new StubResponse(
+                    HttpStatusCode.ServiceUnavailable,
+                    string.Empty,
+                    reset),
+                new StubResponse(
+                    HttpStatusCode.OK,
+                    ChatResponse("Second bug", "src/second.cs", 1)),
+            ],
+            patch,
+            contextLength: 24_576);
+
+        await fixture.Runner.RunAsync(fixture.Brief, CancellationToken.None);
+
+        fixture.Handler.RequestBodies.Should().HaveCount(3);
+        var run = fixture.Store.Get(fixture.Brief.PrUrl)!;
+        run.LocalReview!.Status.Should().Be(LocalReviewStatus.Completed);
+        run.LocalReview.Findings.Select(finding => finding.Title)
+            .Should().Equal("First bug", "Second bug");
+        var transcript = File.ReadAllText(Path.Combine(
+            fixture.Brief.RunDirectory,
+            LocalReviewArtifact.TranscriptFileName));
+        transcript.Should().Contain("REQUEST pass 1, chunk 1/2");
+        transcript.Should().Contain("REQUEST pass 1, chunk 2/2");
+        transcript.Should().Contain("REUSED COMPLETED CHUNK pass 2, chunk 1/2");
+        transcript.Should().Contain("REQUEST pass 2, chunk 2/2");
+    }
+
+    [Fact]
+    public void DiffFilter_RejectsOldLineFindingAndKeepsAddedLineFinding()
+    {
+        var patch = """
+            diff --git a/scripts/Reconcile.ps1 b/scripts/Reconcile.ps1
+            index 1111111..2222222 100644
+            --- a/scripts/Reconcile.ps1
+            +++ b/scripts/Reconcile.ps1
+            @@ -317,3 +340,7 @@
+             $warnings = @()
+            +$targetEntryCount = @($target.PSObject.Properties).Count
+            +if ($targetEntryCount -eq 0 -and $directDeps.Count -gt 0) {
+            +    $escalations += [pscustomobject]@{
+            +        reason = 'assets-file-has-no-resolved-packages'
+            +    }
+            +}
+             $nextStep = $true
+            """;
+        var parsed = new LocalReviewParseResult(
+            [
+                new Finding
+                {
+                    Id = "local-01",
+                    Severity = FindingSeverity.High,
+                    Confidence = FindingConfidence.High,
+                    FoundBy = ["qwen2.5-coder-14b"],
+                    File = "scripts/Reconcile.ps1",
+                    Line = 317,
+                    Title = "Empty graph reported idempotent",
+                },
+                new Finding
+                {
+                    Id = "local-02",
+                    Severity = FindingSeverity.Medium,
+                    Confidence = FindingConfidence.High,
+                    FoundBy = ["qwen2.5-coder-14b"],
+                    File = "scripts/Reconcile.ps1",
+                    Line = 342,
+                    Title = "New guard has another bug",
+                },
+            ],
+            Array.Empty<string>());
+
+        var filtered = LocalReviewDiffIndex.FilterToAddedLines(parsed, patch);
+
+        filtered.Findings.Should().ContainSingle()
+            .Which.Title.Should().Be("New guard has another bug");
+        filtered.Warnings.Should().ContainSingle(
+            warning => warning.Contains("Empty graph reported idempotent")
+                       && warning.Contains(
+                           "not anchored to an added post-change line"));
+    }
+
+    [Fact]
+    public void CandidateCurator_CollapsesLocationsAndCapsVerificationWork()
+    {
+        var candidates = new List<Finding>
+        {
+            Candidate("src/a.cs", 10, "Weak duplicate", FindingSeverity.Medium,
+                FindingConfidence.Medium, "short"),
+            Candidate("src/a.cs", 10, "Strong duplicate", FindingSeverity.High,
+                FindingConfidence.High, "more complete explanation"),
+            Candidate("src/a.cs", 20, "Second A", FindingSeverity.High),
+            Candidate("src/a.cs", 30, "Third A deferred", FindingSeverity.High),
+            Candidate("src/b.cs", 1, "B1", FindingSeverity.Critical),
+            Candidate("src/b.cs", 2, "B2", FindingSeverity.High),
+            Candidate("src/b.cs", 3, "B3 deferred", FindingSeverity.High),
+            Candidate("src/c.cs", 1, "C1", FindingSeverity.High),
+            Candidate("src/d.cs", 1, "D1", FindingSeverity.Medium),
+            Candidate("src/e.cs", 1, "E1", FindingSeverity.Medium),
+            Candidate("src/f.cs", 1, "F1 deferred overall", FindingSeverity.Low),
+            Candidate("src/g.cs", 1, "G1 deferred overall", FindingSeverity.Low),
+        };
+
+        var result = LocalReviewCandidateCurator.Curate(candidates);
+
+        result.Candidates.Should().HaveCount(
+            LocalReviewCandidateCurator.MaxCandidates);
+        result.Candidates.Should().ContainSingle(candidate =>
+            candidate.File == "src/a.cs"
+            && candidate.Line == 10
+            && candidate.Title == "Strong duplicate");
+        result.Candidates.Count(candidate => candidate.File == "src/a.cs")
+            .Should().Be(LocalReviewCandidateCurator.MaxCandidatesPerFile);
+        result.Candidates.Count(candidate => candidate.File == "src/b.cs")
+            .Should().Be(LocalReviewCandidateCurator.MaxCandidatesPerFile);
+        result.Candidates[0].Title.Should().Be("B1");
+        result.Warnings.Should().Contain(
+            warning => warning.Contains("Collapsed 2 local candidates")
+                       && warning.Contains("src/a.cs:10"));
+        result.Warnings.Should().Contain(
+            warning => warning.Contains("at most 2 candidates per file"));
+        result.Warnings.Should().Contain(
+            warning => warning.Contains("at most 8 candidates"));
+    }
+
+    private static Finding Candidate(
+        string file,
+        int line,
+        string title,
+        FindingSeverity severity,
+        FindingConfidence confidence = FindingConfidence.High,
+        string body = "body") => new()
+    {
+        Id = title,
+        Severity = severity,
+        Confidence = confidence,
+        FoundBy = ["local"],
+        File = file,
+        Line = line,
+        DiffAnchorable = true,
+        Title = title,
+        Body = body,
+    };
+
+    private sealed class RunnerFixture : IAsyncDisposable
+    {
+        private readonly Microsoft.Data.Sqlite.SqliteConnection _keepAlive;
+        private readonly string _runDirectory;
+
+        private RunnerFixture(
+            Microsoft.Data.Sqlite.SqliteConnection keepAlive,
+            string runDirectory,
+            LocalReviewRunner runner,
+            ReviewRunStore store,
+            BriefResult brief,
+            StubHttpHandler handler)
+        {
+            _keepAlive = keepAlive;
+            _runDirectory = runDirectory;
+            Runner = runner;
+            Store = store;
+            Brief = brief;
+            Handler = handler;
+        }
+
+        public LocalReviewRunner Runner { get; }
+        public ReviewRunStore Store { get; }
+        public BriefResult Brief { get; }
+        public StubHttpHandler Handler { get; }
+
+        public static async Task<RunnerFixture> CreateAsync(
+            HttpStatusCode status,
+            string response)
+            => await CreateAsync(
+                [new StubResponse(status, response)],
+                StubPatchProvider.DefaultPatch,
+                contextLength: 32_768);
+
+        public static async Task<RunnerFixture> CreateAsync(
+            IReadOnlyList<StubResponse> responses,
+            string patch,
+            int contextLength,
+            bool isReasoning = false,
+            string? device = null)
+        {
+            var connString = PrInboxDb.InMemoryConnectionString(
+                $"local-review-{Guid.NewGuid():N}");
+            var db = new PrInboxDb(connString);
+            var keepAlive = await db.OpenAsync();
+            await new MigrationRunner().MigrateAsync(connString);
+
+            var url = "https://github.com/owner/repo/pull/7";
+            var prRepo = new PullRequestRepository(db);
+            await prRepo.UpsertAsync(new PullRequestRow(
+                    Identity: new PrIdentity(url, "gh.com:1#7"),
+                    SourceKind: SourceKind.GitHub,
+                    SourceId: "gh.com",
+                    DisplayRepo: "owner/repo",
+                    Number: 7,
+                    Title: "Exercise local review",
+                    AuthorLogin: "author",
+                    Url: url,
+                    Status: PullRequestStatus.Open,
+                    TrackingReason: TrackingReason.Assigned,
+                    IdentityUsed: "owner",
+                    FirstSeenAt: DateTimeOffset.UtcNow,
+                    LastSyncedAt: DateTimeOffset.UtcNow,
+                    EnrichState: EnrichState.Enriched,
+                    LastBriefedHeadSha: null,
+                    LastReviewRunHeadSha: null,
+                    LastPostedReviewHeadSha: null),
+                CancellationToken.None);
+
+            var runDirectory = Path.Combine(
+                Path.GetTempPath(),
+                $"pr-inbox-local-runner-{Guid.NewGuid():N}");
+            Directory.CreateDirectory(runDirectory);
+            var brief = new BriefResult(
+                RunId: 1,
+                RunDirectory: runDirectory,
+                BriefPath: Path.Combine(runDirectory, "brief.md"),
+                MetadataPath: Path.Combine(runDirectory, "metadata.json"),
+                HeadSha: "abcdef1234567",
+                PrUrl: url);
+
+            var store = new ReviewRunStore();
+            store.StartedRun(new ReviewRun(
+                RunId: brief.RunId,
+                PrUrl: brief.PrUrl,
+                RunDirectory: brief.RunDirectory,
+                HeadSha: brief.HeadSha,
+                StartedAtUtc: DateTimeOffset.UtcNow,
+                FindingsAtUtc: null,
+                Findings: null,
+                FindingsErrors: Array.Empty<string>()));
+
+            var handler = new StubHttpHandler(responses);
+            var config = new PrInboxConfig();
+            config.LocalReviewer.Enabled = true;
+            config.LocalReviewer.Endpoint = "http://127.0.0.1:39839";
+            config.LocalReviewer.Model = "qwen2.5-coder-7b";
+
+            var runner = new LocalReviewRunner(
+                config,
+                prRepo,
+                new StubPatchProvider(patch),
+                new StubFoundryRuntime(contextLength, isReasoning, device),
+                new StubEndpointResolver(),
+                new StubFindingVerifier(),
+                new StubHttpClientFactory(handler),
+                new LocalReviewArtifactStore(store),
+                NullLogger<LocalReviewRunner>.Instance);
+
+            return new RunnerFixture(
+                keepAlive, runDirectory, runner, store, brief, handler);
+        }
+
+        public async ValueTask DisposeAsync()
+        {
+            await _keepAlive.DisposeAsync();
+            Directory.Delete(_runDirectory, recursive: true);
+        }
+    }
+
+    private sealed class StubPatchProvider : IReviewPatchProvider
+    {
+        public const string DefaultPatch = """
+            --- a/src/a.cs
+            +++ b/src/a.cs
+            @@ -1 +1 @@
+            -return input ?? string.Empty;
+            +return input.Trim();
+            """;
+
+        private readonly string _patch;
+
+        public StubPatchProvider(string patch)
+        {
+            _patch = patch;
+        }
+
+        public Task<ReviewPatchResult> GetPatchAsync(
+            PullRequestRow pr,
+            int maxCharacters,
+            CancellationToken ct) =>
+            Task.FromResult(ReviewPatchResult.Success(_patch));
+
+        public Task<PostChangeFileResult> GetPostChangeFileAsync(
+            PullRequestRow pr,
+            string path,
+            string headSha,
+            int maxCharacters,
+            CancellationToken ct) =>
+            Task.FromResult(new PostChangeFileResult(
+                "return input.Trim();",
+                false,
+                null));
+    }
+
+    private sealed class StubEndpointResolver : ILocalModelEndpointResolver
+    {
+        public Task<string> ResolveAsync(
+            string configuredEndpoint,
+            CancellationToken ct) =>
+            Task.FromResult("http://127.0.0.1:39839");
+    }
+
+    private sealed class StubFoundryRuntime : IFoundryLocalRuntime
+    {
+        private readonly int _contextLength;
+        private readonly bool _isReasoning;
+        private readonly string? _device;
+
+        public StubFoundryRuntime(
+            int contextLength,
+            bool isReasoning = false,
+            string? device = null)
+        {
+            _contextLength = contextLength;
+            _isReasoning = isReasoning;
+            _device = device;
+        }
+
+        public Task<LocalModelRuntimeInfo> PrepareAsync(
+            string configuredEndpoint,
+            string model,
+            int timeoutSeconds,
+            CancellationToken ct) =>
+            Task.FromResult(new LocalModelRuntimeInfo(
+                _contextLength,
+                _isReasoning,
+                _device));
+    }
+
+    private sealed class StubFindingVerifier : ILocalFindingVerifier
+    {
+        public Task<LocalReviewParseResult> VerifyAsync(
+            Uri requestUri,
+            string model,
+            PullRequestRow pr,
+            string headSha,
+            string patch,
+            IReadOnlyList<Finding> candidates,
+            int contextLength,
+            bool isReasoning,
+            string transcriptPath,
+            int reviewPass,
+            Func<int, int, string, CancellationToken, Task>? progress,
+            CancellationToken ct) =>
+            VerifyCoreAsync(candidates, progress, ct);
+
+        private static async Task<LocalReviewParseResult> VerifyCoreAsync(
+            IReadOnlyList<Finding> candidates,
+            Func<int, int, string, CancellationToken, Task>? progress,
+            CancellationToken ct)
+        {
+            for (var index = 0; index < candidates.Count; index++)
+            {
+                if (progress is not null)
+                {
+                    await progress(
+                        index + 1,
+                        candidates.Count,
+                        $"Verifying candidate {index + 1}/{candidates.Count}.",
+                        ct);
+                }
+            }
+            return new LocalReviewParseResult(
+                candidates,
+                Array.Empty<string>());
+        }
+    }
+
+    private sealed class StubFoundryCliRunner : IFoundryCliRunner
+    {
+        private readonly Queue<FoundryCliResult> _results;
+
+        public StubFoundryCliRunner(params FoundryCliResult[] results)
+        {
+            _results = new Queue<FoundryCliResult>(results);
+        }
+
+        public List<string> Commands { get; } = new();
+
+        public Task<FoundryCliResult> RunAsync(
+            IReadOnlyList<string> arguments,
+            TimeSpan timeout,
+            CancellationToken ct)
+        {
+            Commands.Add(string.Join(' ', arguments));
+            return Task.FromResult(_results.Dequeue());
+        }
+    }
+
+    private sealed class StubHttpClientFactory : IHttpClientFactory
+    {
+        private readonly HttpClient _client;
+
+        public StubHttpClientFactory(HttpMessageHandler handler)
+        {
+            _client = new HttpClient(handler);
+        }
+
+        public HttpClient CreateClient(string name) => _client;
+    }
+
+    private sealed class StubHttpHandler : HttpMessageHandler
+    {
+        private readonly Queue<StubResponse> _responses;
+
+        public StubHttpHandler(IReadOnlyList<StubResponse> responses)
+        {
+            _responses = new Queue<StubResponse>(responses);
+        }
+
+        public IReadOnlyList<string> RequestBodies => _requestBodies;
+        public string RequestBody => _requestBodies.LastOrDefault() ?? string.Empty;
+        private readonly List<string> _requestBodies = new();
+
+        protected override async Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            _requestBodies.Add(request.Content is null
+                ? string.Empty
+                : await request.Content.ReadAsStringAsync(cancellationToken));
+            var response = _responses.Dequeue();
+            if (response.Error is not null)
+            {
+                throw response.Error;
+            }
+            return new HttpResponseMessage(response.Status)
+            {
+                Content = new StringContent(
+                    response.Body, Encoding.UTF8, "application/json"),
+            };
+        }
+    }
+
+    private sealed record StubResponse(
+        HttpStatusCode Status,
+        string Body,
+        Exception? Error = null);
+
+    private static string BuildFileDiff(string path, int bodyCharacters)
+    {
+        var header = $"""
+            diff --git a/{path} b/{path}
+            index 1111111..2222222 100644
+            --- a/{path}
+            +++ b/{path}
+            @@ -1,1 +1,1 @@
+            """;
+        return header + "\n+" + new string('x', bodyCharacters) + "\n";
+    }
+
+    private static string ChatResponse(string title, string file, int line)
+    {
+        var content = JsonSerializer.Serialize(new
+        {
+            findings = new[]
+            {
+                new
+                {
+                    severity = "medium",
+                    confidence = "high",
+                    file,
+                    line,
+                    title,
+                    body = "Concrete bug.",
+                },
+            },
+        });
+        return JsonSerializer.Serialize(new
+        {
+            choices = new[]
+            {
+                new
+                {
+                    message = new
+                    {
+                        content,
+                    },
+                },
+            },
+        });
+    }
+}

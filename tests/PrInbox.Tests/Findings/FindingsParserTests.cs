@@ -14,6 +14,9 @@ public class FindingsParserTests
         base_sha: 8a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b
         generated_at_utc: 2026-05-15T21:00:13Z
         models: [claude-opus-4.8, gpt-5.6-terra]
+        primary_models: [claude-opus-4.8, gpt-5.6-terra]
+        shadow_models: [qwen2.5-coder-7b]
+        review_status: complete
         asymmetry:
           both_found: 4
           opus_only: 2
@@ -54,6 +57,10 @@ public class FindingsParserTests
         doc.PrStableIdentity.Should().Be("gh.com:123#456");
         doc.HeadSha.Should().Be("deadbeefcafebabe1234567890abcdef12345678");
         doc.Models.Should().Equal("claude-opus-4.8", "gpt-5.6-terra");
+        doc.PrimaryModels.Should().Equal("claude-opus-4.8", "gpt-5.6-terra");
+        doc.ShadowModels.Should().Equal("qwen2.5-coder-7b");
+        doc.ReviewStatus.Should().Be(ReviewCompleteness.Complete);
+        doc.EffectivePrimaryModels.Should().Equal("claude-opus-4.8", "gpt-5.6-terra");
         doc.Asymmetry.Should().NotBeNull();
         doc.Asymmetry!.BothFound.Should().Be(4);
         doc.Asymmetry.OpusOnly.Should().Be(2);
@@ -163,12 +170,18 @@ public class FindingsParserTests
 
         yaml.Should().Contain("schema_version: 1");
         yaml.Should().Contain("pr_url:");
+        yaml.Should().Contain("primary_models:");
+        yaml.Should().Contain("shadow_models:");
+        yaml.Should().Contain("review_status: complete");
         yaml.Should().Contain("diff_anchorable:");
 
         var round = _parser.ParseStrict(yaml);
         round.SchemaVersion.Should().Be(original.SchemaVersion);
         round.PrUrl.Should().Be(original.PrUrl);
         round.HeadSha.Should().Be(original.HeadSha);
+        round.PrimaryModels.Should().Equal(original.PrimaryModels);
+        round.ShadowModels.Should().Equal(original.ShadowModels);
+        round.ReviewStatus.Should().Be(original.ReviewStatus);
         round.Findings.Should().HaveCount(original.Findings.Count);
         round.Findings[0].Severity.Should().Be(original.Findings[0].Severity);
         round.Findings[0].FoundBy.Should().Equal(original.Findings[0].FoundBy);
@@ -180,6 +193,89 @@ public class FindingsParserTests
     {
         FindingsParser.SchemaJson.Should().Contain("\"title\": \"pr-inbox findings\"");
         FindingsParser.SchemaJson.Should().Contain("\"$defs\"");
+    }
+
+    [Fact]
+    public void ParseStrict_Rejects_Complete_Review_Without_Opus_And_Gpt()
+    {
+        const string invalid = """
+            schema_version: 1
+            pr_url: https://github.com/owner/repo/pull/42
+            head_sha: deadbeef
+            generated_at_utc: 2026-05-15T21:00:13Z
+            review_status: complete
+            primary_models: [gpt-5.6-terra]
+            asymmetry:
+              both_found: 0
+              opus_only: 0
+              gpt_only: 0
+            findings: []
+            """;
+
+        var act = () => _parser.ParseStrict(invalid);
+
+        act.Should().Throw<FormatException>();
+    }
+
+    [Fact]
+    public void ParseStrict_Allows_Single_Model_Only_In_Degraded_Mode()
+    {
+        const string invalid = """
+            schema_version: 1
+            pr_url: https://github.com/owner/repo/pull/42
+            head_sha: deadbeef
+            generated_at_utc: 2026-05-15T21:00:13Z
+            primary_models: [gpt-5.6-terra]
+            asymmetry:
+              single_model: 1
+            findings: []
+            """;
+
+        var act = () => _parser.ParseStrict(invalid);
+
+        act.Should().Throw<FormatException>();
+    }
+
+    [Fact]
+    public void ParseStrict_Accepts_Explicit_Degraded_Review()
+    {
+        const string valid = """
+            schema_version: 1
+            pr_url: https://github.com/owner/repo/pull/42
+            head_sha: deadbeef
+            generated_at_utc: 2026-05-15T21:00:13Z
+            review_status: degraded
+            primary_models: [gpt-5.6-terra]
+            asymmetry:
+              single_model: 1
+            findings: []
+            """;
+
+        var doc = _parser.ParseStrict(valid);
+        var roundTrip = _parser.ParseStrict(_parser.Serialize(doc));
+
+        doc.ReviewStatus.Should().Be(ReviewCompleteness.Degraded);
+        doc.Asymmetry!.SingleModel.Should().Be(1);
+        roundTrip.Asymmetry!.SingleModel.Should().Be(1);
+        roundTrip.Models.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void ParseStrict_Requires_Reason_For_Incomplete_Review()
+    {
+        const string invalid = """
+            schema_version: 1
+            pr_url: https://github.com/owner/repo/pull/42
+            head_sha: deadbeef
+            generated_at_utc: 2026-05-15T21:00:13Z
+            review_status: incomplete
+            primary_models: [gpt-5.6-terra]
+            findings: []
+            """;
+
+        var act = () => _parser.ParseStrict(invalid);
+
+        act.Should().Throw<FormatException>();
     }
 
     [Fact]

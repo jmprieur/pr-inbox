@@ -396,7 +396,13 @@ public sealed class BriefService
 
         sb.AppendLine("## Output contract");
         sb.AppendLine();
-        sb.AppendLine("You are running **as** the dual-model-review agent — do the review yourself with the asymmetry pattern; do not spawn another dual-model-review.");
+        sb.AppendLine("You are running **as** the dual-model-review orchestrator. Spawn two independent primary `code-review` agents on the same change set: one Opus-family model and one GPT-family model. Do not spawn another `dual-model-review` orchestrator.");
+        sb.AppendLine();
+        sb.AppendLine("The optional local review (`local-review.json`) is shadow-only: it is informational, never replaces either primary reviewer, and never contributes to primary quorum or asymmetry counts.");
+        sb.AppendLine();
+        sb.AppendLine("Write `review_status: complete` only after both primary reviewers return usable reports. If either primary reviewer is unavailable, write `review_status: incomplete` with `incomplete_reason`; do not substitute the local shadow. `review_status: degraded` and `asymmetry.single_model` are allowed only when the user explicitly approved degraded mode in the current request.");
+        sb.AppendLine();
+        sb.AppendLine("In new schema-v1 documents, record the required pair in `primary_models` and any completed supplemental reviewers in `shadow_models`. Do not combine shadow models into `primary_models` or the legacy `models` field.");
         sb.AppendLine();
         sb.AppendLine($"Write `findings.yaml` (schema v1, see `./findings.schema.json` next to this brief) to this run directory:");
         sb.AppendLine();

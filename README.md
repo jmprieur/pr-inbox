@@ -272,6 +272,133 @@ when launching from the web UI):
 | Review tab opens but model call fails | Review CLI not authenticated to the chosen model | Authenticate your CLI to its providers, or change `PRINBOX_REVIEW_MODEL` |
 | Web UI says port already in use | Another instance running, or stale Kestrel | `Get-NetTCPConnection -LocalPort 7341 \| Stop-Process -Force` |
 
+## Optional local shadow reviewer
+
+The Web UI can run an independent local model beside the authoritative
+dual-model review. Enable it under **Settings → Local shadow reviewer**, then
+use **Run local** on an individual Review page. Normal review launches do not
+start local inference automatically while this path remains experimental.
+The local result is written to `local-review.json` in the immutable run
+directory and displayed separately on the Review page. It is informational:
+local candidates are never selected or published. This first version is
+deliberately diff-only; it does not give the local model repository tools.
+Use **Rerun local** on the Review page to repeat only this pass while tuning
+the model or settings; it reuses the current immutable run and does not reopen
+the cloud review.
+
+For diagnostics, **Open local transcript** opens
+`local-review-transcript.txt` from the private run directory. It contains each
+chunk's exact system/user prompts, request parameters, HTTP status, and raw
+provider response, including failed attempts and context-limit retries. The
+transcript includes private PR code and must not be published.
+
+If the local provider forcibly resets the TCP connection, PR Inbox assumes the
+daemon may have crashed, re-prepares Foundry, and resolves its potentially new
+loopback endpoint. Successful chunk results are checkpointed in memory, so
+recovery resumes at the failed chunk instead of replaying the whole PR. Up to
+three daemon recoveries are allowed per review; every attempt and reused chunk
+is recorded in the transcript.
+
+Local model work is serialized through a single queue because Foundry Local is
+optimized for one interactive inference stream, not concurrent server loads.
+Each Review page shows `Queued` plus its live position; cloud review windows
+continue to run in parallel.
+
+The Inbox shows a global **Local review queue** panel whenever work is active.
+It lists the running PR, every waiting PR in order, live positions, model, HEAD,
+and links back to each Review page. The panel disappears when the queue is
+empty.
+
+Both the Review page and global queue expose live pipeline progress:
+**Preparing**, **Finding candidates (chunk n/m)**, **Curating candidates**, and
+**Verifying candidates (n/m)**. Progress is persisted in `local-review.json`,
+so the UI can show the current step rather than only a generic Running state.
+
+The review launcher passes each generated run directory to Copilot with
+`--add-dir`. This trusts that specific app-generated directory for the session
+and avoids a new folder-trust prompt for every timestamped run. The separate
+**Allow all paths** setting still controls broader path authorization.
+
+The default and currently recommended model is
+`qwen3.5-9b-generic-cpu:3`. In testing on Windows on Arm it has produced the
+most useful review reasoning while avoiding the Adreno WebGPU failures seen
+with larger GPU models. It is a reasoning model, so PR Inbox uses the larger
+output budget, final-JSON extraction, and verification path described below.
+`qwen2.5-coder-7b` remains a faster Qualcomm NPU fallback.
+
+The runner accepts any OpenAI-compatible loopback endpoint. Leave the endpoint
+blank to discover the current Foundry Local server with
+`foundry server status --output json`. Non-loopback URLs are rejected so a
+private PR patch cannot accidentally be sent to a remote endpoint.
+
+When endpoint discovery is selected, PR Inbox starts Foundry Local and loads
+the configured model automatically for each review. It never downloads a
+model implicitly. If the model is not cached, the local panel is marked
+**Skipped** and shows the exact `foundry cache` / `foundry model download`
+commands required.
+
+Foundry Local model storage is configured globally, outside pr-inbox:
+
+```powershell
+foundry cache cd D:\FoundryLocal\models
+foundry cache location
+foundry model download qwen3.5-9b-generic-cpu:3
+foundry server start
+foundry model load qwen3.5-9b-generic-cpu:3
+```
+
+The shadow reviewer currently obtains unified patches from GitHub.com and
+GitHub Enterprise. Azure DevOps runs are explicitly marked skipped until a
+complete ADO patch provider is available. Oversized patches are also skipped
+rather than truncated, because a partial review must not look complete.
+Within that configured overall limit, PR Inbox reads Foundry's reported
+`contextLength`, splits the patch into conservative file/hunk-aligned chunks,
+reviews every chunk, and de-duplicates the combined findings. High-context CPU
+reasoning models start with a conservative 32K operational cap rather than
+assuming the advertised maximum is safe in available RAM. If ONNX reports an
+allocation failure, PR Inbox halves the context to 16K and then 8K, rechunking
+and retrying at each step. Custom OpenAI-compatible endpoints use a
+conservative 32K default because they do not expose Foundry catalog metadata.
+If a runtime enforces a lower limit than its catalog metadata (currently
+observed with the `gpt-oss-20b` WebGPU variant advertising 131K but serving
+8K), PR Inbox reads the effective limit from the 400 response, rechunks the
+entire patch, and retries once.
+
+Because the local reviewer is diff-only, its prompt explicitly distinguishes
+deleted `-` lines from surviving `+` lines and requires every candidate to
+remain true in the post-change result. PR Inbox also validates each candidate
+mechanically and drops findings that do not anchor to an added new-file line;
+this filters common false positives where a model restates the defect that the
+PR itself is fixing.
+
+Candidates that survive that first filter receive a second verification pass.
+PR Inbox itself fetches the complete post-change file from GitHub/GHE at the
+exact reviewed HEAD using the source's existing delegated `gh` identity. The
+local model receives the source text but no credential, network access, or
+repository tool. It must return an exact quoted source line from an added line;
+unverifiable candidates are dropped. Azure DevOps remains unsupported.
+
+Before verification, candidates pointing to the same file and added line are
+collapsed to the strongest severity/confidence representative. PR Inbox then
+verifies at most two candidates per file and eight per review, ranked by
+severity and confidence. This prevents a noisy small model from turning one
+repeated hypothesis into dozens of sequential verification calls. The
+transcript records generated, collapsed, selected, and deferred counts.
+
+Foundry models marked with the `reasoning` capability receive a larger
+4,096-token output budget and a Qwen-compatible `/no_think` control. Requests
+also ask for OpenAI JSON mode. Some reasoning models still emit visible
+analysis; PR Inbox safely selects the final valid JSON object with the expected
+contract. A response ending with `finish_reason: length` is treated as
+truncated, never as malformed-but-usable JSON.
+
+If a model reports `stop` but leaves the final findings array malformed, PR
+Inbox may recover only balanced, individually valid finding objects after an
+explicit `</think>` terminator or final JSON fence. An incomplete trailing
+finding is discarded, and every recovered candidate still passes added-line
+and full-file verification. JSON examples embedded in ordinary reasoning are
+never treated as results.
+
 ---
 
 ## Configuration
