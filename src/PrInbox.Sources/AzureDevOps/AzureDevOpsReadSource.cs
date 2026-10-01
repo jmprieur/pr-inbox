@@ -19,6 +19,7 @@ public sealed class AzureDevOpsReadSource : IPrReadSource
     private readonly AdoApiClient _client;
     private readonly BotDetector _botDetector;
     private readonly ILogger<AzureDevOpsReadSource> _logger;
+    private readonly IReadOnlyList<string> _reviewerGroupIds;
 
     /// <summary>Cached VSTS profile id; resolved once per process.</summary>
     private string? _cachedReviewerId;
@@ -30,7 +31,8 @@ public sealed class AzureDevOpsReadSource : IPrReadSource
         ITokenProvider tokenProvider,
         BotDetector? botDetector = null,
         HttpClient? http = null,
-        ILogger<AzureDevOpsReadSource>? logger = null)
+        ILogger<AzureDevOpsReadSource>? logger = null,
+        IReadOnlyList<string>? reviewerGroupIds = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sourceId);
         ArgumentException.ThrowIfNullOrWhiteSpace(org);
@@ -42,6 +44,7 @@ public sealed class AzureDevOpsReadSource : IPrReadSource
         _client = new AdoApiClient(org, tokenProvider, http);
         _botDetector = botDetector ?? new BotDetector();
         _logger = logger ?? NullLogger<AzureDevOpsReadSource>.Instance;
+        _reviewerGroupIds = NormalizeGroupIds(reviewerGroupIds);
     }
 
     /// <summary>Internal constructor for tests: inject a pre-built API client.</summary>
@@ -51,7 +54,8 @@ public sealed class AzureDevOpsReadSource : IPrReadSource
         string project,
         AdoApiClient client,
         BotDetector? botDetector = null,
-        ILogger<AzureDevOpsReadSource>? logger = null)
+        ILogger<AzureDevOpsReadSource>? logger = null,
+        IReadOnlyList<string>? reviewerGroupIds = null)
     {
         SourceId = sourceId;
         _org = org;
@@ -59,7 +63,16 @@ public sealed class AzureDevOpsReadSource : IPrReadSource
         _client = client;
         _botDetector = botDetector ?? new BotDetector();
         _logger = logger ?? NullLogger<AzureDevOpsReadSource>.Instance;
+        _reviewerGroupIds = NormalizeGroupIds(reviewerGroupIds);
     }
+
+    private static IReadOnlyList<string> NormalizeGroupIds(IReadOnlyList<string>? ids) =>
+        ids is null
+            ? Array.Empty<string>()
+            : ids.Where(i => !string.IsNullOrWhiteSpace(i))
+                 .Select(i => i.Trim())
+                 .Distinct(StringComparer.OrdinalIgnoreCase)
+                 .ToList();
 
     public string SourceId { get; }
 
@@ -78,14 +91,34 @@ public sealed class AzureDevOpsReadSource : IPrReadSource
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
     {
         var reviewerId = await ResolveReviewerIdAsync(ct);
+        var seen = new HashSet<int>();
 
         await foreach (var pr in _client.ListPullRequestsForReviewerAsync(_project, reviewerId, pageSize: 100, ct))
         {
             ct.ThrowIfCancellationRequested();
+            if (!seen.Add(pr.PullRequestId)) continue;
             var mapped = MapListItem(pr);
             if (mapped is not null)
             {
                 yield return mapped;
+            }
+        }
+
+        // ADO's reviewerId search matches only the identity named on the PR,
+        // not groups the user belongs to. Opted-in groups get their own query.
+        foreach (var groupId in _reviewerGroupIds)
+        {
+            ct.ThrowIfCancellationRequested();
+            if (string.Equals(groupId, reviewerId, StringComparison.OrdinalIgnoreCase)) continue;
+            await foreach (var pr in _client.ListPullRequestsForReviewerAsync(_project, groupId, pageSize: 100, ct))
+            {
+                ct.ThrowIfCancellationRequested();
+                if (!seen.Add(pr.PullRequestId)) continue;
+                var mapped = MapListItem(pr);
+                if (mapped is not null)
+                {
+                    yield return mapped;
+                }
             }
         }
     }

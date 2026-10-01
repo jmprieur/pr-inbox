@@ -2,8 +2,10 @@
 @rendermode InteractiveServer
 @using PrInbox.Core.Config
 @using PrInbox.Core.Credentials
+@using PrInbox.Sources.AzureDevOps
 @inject IConfigService ConfigSvc
 @inject IGitHubAuthDiscovery GhAuthDiscovery
+@inject AdoReviewerGroupDiscovery GroupDiscovery
 @inject DoctorService Doctor
 @inject InboxSyncHostedService Sync
 @inject ILogger<Settings> Log
@@ -137,17 +139,52 @@ else
 
         @if (_showGheForm)
         {
-            <div class="settings-inline-form">
-                <label>Host
-                    <input @bind="_gheHost" placeholder="github.contoso.com" />
-                </label>
-                <label>Custom id (optional)
-                    <input @bind="_gheCustomId" placeholder="ghe.contoso" />
-                </label>
-                <div class="settings-inline-form-actions">
-                    <button @onclick="AddGheAsync" disabled="@_busy">Add</button>
-                    <button class="link-button" @onclick="CancelGheForm">Cancel</button>
+            <div class="settings-inline-form settings-stacked">
+                <p class="muted">
+                    Use the exact host from your PR URLs — separate GHE instances (e.g. <code>contoso.ghe.com</code> and
+                    <code>fabrikam.ghe.com</code>) each need their own source. Bind an identity when you have more than one
+                    <code>gh</code> login on the host.
+                </p>
+                <div class="settings-inline-form-row">
+                    <label>Host
+                        <input @bind="_gheHost" @bind:after="OnGheHostChanged" placeholder="github.contoso.com" />
+                    </label>
+                    <label>Identity (gh login, optional)
+                        <input @bind="_gheIdentity" placeholder="default" />
+                    </label>
+                    <label>Custom id (optional)
+                        <input @bind="_gheCustomId" placeholder="ghe.contoso" />
+                    </label>
+                    <div class="settings-inline-form-actions">
+                        <button @onclick="DetectGheIdentitiesAsync" disabled="@(_busy || _gheDiscovering || string.IsNullOrWhiteSpace(_gheHost))">
+                            @(_gheDiscovering ? "Detecting…" : "Detect logins")
+                        </button>
+                        <button @onclick="AddGheAsync" disabled="@_busy">Add</button>
+                        <button class="link-button" @onclick="CancelGheForm">Cancel</button>
+                    </div>
                 </div>
+                @if (_gheIdentities is not null)
+                {
+                    @if (_gheIdentities.Count == 0)
+                    {
+                        <p class="muted">No <code>gh</code> logins found for <code>@_gheIdentitiesHost</code>. Run <code>gh auth login --hostname @_gheIdentitiesHost</code> first.</p>
+                    }
+                    else
+                    {
+                        <div class="settings-identity-list">
+                            @foreach (var identity in _gheIdentities)
+                            {
+                                var localLogin = identity.Login;
+                                <button class="settings-identity-button" @onclick="@(() => _gheIdentity = localLogin)" disabled="@_busy">
+                                    <strong>@localLogin</strong>
+                                    <span class="muted">
+                                        @(string.Equals(_gheIdentity, localLogin, StringComparison.OrdinalIgnoreCase) ? "selected" : identity.IsActive ? "active" : "")
+                                    </span>
+                                </button>
+                            }
+                        </div>
+                    }
+                }
             </div>
         }
     </section>
@@ -162,7 +199,7 @@ else
         {
             <table class="settings-table">
                 <thead>
-                    <tr><th>Org</th><th>Project</th><th></th></tr>
+                    <tr><th>Org</th><th>Project</th><th>Reviewer groups</th><th></th></tr>
                 </thead>
                 <tbody>
                     @foreach (var p in _cfg.Ado.Projects)
@@ -171,6 +208,19 @@ else
                             <td>@p.Org</td>
                             <td>@p.Project</td>
                             <td>
+                                @if (p.ReviewerGroups.Count == 0)
+                                {
+                                    <span class="muted">only PRs naming you</span>
+                                }
+                                else
+                                {
+                                    @string.Join(", ", p.ReviewerGroups.Select(g => GroupLabel(g.Name ?? g.Id)))
+                                }
+                            </td>
+                            <td>
+                                <button class="link-button"
+                                        @onclick="@(() => StartEditGroups(p))"
+                                        disabled="@_busy">Groups…</button>
                                 <button class="link-button danger"
                                         @onclick="@(() => RemoveAdoAsync(p.Org, p.Project))"
                                         disabled="@_busy">Remove</button>
@@ -179,6 +229,63 @@ else
                     }
                 </tbody>
             </table>
+        }
+        @if (_groupEdit is not null)
+        {
+            <div class="settings-inline-form settings-stacked">
+                <p class="muted">
+                    Reviewer groups for <strong>@_groupEdit.Org/@_groupEdit.Project</strong>.
+                    Azure DevOps only matches PRs that name <em>you</em> as a reviewer; PRs assigned to a team or group you
+                    belong to stay hidden unless you opt that group in here. <strong>Discover</strong> samples the
+                    @AdoReviewerGroupDiscovery.DefaultSampleSize most recent active PRs and lists the groups you belong to,
+                    with how many of those PRs each one reviews. Avoid broad groups — every PR they review lands in your inbox.
+                </p>
+                @if (_groupEdit.Rows.Count == 0)
+                {
+                    <p class="muted">No groups yet — run Discover or add one by id.</p>
+                }
+                else
+                {
+                    <div class="settings-group-list">
+                        @foreach (var row in _groupEdit.Rows)
+                        {
+                            var localRow = row;
+                            <label class="settings-group-row">
+                                <input type="checkbox" checked="@localRow.Selected"
+                                       @onchange="@(e => localRow.Selected = e.Value is true)" />
+                                <span>@(localRow.Name ?? localRow.Id)</span>
+                                @if (localRow.ActivePrCount is int n)
+                                {
+                                    <span class="muted">@n active PR@(n == 1 ? "" : "s")</span>
+                                }
+                                <code class="muted">@localRow.Id</code>
+                            </label>
+                        }
+                    </div>
+                }
+                @if (_groupEdit.Error is not null)
+                {
+                    <p class="settings-warning">@_groupEdit.Error</p>
+                }
+                <div class="settings-inline-form-row">
+                    <label>Group id (GUID)
+                        <input @bind="_groupEdit.ManualId" placeholder="00000000-0000-0000-0000-000000000000" />
+                    </label>
+                    <label>Name (optional)
+                        <input @bind="_groupEdit.ManualName" placeholder="My team" />
+                    </label>
+                    <div class="settings-inline-form-actions">
+                        <button @onclick="AddManualGroup" disabled="@_busy">Add id</button>
+                    </div>
+                </div>
+                <div class="settings-inline-form-actions">
+                    <button @onclick="DiscoverGroupsAsync" disabled="@(_busy || _groupEdit.Discovering)">
+                        @(_groupEdit.Discovering ? "Discovering… (can take ~15s)" : "Discover my groups")
+                    </button>
+                    <button @onclick="SaveGroupsAsync" disabled="@(_busy || _groupEdit.Discovering)">Save</button>
+                    <button class="link-button" @onclick="@(() => _groupEdit = null)">Cancel</button>
+                </div>
+            </div>
         }
         <div class="settings-actions">
             <button @onclick="@(() => _showAdoForm = !_showAdoForm)" disabled="@_busy">+ Add ADO project…</button>
@@ -479,6 +586,32 @@ else
     private bool _showGheForm;
     private string _gheHost = string.Empty;
     private string _gheCustomId = string.Empty;
+    private string _gheIdentity = string.Empty;
+    private bool _gheDiscovering;
+    private IReadOnlyList<GitHubAuthIdentity>? _gheIdentities;
+    private string? _gheIdentitiesHost;
+
+    // ADO reviewer-group editor; null when closed. One project at a time.
+    private GroupEditState? _groupEdit;
+
+    private sealed class GroupEditState
+    {
+        public required string Org { get; init; }
+        public required string Project { get; init; }
+        public List<GroupRow> Rows { get; } = new();
+        public bool Discovering { get; set; }
+        public string? Error { get; set; }
+        public string ManualId { get; set; } = string.Empty;
+        public string ManualName { get; set; } = string.Empty;
+    }
+
+    private sealed class GroupRow
+    {
+        public required string Id { get; init; }
+        public string? Name { get; set; }
+        public int? ActivePrCount { get; set; }
+        public bool Selected { get; set; }
+    }
 
     private bool _showAdoForm;
     private string _adoOrg = string.Empty;
@@ -729,13 +862,18 @@ else
         await WrapAsync(async () =>
         {
             var id = string.IsNullOrWhiteSpace(_gheCustomId) ? null : _gheCustomId.Trim();
-            var added = await ConfigSvc.AddGitHubSourceAsync(SourceConfigKind.GitHubEnterprise, host, id);
+            var identity = _gheIdentity?.Trim();
+            var hasIdentity = !string.IsNullOrEmpty(identity)
+                              && !string.Equals(identity, "default", StringComparison.OrdinalIgnoreCase);
+            var added = hasIdentity
+                ? await ConfigSvc.AddGitHubSourceWithIdentityAsync(SourceConfigKind.GitHubEnterprise, host, identity!, id)
+                : await ConfigSvc.AddGitHubSourceAsync(SourceConfigKind.GitHubEnterprise, host, id);
             if (added)
             {
-                SetMessage($"Added GitHub Enterprise source for {host}.");
-                _showGheForm = false;
-                _gheHost = string.Empty;
-                _gheCustomId = string.Empty;
+                SetMessage(hasIdentity
+                    ? $"Added GitHub Enterprise source for {host} as {identity}."
+                    : $"Added GitHub Enterprise source for {host}.");
+                CancelGheForm();
             }
             else
             {
@@ -744,11 +882,165 @@ else
         });
     }
 
+    private async Task DetectGheIdentitiesAsync()
+    {
+        var host = _gheHost?.Trim() ?? "";
+        if (string.IsNullOrEmpty(host)) return;
+        _gheDiscovering = true;
+        StateHasChanged();
+        try
+        {
+            var found = await GhAuthDiscovery.ListIdentitiesAsync(host);
+            // The host may have been edited while gh was running; drop stale results.
+            if (!IsCurrentGheHost(host)) return;
+            _gheIdentities = found;
+            _gheIdentitiesHost = host;
+            if (string.IsNullOrWhiteSpace(_gheIdentity) && _gheIdentities.Count == 1)
+            {
+                _gheIdentity = _gheIdentities[0].Login;
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.LogWarning(ex, "gh identity discovery failed for {Host}.", host);
+            if (!IsCurrentGheHost(host)) return;
+            _gheIdentities = Array.Empty<GitHubAuthIdentity>();
+            _gheIdentitiesHost = host;
+        }
+        finally
+        {
+            _gheDiscovering = false;
+        }
+    }
+
+    private bool IsCurrentGheHost(string host)
+        => string.Equals(_gheHost?.Trim(), host, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Logins detected for one host are meaningless for another: clear the
+    /// detected list and any login picked from it when the host changes.
+    /// A login the user typed by hand is kept.
+    /// </summary>
+    private void OnGheHostChanged()
+    {
+        if (_gheIdentitiesHost is null || IsCurrentGheHost(_gheIdentitiesHost)) return;
+        var pickedFromList = _gheIdentities?.Any(i =>
+            string.Equals(i.Login, _gheIdentity?.Trim(), StringComparison.OrdinalIgnoreCase)) == true;
+        if (pickedFromList) _gheIdentity = string.Empty;
+        _gheIdentities = null;
+        _gheIdentitiesHost = null;
+    }
+
     private void CancelGheForm()
     {
         _showGheForm = false;
         _gheHost = string.Empty;
         _gheCustomId = string.Empty;
+        _gheIdentity = string.Empty;
+        _gheIdentities = null;
+        _gheIdentitiesHost = null;
+    }
+
+    /// <summary>Drop the "[Scope]\" prefix ADO puts on group names.</summary>
+    private static string GroupLabel(string name)
+    {
+        var slash = name.LastIndexOf('\\');
+        return slash >= 0 && name.StartsWith('[') ? name[(slash + 1)..] : name;
+    }
+
+    private void StartEditGroups(AdoProjectConfig p)
+    {
+        var state = new GroupEditState { Org = p.Org, Project = p.Project };
+        foreach (var g in p.ReviewerGroups)
+        {
+            state.Rows.Add(new GroupRow { Id = g.Id, Name = g.Name, Selected = true });
+        }
+        _groupEdit = state;
+    }
+
+    private async Task DiscoverGroupsAsync()
+    {
+        var state = _groupEdit;
+        if (state is null) return;
+        state.Discovering = true;
+        state.Error = null;
+        StateHasChanged();
+        try
+        {
+            var found = await GroupDiscovery.DiscoverAsync(state.Org, state.Project);
+            foreach (var c in found)
+            {
+                var row = state.Rows.FirstOrDefault(r => string.Equals(r.Id, c.Id, StringComparison.OrdinalIgnoreCase));
+                if (row is null)
+                {
+                    state.Rows.Add(new GroupRow { Id = c.Id, Name = c.Name, ActivePrCount = c.ActivePrCount });
+                }
+                else
+                {
+                    row.Name = c.Name;
+                    row.ActivePrCount = c.ActivePrCount;
+                }
+            }
+            if (found.Count == 0)
+            {
+                state.Error = "None of the groups reviewing recent active PRs in this project include you.";
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.LogWarning(ex, "ADO reviewer-group discovery failed for {Org}/{Project}.", state.Org, state.Project);
+            state.Error = $"Discovery failed: {ex.Message.Split('\n')[0]}";
+        }
+        finally
+        {
+            state.Discovering = false;
+        }
+    }
+
+    private void AddManualGroup()
+    {
+        var state = _groupEdit;
+        if (state is null) return;
+        var id = state.ManualId?.Trim() ?? "";
+        if (!Guid.TryParse(id, out _))
+        {
+            state.Error = "Group id must be a GUID (the identity id shown in the PR's reviewer list / REST API).";
+            return;
+        }
+        state.Error = null;
+        var name = string.IsNullOrWhiteSpace(state.ManualName) ? null : state.ManualName.Trim();
+        var existing = state.Rows.FirstOrDefault(r => string.Equals(r.Id, id, StringComparison.OrdinalIgnoreCase));
+        if (existing is null)
+        {
+            state.Rows.Add(new GroupRow { Id = id, Name = name, Selected = true });
+        }
+        else
+        {
+            existing.Selected = true;
+            existing.Name = name ?? existing.Name;
+        }
+        state.ManualId = string.Empty;
+        state.ManualName = string.Empty;
+    }
+
+    private async Task SaveGroupsAsync()
+    {
+        var state = _groupEdit;
+        if (state is null) return;
+        var selected = state.Rows
+            .Where(r => r.Selected)
+            .Select(r => new AdoReviewerGroup { Id = r.Id, Name = r.Name })
+            .ToList();
+        await WrapAsync(async () =>
+        {
+            var ok = await ConfigSvc.SetAdoReviewerGroupsAsync(state.Org, state.Project, selected);
+            SetMessage(
+                ok
+                    ? $"Saved {selected.Count} reviewer group(s) for {state.Org}/{state.Project}. They'll be picked up on the next sync."
+                    : $"ADO project {state.Org}/{state.Project} is no longer configured.",
+                isError: !ok);
+            if (ok) _groupEdit = null;
+        });
     }
 
     private async Task AddAdoAsync()

@@ -47,6 +47,14 @@ infrastructure to run.
   ad-hoc conditionals. Example: `list` queries
   `SupportsGlobalReviewerInbox` and falls back to per-project enumeration
   when it's `false`.
+- ADO's `searchCriteria.reviewerId` matches only the identity named on the
+  PR, not groups the user belongs to. Group-assigned PRs are therefore
+  opt-in per project (`ado.projects[].reviewerGroups`), each queried
+  alongside the user and deduped. Groups are opted in explicitly rather
+  than auto-expanded because a typical user belongs to hundreds of groups,
+  some of which review thousands of PRs. `AdoReviewerGroupDiscovery`
+  (Settings only, never during sync) samples recent active PRs to suggest
+  the groups the user is actually in.
 - v0.1 is read-only **by construction**: `IPrReadSource` has no write methods.
   A future `IPrReviewPublisher` is a separate type the v0.1 binary cannot
   accidentally call.

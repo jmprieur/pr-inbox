@@ -76,6 +76,17 @@ public interface IConfigService
     Task<bool> RemoveAdoProjectAsync(string org, string project, CancellationToken ct = default);
 
     /// <summary>
+    /// Replaces the reviewer-group list of the (org, project) entry.
+    /// Entries with a blank id are dropped and ids are de-duplicated.
+    /// Returns false if the project isn't configured.
+    /// </summary>
+    Task<bool> SetAdoReviewerGroupsAsync(
+        string org,
+        string project,
+        IReadOnlyList<AdoReviewerGroup> groups,
+        CancellationToken ct = default);
+
+    /// <summary>
     /// Replaces the entire <see cref="PrInboxConfig.IgnoredRepos"/> list.
     /// Pass an empty list to clear.
     /// </summary>

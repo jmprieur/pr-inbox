@@ -292,7 +292,13 @@ Example:
   ],
   "ado": {
     "projects": [
-      { "org": "mseng", "project": "Context" }
+      { "org": "mseng", "project": "Context" },
+      {
+        "org": "fabrikam", "project": "Widgets",
+        "reviewerGroups": [
+          { "id": "00000000-0000-0000-0000-000000000000", "name": "[TEAM FOUNDATION]\\My Team" }
+        ]
+      }
     ]
   },
   "bots": {
@@ -308,6 +314,17 @@ specific `gh` login — the token provider passes
 Web UI's Settings → **+ Add GitHub.com** picker. Two sources for the
 same host with different identities sync independently and surface
 under distinct chips in the Inbox.
+
+`reviewerGroups` (per ADO project, optional) opts in to PRs that list a
+**group or team** you belong to as reviewer, rather than you personally —
+ADO's reviewer search doesn't expand group membership. Manage them in
+Settings → Azure DevOps projects → **Groups…**, whose **Discover my
+groups** button lists the groups reviewing recent active PRs that you're
+a member of, with a PR count so you can skip overly broad ones.
+
+GitHub Enterprise instances are matched by exact host: e.g.
+`contoso.ghe.com` and `fabrikam.ghe.com` are separate instances and each
+needs its own source.
 
 ---
 

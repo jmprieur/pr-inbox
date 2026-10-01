@@ -173,6 +173,37 @@ public sealed class ConfigServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task SetAdoReviewerGroupsAsync_Persists_Trimmed_Deduped_Groups()
+    {
+        var svc = new ConfigService(_path);
+        await svc.AddAdoProjectAsync("fabrikam", "Context");
+
+        var ok = await svc.SetAdoReviewerGroupsAsync("FABRIKAM", "context", new[]
+        {
+            new AdoReviewerGroup { Id = " 11111111-1111-1111-1111-111111111111 ", Name = " Team A " },
+            new AdoReviewerGroup { Id = "11111111-1111-1111-1111-111111111111", Name = "dup" },
+            new AdoReviewerGroup { Id = "  ", Name = "blank" },
+            new AdoReviewerGroup { Id = "22222222-2222-2222-2222-222222222222" },
+        });
+
+        ok.Should().BeTrue();
+        var groups = (await svc.GetAsync()).Ado.Projects.Single().ReviewerGroups;
+        groups.Select(g => g.Id).Should().Equal(
+            "11111111-1111-1111-1111-111111111111",
+            "22222222-2222-2222-2222-222222222222");
+        groups[0].Name.Should().Be("Team A");
+        groups[1].Name.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task SetAdoReviewerGroupsAsync_Returns_False_For_Unknown_Project()
+    {
+        var svc = new ConfigService(_path);
+        var ok = await svc.SetAdoReviewerGroupsAsync("fabrikam", "Nope", Array.Empty<AdoReviewerGroup>());
+        ok.Should().BeFalse();
+    }
+
+    [Fact]
     public async Task SetIgnoredReposAsync_Replaces_List_And_Trims_Empty()
     {
         var svc = new ConfigService(_path);
