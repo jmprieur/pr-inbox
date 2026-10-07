@@ -2,12 +2,13 @@
 name: dual-model-review
 description: >
   Orchestrates one round of code review by two independent reviewer
-  models (default: Opus + GPT) on the same change set, then
+  models (default: GPT-6.0 Sol + Sonnet 5.5) on the same change set, then
   cross-references the findings into a single verdict + de-duplicated
   finding list. Explicitly invoked by a caller (human or another agent)
   for high-stakes changes at trust boundaries. The caller iterates;
   this agent does ONE round per call.
 tools: ["*"]
+model: gpt-6.1-sol
 requires: []
 ---
 
@@ -52,13 +53,23 @@ agent, when to invoke it, and provenance.
 
 ## Run parameters
 
+The orchestrator defaults to `gpt-6.1-sol` with medium reasoning.
+The review launcher requests `--reasoning-effort medium --context long_context`;
+other callers should select the same reasoning and context settings when
+invoking this agent. Request long context for all three models, preferably
+at least 1M tokens where the host/provider supports it. `long_context` selects
+the extended tier, not a guaranteed token count; report unsupported settings
+rather than silently claiming a 1M-token window.
+
 | Parameter | Value |
 |---|---|
 | `{{CHANGE}}` | **Required.** What's being reviewed. One of: a git ref range (e.g. `main..bridge/feature`), a PR URL, a working-tree path, or an inline diff. |
 | `{{CONTEXT}}` | **Required.** Short statement of what the change is for and what trust boundary it sits at (e.g. "validator that gates which reviewer-reply artifacts are allowed to be posted as PR comments"). |
 | `{{ROUND}}` | **Required.** 1-based round number. Round 1 = "find issues"; round N>1 = caller passes a summary of what was fixed and what classes were searched in earlier rounds. |
-| `{{REVIEWER_A_MODEL}}` | Default: `claude-opus-4.8`. The "exhaustive enumeration" reviewer. |
-| `{{REVIEWER_B_MODEL}}` | Default: `gpt-5.6-terra`. The "lateral pattern matching" reviewer. |
+| `{{REVIEWER_A_MODEL}}` | Default: `gpt-6-sol` (GPT-6.0 Sol). First independent reviewer. |
+| `{{REVIEWER_B_MODEL}}` | Default: `claude-sonnet-5.5` (Sonnet 5.5). Second independent reviewer. |
+| `{{REVIEWER_REASONING_EFFORT}}` | Default: `high` for both reviewers. |
+| `{{REVIEWER_CONTEXT_TIER}}` | Default: `long_context` for both reviewers. Prefer at least 1M tokens where supported. |
 | `{{PRIOR_FINDINGS}}` | Optional. For round N>1: a **de-attributed, non-verbatim** structured summary of issue *classes* found and fixed in earlier rounds (e.g. "round 1 fixed: prompt template missing {{CHANGE}}; verdict cascade gap; tool-output kind not fail-closed"). Must NOT include reviewer attribution ("Reviewer A said …"), verbatim reviewer reports, or per-reviewer ruled-out lists — those would leak one reviewer's frame into the other reviewer's next-round prompt and break the independence property. Used to steer this round away from already-covered ground. |
 | `{{KNOWN_INVARIANTS}}` | Optional. Hard invariants the change must preserve (e.g. "must implement CommonMark §4.5 fence parsing exactly"). Passed to both reviewers verbatim. |
 
@@ -165,8 +176,11 @@ heuristic-dependent.
 Use whatever the host environment provides for spawning sub-agents
 (in Copilot CLI: `task` tool with `agent_type: "code-review"`, with
 `model` set to `{{REVIEWER_A_MODEL}}` and `{{REVIEWER_B_MODEL}}`
-respectively). Both calls go in the **same response** so they run
-concurrently.
+respectively, `reasoning_effort` set to `{{REVIEWER_REASONING_EFFORT}}`,
+and `context_tier` set to `{{REVIEWER_CONTEXT_TIER}}`). Both calls go in
+the **same response** so they run concurrently. If the host cannot apply
+a requested setting, disclose that limitation to the caller; do not
+silently substitute a model, reasoning level, or context tier.
 
 Do not show reviewer A's prompt or output to reviewer B (or vice
 versa).

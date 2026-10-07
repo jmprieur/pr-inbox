@@ -35,10 +35,11 @@
     The full command that runs the review, with {plugindir} / {plugin} /
     {model} / {agent} placeholders. Defaults to the public GitHub Copilot
     CLI, which loads the plugin from a local directory:
-    `copilot --plugin-dir {plugindir} --model {model} --agent {agent}`.
+    `copilot --plugin-dir {plugindir} --model {model}
+    --reasoning-effort medium --context long_context --agent {agent}`.
     Microsoft users set PRINBOX_REVIEW_COMMAND (or the Settings field)
     to e.g. `agency copilot --mcp workiq --mcp teams --plugin {plugin}
-    --model {model} --agent {agent}`.
+    --model {model} --reasoning-effort medium --context long_context --agent {agent}`.
 
 .PARAMETER Agent
     Value substituted into the {agent} placeholder. Defaults to
@@ -50,7 +51,7 @@
 
 .PARAMETER Model
     Value substituted into the {model} placeholder. Defaults to
-    gpt-5.6-sol.
+    gpt-6.1-sol (medium reasoning, long context in the default command).
 
 .PARAMETER SessionName
     Optional human-readable name for the underlying copilot session.
@@ -87,13 +88,13 @@ param(
 
 if (-not $Agent)  { $Agent  = 'dual-review:dual-model-review' }
 if (-not $Plugin) { $Plugin = 'market:dual-review@jmprieur/pr-inbox' }
-if (-not $Model)  { $Model  = 'gpt-5.6-sol' }
+if (-not $Model)  { $Model  = 'gpt-6.1-sol' }
 # Default launch command targets the public GitHub Copilot CLI, which loads
 # the plugin from a local directory. Microsoft users set PRINBOX_REVIEW_COMMAND
 # (or the Settings field) to e.g.
-# 'agency copilot --mcp workiq --mcp teams --plugin {plugin} --model {model} --agent {agent}'.
+# 'agency copilot --mcp workiq --mcp teams --plugin {plugin} --model {model} --reasoning-effort medium --context long_context --agent {agent}'.
 if (-not $LaunchCommand) {
-    $LaunchCommand = 'copilot --plugin-dir {plugindir} --model {model} --agent {agent}'
+    $LaunchCommand = 'copilot --plugin-dir {plugindir} --model {model} --reasoning-effort medium --context long_context --agent {agent}'
 }
 
 # Resolve the bundled plugin path for the {plugindir} placeholder (the public

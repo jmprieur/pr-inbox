@@ -24,8 +24,8 @@ will run the actual `dual-model-review`.
 
 Reviewing many PRs at scale across three platforms with two identities is
 manual. The pain is not the review skill itself — that's mature
-(`dual-model-review` with `claude-opus-4.8` + `gpt-5.6-terra`, preserving the
-cross-family asymmetry pattern observed across the historical N=6 runs).
+(`dual-model-review` with `gpt-6-sol` + `claude-sonnet-5.5`, retaining the
+cross-family diversity motivated by the historical N=6 runs).
 The pain is:
 
 | Pain | What `pr-inbox` does about it |
@@ -237,14 +237,14 @@ GitHub Copilot CLI, which loads the dual-review plugin from a local directory
 bundled plugin path, resolved automatically), `{plugin}`, `{model}`, `{agent}`:
 
 ```
-copilot --plugin-dir {plugindir} --model {model} --agent {agent}
+copilot --plugin-dir {plugindir} --model {model} --reasoning-effort medium --context long_context --agent {agent}
 ```
 
 **Microsoft users** point it at the `agency` wrapper, which uses the marketplace
 plugin spec and wrapper-only flags such as `--mcp`:
 
 ```
-agency copilot --mcp workiq --mcp teams --plugin {plugin} --model {model} --agent {agent}
+agency copilot --mcp workiq --mcp teams --plugin {plugin} --model {model} --reasoning-effort medium --context long_context --agent {agent}
 ```
 
 `tools/launch-review.ps1` also honours these env vars (Settings takes precedence
@@ -252,11 +252,17 @@ when launching from the web UI):
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `PRINBOX_REVIEW_COMMAND` | `copilot --plugin-dir {plugindir} --model {model} --agent {agent}` | Launch command template (owns the CLI + flag syntax) |
+| `PRINBOX_REVIEW_COMMAND` | `copilot --plugin-dir {plugindir} --model {model} --reasoning-effort medium --context long_context --agent {agent}` | Launch command template (owns the CLI + flag syntax) |
 | `PRINBOX_REVIEW_AGENT` | `dual-review:dual-model-review` | Value for the `{agent}` placeholder |
 | `PRINBOX_REVIEW_PLUGIN` | `market:dual-review@jmprieur/pr-inbox` | Value for the `{plugin}` placeholder (agency marketplace spec) |
-| `PRINBOX_REVIEW_MODEL` | `gpt-5.6-sol` | Value for the `{model}` placeholder (the review orchestrator) |
+| `PRINBOX_REVIEW_MODEL` | `gpt-6.1-sol` | Value for the `{model}` placeholder (the review orchestrator) |
 | `PRINBOX_PLUGIN_DIR` | _(auto-resolved)_ | Overrides the `{plugindir}` path (bundled `plugins/dual-review`) |
+
+Both reviewers default to high reasoning and `long_context`. The orchestrator
+uses medium reasoning and `long_context`. Prefer at least 1M tokens where the
+host/provider supports it; the extended tier does not guarantee that size.
+Saved launch commands and model overrides are preserved; existing installations
+must update Settings or import the updated profile to adopt these defaults.
 
 ---
 

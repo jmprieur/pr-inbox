@@ -7,7 +7,7 @@ delivery skill that turns the review verdict into inline GitHub PR comments.
 
 | Kind | Name | Purpose |
 |---|---|---|
-| Agent | [`dual-model-review`](agents/dual-model-review.md) | Orchestrates one round of review by two independent reviewer models (default: Opus + GPT) over the same change set, then cross-references their findings into a single verdict + de-duplicated finding list. One round per call; the caller iterates. |
+| Agent | [`dual-model-review`](agents/dual-model-review.md) | Orchestrates one round of review by two independent reviewer models (default: GPT-6.0 Sol + Sonnet 5.5) over the same change set, then cross-references their findings into a single verdict + de-duplicated finding list. One round per call; the caller iterates. |
 | Skill | [`post-dual-review-as-pr-comments`](skills/post-dual-review-as-pr-comments/SKILL.md) | Converts a `dual-model-review` verdict into a single GitHub PR review with inline comments anchored to the exact lines, suggestion blocks where the fix is mechanical, and a summary body. The **outbound** path: post *our* findings. |
 | Skill | [`triage-existing-review-comments`](skills/triage-existing-review-comments/SKILL.md) | The **inbound** path: adjudicate the comments already on a PR (bots like Copilot by default). Verifies each against HEAD, replies, thumbs-up the correct ones, and resolves threads that are settled **and verified** (author fixed it and we confirmed, or author rejected with evidence and we agree). Dry-run by default; mutates only on an explicit execute signal. |
 | Doc | [`dual-model-review-pattern`](docs/dual-model-review-pattern.md) | The iteration loop, the model-asymmetry insight that motivates N=2 reviewers, when to invoke, and provenance. |
@@ -36,6 +36,10 @@ preserves their independence. All reference the companion pattern doc.
 
 ## Requirements
 
+- Orchestrator: `gpt-6.1-sol`, medium reasoning. Reviewers: `gpt-6-sol`
+  and `claude-sonnet-5.5`, both high reasoning. Request `long_context`
+  for all three, preferably at least 1M tokens where supported by the host.
+  The extended context tier does not itself guarantee a 1M-token window.
 - The skill uses the GitHub CLI (`gh`) to read the PR diff and post reviews.
 
 ## Provenance
