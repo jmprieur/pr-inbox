@@ -472,13 +472,13 @@ else
                     public GitHub Copilot CLI and loads the plugin from a local directory
                     (<code>{plugindir}</code> is resolved automatically).
                     <strong>Microsoft users:</strong> e.g.
-                    <code>agency copilot --mcp workiq --mcp teams --plugin {plugin} --model {model} --agent {agent}</code>.
+                    <code>agency copilot --mcp workiq --mcp teams --plugin {plugin} --model {model} --reasoning-effort medium --context long_context --agent {agent}</code>.
                     Leave blank to restore the default.
                 </span>
                 <input type="text"
                        value="@_launchCommand"
                        @onchange="OnLaunchCommandChanged"
-                       placeholder="copilot --plugin-dir {plugindir} --model {model} --agent {agent}"
+                       placeholder="@(new ReviewLauncherSettings().LaunchCommand)"
                        disabled="@_busy"
                        style="grid-column: 1 / -1; width: 100%; margin-top: .35rem;" />
             </label>

@@ -55,6 +55,13 @@ The orchestration of one round is encoded in
 [`agents/dual-model-review.md`](../agents/dual-model-review.md). The
 caller iterates; the agent does not.
 
+Current defaults are GPT-6.0 Sol (`gpt-6-sol`) as reviewer A and
+Sonnet 5.5 (`claude-sonnet-5.5`) as reviewer B, both at high reasoning.
+GPT-6.1 Sol (`gpt-6.1-sol`) orchestrates at medium reasoning. All three
+request long context, preferably at least 1M tokens where supported.
+These defaults do not assign the historical enumeration/lateral strengths
+below to the new models or reviewer ordering.
+
 ## The asymmetry insight
 
 Across the two observations we have, the two reviewer model families

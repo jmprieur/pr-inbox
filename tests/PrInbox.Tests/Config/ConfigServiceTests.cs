@@ -363,7 +363,7 @@ public sealed class ConfigServiceTests : IDisposable
         var singleton = new PrInboxConfig();
         var svc = new ConfigService(singleton, _path);
         singleton.ReviewLauncher.LaunchCommand
-            .Should().Be("copilot --plugin-dir {plugindir} --model {model} --agent {agent}"); // default
+            .Should().Be("copilot --plugin-dir {plugindir} --model {model} --reasoning-effort medium --context long_context --agent {agent}"); // default
 
         var custom = "agency copilot --mcp workiq --plugin {plugin} --model {model} --agent {agent}";
         await svc.SetReviewLauncherCommandAsync(custom);
@@ -374,7 +374,7 @@ public sealed class ConfigServiceTests : IDisposable
         // Blank restores the default.
         await svc.SetReviewLauncherCommandAsync("   ");
         singleton.ReviewLauncher.LaunchCommand
-            .Should().Be("copilot --plugin-dir {plugindir} --model {model} --agent {agent}");
+            .Should().Be("copilot --plugin-dir {plugindir} --model {model} --reasoning-effort medium --context long_context --agent {agent}");
     }
 
     [Fact]

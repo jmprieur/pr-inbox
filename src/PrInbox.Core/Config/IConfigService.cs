@@ -111,7 +111,7 @@ public interface IConfigService
     /// (<see cref="ReviewLauncherSettings.LaunchCommand"/>) and mirrors it
     /// onto the DI singleton so the next review launch picks it up without a
     /// process restart. A blank value restores the default
-    /// (<c>copilot --plugin-dir {plugindir} --model {model} --agent {agent}</c>).
+    /// (<c>copilot --plugin-dir {plugindir} --model {model} --reasoning-effort medium --context long_context --agent {agent}</c>).
     /// </summary>
     Task SetReviewLauncherCommandAsync(string launchCommand, CancellationToken ct = default);
 

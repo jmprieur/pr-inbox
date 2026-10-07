@@ -210,7 +210,7 @@ public sealed class ReviewLauncherSettings
     /// GitHub Copilot CLI, which loads the plugin from a local directory
     /// (<c>--plugin-dir</c>). Microsoft users point it at the <c>agency</c>
     /// wrapper, e.g.
-    /// <c>agency copilot --mcp workiq --mcp teams --plugin {plugin} --model {model} --agent {agent}</c>.
+    /// <c>agency copilot --mcp workiq --mcp teams --plugin {plugin} --model {model} --reasoning-effort medium --context long_context --agent {agent}</c>.
     /// The template owns the CLI and its flag syntax, so no flag name is
     /// hardcoded in the launcher.
     /// </summary>
@@ -220,7 +220,7 @@ public sealed class ReviewLauncherSettings
     /// without a process restart.
     /// </remarks>
     public string LaunchCommand { get; set; } =
-        "copilot --plugin-dir {plugindir} --model {model} --agent {agent}";
+        "copilot --plugin-dir {plugindir} --model {model} --reasoning-effort medium --context long_context --agent {agent}";
 
     /// <summary>
     /// Returns <see cref="LaunchCommand"/> with the <c>{plugindir}</c>,
@@ -252,7 +252,7 @@ public sealed class ReviewLauncherSettings
     public string Plugin { get; init; } = "market:dual-review@jmprieur/pr-inbox";
 
     /// <summary>Model id substituted into the <c>{model}</c> placeholder.</summary>
-    public string Model { get; set; } = "gpt-5.6-sol";
+    public string Model { get; set; } = "gpt-6.1-sol";
 
     /// <summary>Agent id substituted into the <c>{agent}</c> placeholder.</summary>
     public string Agent { get; init; } = "dual-review:dual-model-review";

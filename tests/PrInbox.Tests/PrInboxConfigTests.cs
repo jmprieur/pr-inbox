@@ -15,7 +15,9 @@ public class PrInboxConfigTests
         config.Sources.Should().BeEmpty();
         config.Ado.Projects.Should().BeEmpty();
         config.Bots.ExtraLogins.Should().BeEmpty();
-        config.ReviewLauncher.Model.Should().Be("gpt-5.6-sol");
+        config.ReviewLauncher.Model.Should().Be("gpt-6.1-sol");
+        config.ReviewLauncher.ResolveLaunchCommand().Should().Be(
+            "copilot --plugin-dir  --model gpt-6.1-sol --reasoning-effort medium --context long_context --agent dual-review:dual-model-review");
         config.ReviewLauncher.AllowAllPaths.Should().BeFalse();
     }
 
