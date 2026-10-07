@@ -9,6 +9,7 @@ description: >
   this agent does ONE round per call.
 tools: ["*"]
 model: gpt-6.1-sol
+reasoningEffort: medium
 requires: []
 ---
 
@@ -53,7 +54,7 @@ agent, when to invoke it, and provenance.
 
 ## Run parameters
 
-The orchestrator defaults to `gpt-6.1-sol` with medium reasoning.
+The orchestrator frontmatter defaults to `gpt-6.1-sol` with medium reasoning.
 The review launcher requests `--reasoning-effort medium --context long_context`;
 other callers should select the same reasoning and context settings when
 invoking this agent. Request long context for all three models, preferably
