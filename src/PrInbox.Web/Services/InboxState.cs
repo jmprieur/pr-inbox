@@ -62,7 +62,8 @@ public sealed record InboxRow(
     string? CiStatus = null,
     string? MergeableState = null,
     string? ReviewDecision = null,
-    bool IsDraft = false)
+    bool IsDraft = false,
+    bool IsRepoArchived = false)
 {
     /// <summary>
     /// True when the user has flagged this PR as "of interest." Flag is
@@ -160,7 +161,8 @@ public sealed record InboxRow(
             ciStatus,
             mergeableState,
             reviewDecision,
-            row.IsDraft);
+            row.IsDraft,
+            row.IsRepoArchived);
     }
 
     /// <summary>

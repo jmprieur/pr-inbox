@@ -32,14 +32,14 @@ public sealed class PullRequestRepository
               status, tracking_reason, identity_used,
               first_seen_at, last_synced_at, enrich_state,
               last_briefed_head_sha, last_review_run_head_sha, last_posted_review_head_sha,
-              body, last_upstream_updated_at, upstream_created_at, my_role, is_draft
+              body, last_upstream_updated_at, upstream_created_at, my_role, is_draft, is_repo_archived
             ) VALUES (
               $prId, $stableId, $sourceId, $sourceKind,
               $displayRepo, $number, $title, $author, $url,
               $status, $tracking, $identityUsed,
               $firstSeen, $lastSynced, $enrichState,
               $lastBriefed, $lastReviewRun, $lastPosted,
-              $body, $lastUpstreamUpdated, $upstreamCreated, $myRole, $isDraft
+              $body, $lastUpstreamUpdated, $upstreamCreated, $myRole, $isDraft, $isRepoArchived
             )
             ON CONFLICT(stable_identity) DO UPDATE SET
               pr_identity   = excluded.pr_identity,
@@ -89,6 +89,7 @@ public sealed class PullRequestRepository
         cmd.Parameters.AddWithValue("$tracking", TrackingReasonToDb(row.TrackingReason));
         cmd.Parameters.AddWithValue("$myRole", MyRoleToDb(row.MyRole));
         cmd.Parameters.AddWithValue("$isDraft", row.IsDraft ? 1 : 0);
+        cmd.Parameters.AddWithValue("$isRepoArchived", row.IsRepoArchived ? 1 : 0);
         cmd.Parameters.AddWithValue("$identityUsed", row.IdentityUsed);
         cmd.Parameters.AddWithValue("$firstSeen", FormatTimestamp(row.FirstSeenAt));
         cmd.Parameters.AddWithValue("$lastSynced", FormatTimestamp(row.LastSyncedAt));
@@ -585,6 +586,20 @@ public sealed class PullRequestRepository
         return rows;
     }
 
+    /// <summary>
+    /// Refresh the repository archival flag from enrichment. Kept separate
+    /// from fast-pass upserts so sources without this signal cannot erase it.
+    /// </summary>
+    public async Task UpdateIsRepoArchivedAsync(string url, bool isRepoArchived, CancellationToken ct)
+    {
+        await using var conn = await _db.OpenAsync(ct);
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = "UPDATE pull_requests SET is_repo_archived = $archived WHERE pr_identity = $id;";
+        cmd.Parameters.AddWithValue("$archived", isRepoArchived ? 1 : 0);
+        cmd.Parameters.AddWithValue("$id", url);
+        await cmd.ExecuteNonQueryAsync(ct);
+    }
+
     internal static PullRequestRow MapRow(SqliteDataReader reader)
     {
         return new PullRequestRow(
@@ -627,7 +642,9 @@ public sealed class PullRequestRepository
                 ? ParseMyRole(reader.GetString(reader.GetOrdinal("my_role")))
                 : MyRole.Reviewer,
             IsDraft: HasColumn(reader, "is_draft")
-                && reader.GetInt64(reader.GetOrdinal("is_draft")) != 0);
+                && reader.GetInt64(reader.GetOrdinal("is_draft")) != 0,
+            IsRepoArchived: HasColumn(reader, "is_repo_archived")
+                && reader.GetInt64(reader.GetOrdinal("is_repo_archived")) != 0);
     }
 
     private static bool HasColumn(SqliteDataReader reader, string name)

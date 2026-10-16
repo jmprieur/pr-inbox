@@ -420,6 +420,10 @@ public sealed class SyncOrchestrator
             IsDraft: pr.IsDraft);
 
         await _pullRequests.UpsertAsync(row, ct);
+        if (pr.IsRepoArchived is { } archived)
+        {
+            await _pullRequests.UpdateIsRepoArchivedAsync(pr.Identity.Url, archived, ct);
+        }
     }
 
     /// <summary>
@@ -525,6 +529,7 @@ public sealed class SyncOrchestrator
         // Refresh the draft flag from the authoritative detail (GitHub exposes
         // it only here; ADO confirms it). Cheap and idempotent.
         await _pullRequests.UpdateIsDraftAsync(row.Identity.Url, bundle.Detail.IsDraft, ct);
+        await _pullRequests.UpdateIsRepoArchivedAsync(row.Identity.Url, bundle.Detail.IsRepoArchived, ct);
     }
 
     private async Task ReconcileMissingPrsAsync(string sourceId, HashSet<string> seen, CancellationToken ct)

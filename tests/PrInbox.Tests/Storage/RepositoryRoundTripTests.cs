@@ -70,6 +70,30 @@ public class RepositoryRoundTripTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Repository_Archival_RoundTrips_And_Survives_Fast_Upserts()
+    {
+        var repo = new PullRequestRepository(_db);
+        var row = SampleRow() with { IsRepoArchived = true };
+        await repo.UpsertAsync(row, CancellationToken.None);
+        (await repo.GetAsync(row.Url, CancellationToken.None))!.IsRepoArchived.Should().BeTrue();
+
+        await repo.UpsertAsync(row with { IsRepoArchived = false }, CancellationToken.None);
+        (await repo.GetAsync(row.Url, CancellationToken.None))!.IsRepoArchived.Should().BeTrue();
+
+        await repo.UpdateIsRepoArchivedAsync(row.Url, false, CancellationToken.None);
+        var unarchived = await repo.GetAsync(row.Url, CancellationToken.None);
+        unarchived!.IsRepoArchived.Should().BeFalse();
+        unarchived.IsIgnored.Should().BeFalse();
+        unarchived.Status.Should().Be(PullRequestStatus.Open);
+
+        await repo.UpdateIsRepoArchivedAsync(row.Url, true, CancellationToken.None);
+        var archived = await repo.GetAsync(row.Url, CancellationToken.None);
+        archived!.IsRepoArchived.Should().BeTrue();
+        archived.IsIgnored.Should().BeFalse();
+        (await repo.ListActiveAsync(CancellationToken.None)).Should().ContainSingle();
+    }
+
+    [Fact]
     public async Task PullRequest_Upsert_Twice_Updates_Mutable_Fields()
     {
         var repo = new PullRequestRepository(_db);
@@ -1269,4 +1293,3 @@ public class RepositoryRoundTripTests : IAsyncLifetime
         tags[0].Color.Should().Be("#dc2626");
     }
 }
-

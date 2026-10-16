@@ -249,6 +249,47 @@ public class MigrationRunnerTests
         enrichState.Should().Be("basic", "all existing rows are conservatively marked 'basic' so the next enrich pass refreshes them — snapshot presence does not imply threads were also fetched.");
     }
 
+    [Fact]
+    public async Task Migration_017_Backfills_Only_Open_GitHub_Prs_For_Enrichment()
+    {
+        var connectionString = PrInboxDb.InMemoryConnectionString($"mig-{Guid.NewGuid():N}");
+        var db = new PrInboxDb(connectionString);
+        await using var conn = await db.OpenAsync();
+        var migrations = MigrationRunner.LoadEmbeddedMigrations();
+        foreach (var migration in migrations.Where(m => m.Version < 17))
+        {
+            await ExecuteMigrationDirectlyAsync(conn, migration);
+        }
+
+        await ExecuteAsync(conn, """
+            INSERT INTO pull_requests (
+              pr_identity, stable_identity, source_id, source_kind, display_repo, number,
+              url, status, tracking_reason, identity_used, first_seen_at, last_synced_at, enrich_state
+            ) VALUES
+              ('gh-open', 'gh-open', 'gh.com', 'github', 'o/r', 1,
+               'gh-open', 'open', 'assigned', 'me', '2026-01-01', '2026-01-01', 'enriched'),
+              ('ghe-open', 'ghe-open', 'ghe.host', 'github-enterprise', 'o/r', 2,
+               'ghe-open', 'open', 'assigned', 'me', '2026-01-01', '2026-01-01', 'enriched'),
+              ('gh-closed', 'gh-closed', 'gh.com', 'github', 'o/r', 3,
+               'gh-closed', 'closed', 'assigned', 'me', '2026-01-01', '2026-01-01', 'enriched'),
+              ('ado-open', 'ado-open', 'ado:org/project', 'azure-devops', 'o/r', 4,
+               'ado-open', 'open', 'assigned', 'me', '2026-01-01', '2026-01-01', 'enriched');
+            """);
+
+        await ExecuteMigrationDirectlyAsync(conn, migrations.Single(m => m.Version == 17));
+
+        (await ScalarStringAsync(conn, "SELECT enrich_state FROM pull_requests WHERE pr_identity = 'gh-open';"))
+            .Should().Be("basic");
+        (await ScalarStringAsync(conn, "SELECT enrich_state FROM pull_requests WHERE pr_identity = 'ghe-open';"))
+            .Should().Be("basic");
+        (await ScalarStringAsync(conn, "SELECT enrich_state FROM pull_requests WHERE pr_identity = 'gh-closed';"))
+            .Should().Be("enriched");
+        (await ScalarStringAsync(conn, "SELECT enrich_state FROM pull_requests WHERE pr_identity = 'ado-open';"))
+            .Should().Be("enriched");
+        (await ScalarLongAsync(conn, "SELECT SUM(is_repo_archived) FROM pull_requests;")).Should().Be(0);
+        (await ScalarLongAsync(conn, "SELECT COUNT(*) FROM pull_requests;")).Should().Be(4);
+    }
+
     private static async Task ExecuteMigrationDirectlyAsync(
         Microsoft.Data.Sqlite.SqliteConnection conn,
         MigrationRunner.EmbeddedMigration migration)

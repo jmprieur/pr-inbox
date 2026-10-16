@@ -209,6 +209,14 @@ public sealed class ConfigService : IConfigService
     }
 
     /// <inheritdoc />
+    public async Task SetIgnoreArchivedReposAsync(bool ignoreArchivedRepos, CancellationToken ct = default)
+    {
+        var cfg = await PrInboxConfig.LoadAsync(_configPath, ct);
+        cfg.IgnoreArchivedRepos = ignoreArchivedRepos;
+        await SaveAndRefreshAsync(cfg, ct);
+    }
+
+    /// <inheritdoc />
     public async Task SetIgnoredReposAsync(IReadOnlyList<string> patterns, CancellationToken ct = default)
     {
         var cfg = await PrInboxConfig.LoadAsync(_configPath, ct);
@@ -421,6 +429,7 @@ public sealed class ConfigService : IConfigService
 
         _singleton.IgnoredRepos.Clear();
         foreach (var r in cfg.IgnoredRepos) _singleton.IgnoredRepos.Add(r);
+        _singleton.IgnoreArchivedRepos = cfg.IgnoreArchivedRepos;
 
         _singleton.RepoPathFilters.Clear();
         foreach (var (repo, patterns) in cfg.RepoPathFilters)

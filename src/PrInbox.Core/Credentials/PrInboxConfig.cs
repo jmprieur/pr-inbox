@@ -35,6 +35,12 @@ public sealed class PrInboxConfig
     public List<string> IgnoredRepos { get; init; } = new();
 
     /// <summary>
+    /// Hide PRs in archived GitHub/GHE repositories by default. Data is still
+    /// synced; "Show ignored" reveals these PRs without changing this setting.
+    /// </summary>
+    public bool IgnoreArchivedRepos { get; set; } = true;
+
+    /// <summary>
     /// Monorepo path scoping. Maps a repo (display form, e.g.
     /// <c>owner/monorepo</c>) to an allow-list of folder globs. When a
     /// repo has an entry, only its PRs that touch <em>at least one</em>

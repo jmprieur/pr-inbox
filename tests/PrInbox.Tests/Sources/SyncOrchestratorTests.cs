@@ -40,6 +40,69 @@ public class SyncOrchestratorTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Fast_sync_refreshes_archival_for_cached_prs_without_enrichment_or_pr_changes()
+    {
+        const string sourceId = "gh.com:emu";
+        var id = new PrIdentity("https://github.com/AzureAD/MSAL.PS/pull/71", "gh.com:100#71");
+        var basic = BuildBasicPr(id, DateTimeOffset.UnixEpoch, sourceId);
+
+        async Task RunFastAsync(bool? archived)
+        {
+            var source = new FakePrReadSourceBuilder(sourceId, SourceKind.GitHub)
+                .WithPullRequest(basic with { IsRepoArchived = archived }, BuildDetail(id))
+                .Build();
+            var orch = new SyncOrchestrator(source, _prs, _snaps, _threads, _syncRuns);
+            var result = await orch.RunFastAsync("me", null, CancellationToken.None);
+            result.Status.Should().Be(SyncRunStatus.Ok);
+        }
+
+        await RunFastAsync(null);
+        await RunFastAsync(true);
+        var archived = await _prs.GetAsync(id.Url, CancellationToken.None);
+        archived!.IsRepoArchived.Should().BeTrue();
+        archived.IsIgnored.Should().BeFalse();
+        archived.Status.Should().Be(PullRequestStatus.Open);
+        archived.EnrichState.Should().Be(EnrichState.Basic);
+        (await _snaps.GetLatestAsync(id, CancellationToken.None)).Should().BeNull();
+
+        await RunFastAsync(null);
+        (await _prs.GetAsync(id.Url, CancellationToken.None))!.IsRepoArchived.Should().BeTrue();
+
+        await RunFastAsync(false);
+        (await _prs.GetAsync(id.Url, CancellationToken.None))!.IsRepoArchived.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task Enrich_Refreshes_Repository_Archival_Without_Changing_Pr_State_Or_Ignore_Flag()
+    {
+        const string sourceId = "gh.com:emu";
+        var id = new PrIdentity("https://github.com/owner/repo/pull/1", "gh.com:100#1");
+        var basic = BuildBasicPr(id, DateTimeOffset.UnixEpoch, sourceId);
+        var detail = BuildDetail(id);
+        var archivedSource = new FakePrReadSourceBuilder(sourceId, SourceKind.GitHub)
+            .WithPullRequest(basic, detail with { IsRepoArchived = true })
+            .Build();
+        var archivedOrch = new SyncOrchestrator(archivedSource, _prs, _snaps, _threads, _syncRuns);
+
+        var result = await archivedOrch.RunAsync("me", null, CancellationToken.None);
+        result.Status.Should().Be(SyncRunStatus.Ok);
+        var archived = await _prs.GetAsync(id.Url, CancellationToken.None);
+        archived!.IsRepoArchived.Should().BeTrue();
+        archived.Status.Should().Be(PullRequestStatus.Open);
+        archived.IsIgnored.Should().BeFalse();
+
+        await archivedOrch.RunFastAsync("me", null, CancellationToken.None);
+        (await _prs.GetAsync(id.Url, CancellationToken.None))!.IsRepoArchived.Should().BeTrue();
+
+        var unarchivedSource = new FakePrReadSourceBuilder(sourceId, SourceKind.GitHub)
+            .WithPullRequest(basic, detail)
+            .Build();
+        var unarchivedOrch = new SyncOrchestrator(unarchivedSource, _prs, _snaps, _threads, _syncRuns);
+        await unarchivedOrch.RunEnrichOneAsync(id.Url, CancellationToken.None);
+        (await _prs.GetAsync(id.Url, CancellationToken.None))!.IsRepoArchived.Should().BeFalse();
+    }
+
+    [Fact]
     public async Task RunFast_Lists_And_Upserts_Basic_Rows_Without_Snapshots_Or_Threads()
     {
         var source = BuildFakeSource("gh.com:emu", out _);

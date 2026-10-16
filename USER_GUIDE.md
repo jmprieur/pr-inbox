@@ -590,6 +590,20 @@ last-sync timestamps and open-PR counts; expect ~1-2s on a normal run.
 
 ### Ignored repos (regex list)
 
+**Ignore archived GitHub repositories** is on by default. It hides PRs in
+archived GitHub.com and GitHub Enterprise repositories in both **Inbox** and
+**My PRs**. Turn it off under **Settings → Ignored repos**, or enable
+**Show ignored** to reveal them temporarily. This does not change per-PR
+ignore flags or regex patterns. Azure DevOps is unaffected.
+
+Archival status is refreshed during fast sync with one repository lookup per
+distinct repo in each listing, including already-cached PRs. This does not
+wait for full PR enrichment and detects both archiving and unarchiving even
+when the PR itself has not changed.
+Data is still synced and stored. CLI `list` honors the same setting;
+`list --all` includes archived-repo PRs. In `config.json`, set the top-level
+`"ignoreArchivedRepos": false` to disable the default filter.
+
 One regex per line. Matches against `DisplayRepo` (e.g.
 `owner/repo` or `org/project/repo` for ADO). Case-insensitive.
 Invalid patterns are dropped with a warning, never crash the page.

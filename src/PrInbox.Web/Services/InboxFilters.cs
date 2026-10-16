@@ -39,7 +39,8 @@ public sealed record InboxFilters(
     IReadOnlyList<Regex> IgnoredRepoRegexes,
     FrozenDictionary<string, string> SourceClassByConfigId,
     bool ShowOutOfScope = false,
-    FrozenDictionary<string, IReadOnlyList<Regex>>? PathScopeByRepo = null)
+    FrozenDictionary<string, IReadOnlyList<Regex>>? PathScopeByRepo = null,
+    bool IgnoreArchivedRepos = true)
 {
     /// <summary>The four <c>src-*</c> classes the UI surfaces as chips.</summary>
     public static readonly FrozenSet<string> KnownSourceClasses =
@@ -98,7 +99,8 @@ public sealed record InboxFilters(
             regexes,
             BuildSourceClassMap(config.Sources, config.IdentityClasses),
             showOutOfScope,
-            pathScopes);
+            pathScopes,
+            config.IgnoreArchivedRepos);
     }
 
     /// <summary>
@@ -118,7 +120,8 @@ public sealed record InboxFilters(
         IEnumerable<SourceConfig>? sourceConfigs = null,
         bool showOutOfScope = false,
         FrozenDictionary<string, IReadOnlyList<Regex>>? pathScopeByRepo = null,
-        IReadOnlyList<IdentityClass>? identityClasses = null)
+        IReadOnlyList<IdentityClass>? identityClasses = null,
+        bool ignoreArchivedRepos = true)
         => new(
             showClosed,
             showIgnored,
@@ -130,7 +133,8 @@ public sealed record InboxFilters(
             ignoredRepoRegexes,
             BuildSourceClassMap(sourceConfigs, identityClasses),
             showOutOfScope,
-            pathScopeByRepo);
+            pathScopeByRepo,
+            ignoreArchivedRepos);
 
     /// <summary>
     /// Back-compat overload: predates the <c>OnlyFlagged</c> filter.
@@ -180,7 +184,8 @@ public sealed record InboxFilters(
     /// </summary>
     public bool ShouldShow(PullRequestRow row, bool isMarkedDone = false) => ShouldShowCore(
         row.Status, row.SourceId, row.DisplayRepo, row.AuthorLogin,
-        row.IsIgnored, isMarkedDone, row.FlaggedAt.HasValue);
+        row.IsIgnored, isMarkedDone, row.FlaggedAt.HasValue,
+        isRepoArchived: row.IsRepoArchived);
 
     /// <summary>Visible on the dashboard right now? (UI-side overload.)
     /// <para>
@@ -196,7 +201,8 @@ public sealed record InboxFilters(
     public bool ShouldShow(InboxRow row) => ShouldShowCore(
         row.Status, row.SourceId, row.DisplayRepo, row.AuthorLogin,
         row.IsIgnored, row.IsMarkedDone, row.IsFlagged,
-        row.TouchedPaths, row.TouchedPathState, applyPathScope: true);
+        row.TouchedPaths, row.TouchedPathState, applyPathScope: true,
+        isRepoArchived: row.IsRepoArchived);
 
     /// <summary>
     /// Map a SourceId to the UI chip class. Exposed because the chip
@@ -349,7 +355,8 @@ public sealed record InboxFilters(
         bool isFlagged = false,
         IReadOnlyList<string>? touchedPaths = null,
         TouchedPathState touchedState = TouchedPathState.Unknown,
-        bool applyPathScope = false)
+        bool applyPathScope = false,
+        bool isRepoArchived = false)
     {
         // 1. Closed unless "Show closed".
         if (!ShowClosed && status != PullRequestStatus.Open) return false;
@@ -399,14 +406,15 @@ public sealed record InboxFilters(
             }
         }
 
-        // 6. Ignored (per-PR flag + config regex list).
+        // 6. Ignored (per-PR flag, config regex list, archived repository).
         // Note: `disappeared_at != null` does NOT hide the row — disappeared
         // PRs surface in the main inbox with a "no longer assigned" chip so
         // the user can still see and act on them if they want to. Explicit
-        // ignore (per-PR or regex) is the only way to hide them.
+        // ignore filters still apply to them.
         if (!ShowIgnored)
         {
             if (isIgnored) return false;
+            if (IgnoreArchivedRepos && isRepoArchived) return false;
             if (MatchesIgnoredRepoRegex(displayRepo)) return false;
         }
 

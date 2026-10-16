@@ -45,7 +45,7 @@ public class SyncOrchestratorAuthoredTests : IAsyncLifetime
 
         var source = new FakePrReadSourceBuilder("gh.com:emu", SourceKind.GitHub)
             .WithPullRequest(BasicPr(reviewerId), Detail(reviewerId))
-            .WithAuthoredPullRequest(BasicPr(authoredId))
+            .WithAuthoredPullRequest(BasicPr(authoredId) with { IsRepoArchived = true })
             .Build();
         var orch = new SyncOrchestrator(source, _prs, _snaps, _threads, _syncRuns);
 
@@ -57,6 +57,7 @@ public class SyncOrchestratorAuthoredTests : IAsyncLifetime
 
         var authored = await _prs.GetAsync(authoredId.Url, CancellationToken.None);
         authored!.MyRole.Should().Be(MyRole.Author);
+        authored.IsRepoArchived.Should().BeTrue();
         authored.TrackingReason.Should().Be(TrackingReason.NotReviewer);
 
         // The authored view shows only authored PRs...
