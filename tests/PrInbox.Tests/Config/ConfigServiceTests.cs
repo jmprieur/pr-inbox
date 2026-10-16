@@ -204,6 +204,30 @@ public sealed class ConfigServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task SetIgnoreArchivedReposAsync_Persists_And_Refreshes_Singleton()
+    {
+        var singleton = new PrInboxConfig();
+        var svc = new ConfigService(singleton, _path);
+        await svc.SetIgnoredReposAsync(new[] { "owner/repo" });
+        await svc.AddGitHubSourceAsync(SourceConfigKind.GitHub, "github.com");
+
+        await svc.SetIgnoreArchivedReposAsync(false);
+
+        (await svc.GetAsync()).IgnoreArchivedRepos.Should().BeFalse();
+        singleton.IgnoreArchivedRepos.Should().BeFalse();
+        singleton.IgnoredRepos.Should().Equal("owner/repo");
+        singleton.Sources.Should().ContainSingle();
+
+        await svc.SetIgnoredReposAsync(new[] { "other/repo" });
+        (await svc.GetAsync()).IgnoreArchivedRepos.Should().BeFalse();
+        singleton.IgnoreArchivedRepos.Should().BeFalse();
+
+        await svc.SetIgnoreArchivedReposAsync(true);
+        (await svc.GetAsync()).IgnoreArchivedRepos.Should().BeTrue();
+        singleton.IgnoreArchivedRepos.Should().BeTrue();
+    }
+
+    [Fact]
     public async Task SetIgnoredReposAsync_Replaces_List_And_Trims_Empty()
     {
         var svc = new ConfigService(_path);

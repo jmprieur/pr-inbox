@@ -1,7 +1,123 @@
+using System.Net;
+using System.Text;
+using Octokit;
+using Octokit.Internal;
+using PrInbox.Core.Credentials;
 using PrInbox.Core.Models;
 using PrInbox.Sources.GitHub;
 
 namespace PrInbox.Tests.Sources;
+
+public class GitHubArchivedRepositoryTests
+{
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public async Task Fast_listing_fetches_archival_once_per_repo_for_reviewer_and_authored_queries(
+        bool enterprise, bool authored)
+    {
+        using var handler = new RepositoryHandler();
+        using var adapter = new HttpClientAdapter(() => handler);
+        var baseUri = new Uri(enterprise ? "https://ghe.example.com/api/v3/" : "https://api.github.com/");
+        var client = new GitHubClient(new Connection(
+            new ProductHeaderValue("pr-inbox-tests"), baseUri,
+            new InMemoryCredentialStore(new Octokit.Credentials("test-token")), adapter, new SimpleJsonSerializer()));
+        var source = new GitHubReadSource(
+            "test", baseUri.Host, enterprise, new UnusedTokenProvider());
+        var queries = authored ? GitHubReadSource.AuthoredQueries : GitHubReadSource.InboxQueries;
+
+        var first = new List<RemotePullRequest>();
+        await foreach (var pr in source.ListFastAsync(client, queries, CancellationToken.None))
+        {
+            first.Add(pr);
+        }
+
+        first.Should().HaveCount(2);
+        first.Should().OnlyContain(pr => pr.IsRepoArchived == true);
+        handler.RepositoryRequests.Should().Be(1);
+        handler.Paths.Should().OnlyContain(p =>
+            p == baseUri.AbsolutePath + "search/issues" ||
+            p == baseUri.AbsolutePath + "repos/AzureAD/MSAL.PS");
+
+        handler.Archived = false;
+        var second = new List<RemotePullRequest>();
+        await foreach (var pr in source.ListFastAsync(client, queries, CancellationToken.None))
+        {
+            second.Add(pr);
+        }
+
+        second.Should().OnlyContain(pr => pr.IsRepoArchived == false);
+        handler.RepositoryRequests.Should().Be(2, "the cache must expire between syncs");
+    }
+
+    [Fact]
+    public async Task Repository_lookup_failure_is_not_reported_as_unarchived()
+    {
+        using var handler = new RepositoryHandler { FailRepositoryLookup = true };
+        using var adapter = new HttpClientAdapter(() => handler);
+        var client = new GitHubClient(new Connection(new ProductHeaderValue("pr-inbox-tests"), adapter));
+        var source = new GitHubReadSource("test", "github.com", false, new UnusedTokenProvider());
+        var results = new List<RemotePullRequest>();
+
+        var act = async () =>
+        {
+            await foreach (var pr in source.ListFastAsync(client, GitHubReadSource.InboxQueries, CancellationToken.None))
+            {
+                results.Add(pr);
+            }
+        };
+
+        await act.Should().ThrowAsync<NotFoundException>();
+        results.Should().BeEmpty();
+    }
+
+    private sealed class RepositoryHandler : HttpMessageHandler
+    {
+        public int RepositoryRequests { get; private set; }
+        public bool Archived { get; set; } = true;
+        public bool FailRepositoryLookup { get; init; }
+        public List<string> Paths { get; } = new();
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
+        {
+            var path = request.RequestUri!.AbsolutePath;
+            Paths.Add(path);
+            if (path.EndsWith("/search/issues", StringComparison.Ordinal))
+            {
+                return Task.FromResult(JsonResponse("""
+                    {"total_count":2,"incomplete_results":false,"items":[
+                      {"id":71,"number":71,"state":"open","title":"Sample",
+                       "html_url":"https://github.com/AzureAD/MSAL.PS/pull/71",
+                       "created_at":"2026-01-01T00:00:00Z"},
+                      {"id":77,"number":77,"state":"open","title":"Another PR",
+                       "html_url":"https://github.com/AzureAD/MSAL.PS/pull/77",
+                       "created_at":"2026-01-01T00:00:00Z"}
+                    ]}
+                    """));
+            }
+            path.Should().EndWith("/repos/AzureAD/MSAL.PS");
+            RepositoryRequests++;
+            return Task.FromResult(FailRepositoryLookup
+                ? new HttpResponseMessage(HttpStatusCode.NotFound)
+                  { Content = new StringContent("""{"message":"Not Found"}""", Encoding.UTF8, "application/json") }
+                : JsonResponse($$"""{"id":123,"full_name":"AzureAD/MSAL.PS","archived":{{Archived.ToString().ToLowerInvariant()}}}"""));
+        }
+
+        private static HttpResponseMessage JsonResponse(string json) => new(HttpStatusCode.OK)
+        {
+            Content = new StringContent(json, Encoding.UTF8, "application/json"),
+        };
+    }
+
+    private sealed class UnusedTokenProvider : ITokenProvider
+    {
+        public string SourceId => "test";
+        public Task<string> GetTokenAsync(CancellationToken ct = default) => throw new InvalidOperationException();
+        public Task<string?> GetAuthenticatedIdentityAsync(CancellationToken ct = default) => throw new InvalidOperationException();
+    }
+}
 
 public class BotDetectorTests
 {

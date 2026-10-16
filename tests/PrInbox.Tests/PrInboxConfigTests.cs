@@ -15,6 +15,7 @@ public class PrInboxConfigTests
         config.Sources.Should().BeEmpty();
         config.Ado.Projects.Should().BeEmpty();
         config.Bots.ExtraLogins.Should().BeEmpty();
+        config.IgnoreArchivedRepos.Should().BeTrue();
         config.ReviewLauncher.Model.Should().Be("gpt-6.1-sol");
         config.ReviewLauncher.ResolveLaunchCommand().Should().Be(
             "copilot --plugin-dir  --model gpt-6.1-sol --reasoning-effort medium --context long_context --agent dual-review:dual-model-review");
@@ -29,6 +30,7 @@ public class PrInboxConfigTests
         {
             var original = new PrInboxConfig
             {
+                IgnoreArchivedRepos = false,
                 Sources =
                 {
                     new SourceConfig
@@ -64,6 +66,25 @@ public class PrInboxConfigTests
             loaded.Sources.Should().Contain(s => s.Id == "ado:fabrikam" && s.Kind == SourceConfigKind.AzureDevOps);
             loaded.Ado.Projects.Should().ContainSingle(p => p.Org == "fabrikam" && p.Project == "Context");
             loaded.Bots.ExtraLogins.Should().ContainSingle(l => l == "Copilot");
+            loaded.IgnoreArchivedRepos.Should().BeFalse();
+        }
+        finally
+        {
+            if (File.Exists(path)) File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public async Task LoadAsync_Legacy_Config_Ignores_Archived_Repos_By_Default()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"pr-inbox-{Guid.NewGuid():N}.json");
+        try
+        {
+            await File.WriteAllTextAsync(path, """{"schemaVersion":1,"sources":[]}""");
+
+            var config = await PrInboxConfig.LoadAsync(path);
+
+            config.IgnoreArchivedRepos.Should().BeTrue();
         }
         finally
         {

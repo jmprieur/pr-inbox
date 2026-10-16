@@ -60,6 +60,91 @@ public class InboxFiltersTests
     // ---------- SourceClassOf ----------
 
     [Theory]
+    [InlineData(SourceKind.GitHub, MyRole.Reviewer)]
+    [InlineData(SourceKind.GitHub, MyRole.Author)]
+    [InlineData(SourceKind.GitHubEnterprise, MyRole.Both)]
+    public void Archived_repos_are_hidden_unless_disabled_or_show_ignored(SourceKind kind, MyRole role)
+    {
+        var pr = MakePr() with { SourceKind = kind, MyRole = role, IsRepoArchived = true };
+        var inboxRow = InboxRow.FromRow(pr, 0, 0);
+        inboxRow.IsRepoArchived.Should().BeTrue();
+
+        var defaults = DefaultFilters();
+        defaults.ShouldShow(pr).Should().BeFalse();
+        defaults.ShouldShow(inboxRow).Should().BeFalse();
+        (defaults with { ShowIgnored = true }).ShouldShow(pr).Should().BeTrue();
+        (defaults with { ShowIgnored = true }).ShouldShow(inboxRow).Should().BeTrue();
+        (defaults with { IgnoreArchivedRepos = false }).ShouldShow(pr).Should().BeTrue();
+        (defaults with { IgnoreArchivedRepos = false }).ShouldShow(inboxRow).Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task Config_and_show_ignored_preferences_flow_into_loaded_filters()
+    {
+        var db = new PrInboxDb(PrInboxDb.InMemoryConnectionString($"archived-filter-{Guid.NewGuid():N}"));
+        await using var keepAlive = await db.OpenAsync();
+        await new MigrationRunner().MigrateAsync(db.ConnectionString);
+        var prefs = new UiPreferencesRepository(db);
+        var config = new PrInboxConfig();
+        var pr = MakePr() with { IsRepoArchived = true };
+
+        var filters = await InboxFilters.LoadAsync(prefs, config);
+        filters.ShouldShow(pr).Should().BeFalse();
+
+        config.IgnoreArchivedRepos = false;
+        filters = await InboxFilters.LoadAsync(prefs, config);
+        filters.ShouldShow(pr).Should().BeTrue();
+        filters.ShouldShow(InboxRow.FromRow(pr, 0, 0)).Should().BeTrue();
+
+        config.IgnoreArchivedRepos = true;
+        await prefs.SetBoolAsync("inbox.show_ignored", true);
+        filters = await InboxFilters.LoadAsync(prefs, config);
+        filters.ShouldShow(pr).Should().BeTrue();
+    }
+
+    [Fact]
+    public void In_memory_filters_honor_disabled_archived_setting()
+    {
+        var filters = InboxFilters.From(
+            showClosed: false,
+            showIgnored: false,
+            showDone: false,
+            onlyFlagged: false,
+            enabledSources: InboxFilters.KnownSourceClasses,
+            excludedRepos: Array.Empty<string>(),
+            excludedAuthors: Array.Empty<string>(),
+            ignoredRepoRegexes: Array.Empty<Regex>(),
+            ignoreArchivedRepos: false);
+        var pr = MakePr() with { IsRepoArchived = true };
+
+        filters.ShouldShow(pr).Should().BeTrue();
+        filters.ShouldShow(InboxRow.FromRow(pr, 0, 0)).Should().BeTrue();
+    }
+
+    [Fact]
+    public void Disabling_archived_filter_does_not_override_other_ignores()
+    {
+        var filters = DefaultFilters() with { IgnoreArchivedRepos = false };
+        var pr = MakePr(isIgnored: true) with { IsRepoArchived = true };
+        filters.ShouldShow(pr).Should().BeFalse();
+        filters.ShouldShow(InboxRow.FromRow(pr, 0, 0)).Should().BeFalse();
+
+        var regexFilters = filters with
+        {
+            IgnoredRepoRegexes = InboxFilters.CompileIgnoredRepoRegexes(new[] { "owner/repo" }),
+        };
+        regexFilters.ShouldShow(pr with { IsIgnored = false }).Should().BeFalse();
+    }
+
+    [Fact]
+    public void Non_archived_and_ado_repos_remain_visible()
+    {
+        DefaultFilters().ShouldShow(MakePr()).Should().BeTrue();
+        var ado = MakePr(sourceId: "ado:org/project") with { SourceKind = SourceKind.AzureDevOps };
+        DefaultFilters().ShouldShow(ado).Should().BeTrue();
+    }
+
+    [Theory]
     [InlineData("gh.com:emu", "src-emu")]
     [InlineData("gh.com", "src-public")]
     [InlineData("gh.com:public", "src-public")]

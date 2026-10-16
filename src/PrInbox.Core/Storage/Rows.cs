@@ -34,7 +34,8 @@ public sealed record PullRequestRow(
     DateTimeOffset? FlaggedAt = null,
     DateTimeOffset? UpstreamCreatedAt = null,
     MyRole MyRole = MyRole.Reviewer,
-    bool IsDraft = false);
+    bool IsDraft = false,
+    bool IsRepoArchived = false);
 
 /// <summary>
 /// Row from <c>pr_snapshots</c>. Append-only.

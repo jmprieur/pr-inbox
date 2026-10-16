@@ -430,6 +430,20 @@ else
 
     <section class="settings-section">
         <h2>Ignored repos</h2>
+        <div class="settings-toggle">
+            <label>
+                <input type="checkbox"
+                       checked="@(_cfg?.IgnoreArchivedRepos ?? true)"
+                       @onchange="@(e => OnIgnoreArchivedReposChanged((bool)e.Value!))"
+                       disabled="@_busy" />
+                <strong>Ignore archived GitHub repositories</strong>
+                <span class="muted">
+                    On by default for GitHub.com and GitHub Enterprise, in both Inbox and My PRs.
+                    Archival status is refreshed during fast sync. Data stays stored;
+                    "Show ignored" reveals these PRs, or turn this off to show them by default.
+                </span>
+            </label>
+        </div>
         <p class="muted">One regex per line. PRs whose display repo (e.g. <code>contoso/widgets</code>) matches one of these are hidden by default in the Inbox.</p>
         <textarea class="settings-textarea" rows="6" @bind="_ignoredReposText"></textarea>
         <div class="settings-actions">
@@ -1153,6 +1167,12 @@ else
                 isError: !removed);
         });
     }
+
+    private Task OnIgnoreArchivedReposChanged(bool value) => WrapAsync(async () =>
+    {
+        await ConfigSvc.SetIgnoreArchivedReposAsync(value);
+        SetMessage($"Ignore archived repositories {(value ? "ON" : "OFF")}.");
+    });
 
     private async Task SaveIgnoredReposAsync()
     {

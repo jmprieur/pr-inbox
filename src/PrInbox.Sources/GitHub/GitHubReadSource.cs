@@ -95,21 +95,9 @@ public sealed class GitHubReadSource : IPrReadSource
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
     {
         var client = await CreateClientAsync(ct);
-        // Dedupe across the two queries: a PR you've been re-requested on
-        // after reviewing it appears in both result sets. URL is the canonical
-        // identity at this point in the pipeline.
-        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-        foreach (var query in InboxQueries)
+        await foreach (var pr in ListFastAsync(client, InboxQueries, ct))
         {
-            ct.ThrowIfCancellationRequested();
-            await foreach (var pr in SearchPrsPagedAsync(client, query, ct))
-            {
-                if (seen.Add(pr.Url))
-                {
-                    yield return pr;
-                }
-            }
+            yield return pr;
         }
     }
 
@@ -117,16 +105,39 @@ public sealed class GitHubReadSource : IPrReadSource
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
     {
         var client = await CreateClientAsync(ct);
-        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        await foreach (var pr in ListFastAsync(client, AuthoredQueries, ct))
+        {
+            yield return pr;
+        }
+    }
 
-        foreach (var query in AuthoredQueries)
+    internal async IAsyncEnumerable<RemotePullRequest> ListFastAsync(
+        IGitHubClient client,
+        IReadOnlyList<string> queries,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
+    {
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        // Search results omit archival status. Fetch it once per repository
+        // per listing, not per PR, and never retain it across sync cycles.
+        var archivedRepos = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var query in queries)
         {
             ct.ThrowIfCancellationRequested();
             await foreach (var pr in SearchPrsPagedAsync(client, query, ct))
             {
                 if (seen.Add(pr.Url))
                 {
-                    yield return pr;
+                    var (owner, repo, _) = ParseUrl(pr.Url);
+                    var repoKey = $"{owner}/{repo}";
+                    if (!archivedRepos.TryGetValue(repoKey, out var archived))
+                    {
+                        ct.ThrowIfCancellationRequested();
+                        var repository = await client.Repository.Get(owner, repo);
+                        archived = repository.Archived;
+                        archivedRepos.Add(repoKey, archived);
+                    }
+                    yield return pr with { IsRepoArchived = archived };
                 }
             }
         }
@@ -279,7 +290,8 @@ public sealed class GitHubReadSource : IPrReadSource
             MergeableState: mergeable,
             CiStatus: ciStatus,
             ReviewDecision: reviewDecision,
-            IsDraft: pr.Draft);
+            IsDraft: pr.Draft,
+            IsRepoArchived: pr.Base.Repository.Archived);
     }
 
     private static readonly HttpClient s_graphqlHttp = new()

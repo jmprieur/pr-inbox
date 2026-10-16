@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Text.Json;
+using PrInbox.Core.Credentials;
 using PrInbox.Core.Models;
 using PrInbox.Core.Storage;
 using Spectre.Console;
@@ -10,7 +11,7 @@ namespace PrInbox.Cli.Commands;
 internal sealed class ListSettings : CommandSettings
 {
     [CommandOption("--all")]
-    [Description("Include closed, merged, and archived PRs.")]
+    [Description("Include all tracked PRs, including closed/merged PRs and archived repositories.")]
     public bool All { get; init; }
 
     [CommandOption("--source <SOURCE_ID>")]
@@ -33,6 +34,12 @@ internal sealed class ListCommand : AsyncCommand<ListSettings>
         var rows = settings.All
             ? await prRepo.ListAllAsync(CancellationToken.None)
             : await prRepo.ListActiveAsync(CancellationToken.None);
+
+        var config = await PrInboxConfig.LoadAsync(ct: cancellationToken);
+        if (!settings.All && config.IgnoreArchivedRepos)
+        {
+            rows = rows.Where(r => !r.IsRepoArchived).ToList();
+        }
 
         if (settings.SourceId is not null)
         {

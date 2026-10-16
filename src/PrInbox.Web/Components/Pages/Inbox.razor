@@ -405,6 +405,10 @@ else
                         }
                     </td>
                     <td class="title">
+                        @if (row.IsRepoArchived)
+                        {
+                            <span class="draft-tag" title="This GitHub repository is archived.">archived repo</span>
+                        }
                         @if (row.IsDraft)
                         {
                             <span class="draft-tag" title="Draft pull request (work in progress).">draft</span>
@@ -739,7 +743,8 @@ else
     }
 
     private bool RowIsHidden(InboxRow row) =>
-        row.IsIgnored || RowMatchesIgnoredRepoRegex(row);
+        row.IsIgnored || RowMatchesIgnoredRepoRegex(row)
+        || (Config.IgnoreArchivedRepos && row.IsRepoArchived);
 
     /// <summary>
     /// Combines row-level state into the CSS class list. Ignored / hidden
@@ -770,7 +775,8 @@ else
         _ignoredRepoRegexes,
         Config.Sources,
         _showOutOfScope,
-        _pathScopeByRepo);
+        _pathScopeByRepo,
+        ignoreArchivedRepos: Config.IgnoreArchivedRepos);
 
     private IReadOnlyList<InboxRow> VisibleRows
     {

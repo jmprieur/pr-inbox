@@ -411,6 +411,7 @@ public class DoctorServiceTests : IAsyncLifetime
         public Task<bool> RemoveAdoProjectAsync(string org, string project, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<bool> SetAdoReviewerGroupsAsync(string org, string project, IReadOnlyList<AdoReviewerGroup> groups, CancellationToken ct = default) => throw new NotImplementedException();
         public Task SetIgnoredReposAsync(IReadOnlyList<string> patterns, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task SetIgnoreArchivedReposAsync(bool ignoreArchivedRepos, CancellationToken ct = default) => throw new NotImplementedException();
         public Task SetReviewLauncherFlagsAsync(bool autoSend, bool allowAllPaths, bool yolo, CancellationToken ct = default) => throw new NotImplementedException();
         public Task SetReviewLauncherCommandAsync(string launchCommand, CancellationToken ct = default) => throw new NotImplementedException();
         public Task SetReviewLauncherTabColorAsync(string tabColor, CancellationToken ct = default) => throw new NotImplementedException();

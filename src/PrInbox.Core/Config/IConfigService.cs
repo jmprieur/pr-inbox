@@ -92,6 +92,9 @@ public interface IConfigService
     /// </summary>
     Task SetIgnoredReposAsync(IReadOnlyList<string> patterns, CancellationToken ct = default);
 
+    /// <summary>Persists the archived-repository filter and refreshes the live config.</summary>
+    Task SetIgnoreArchivedReposAsync(bool ignoreArchivedRepos, CancellationToken ct = default);
+
     /// <summary>
     /// Updates the three live-toggleable Review-launcher flags
     /// (<see cref="ReviewLauncherSettings.AutoSend"/> and
