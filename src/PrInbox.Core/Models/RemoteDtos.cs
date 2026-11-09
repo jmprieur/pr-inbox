@@ -16,7 +16,8 @@ public sealed record RemotePullRequest(
     PullRequestStatus Status,
     DateTimeOffset LastUpdated,
     DateTimeOffset? CreatedAt = null,
-    bool IsDraft = false);
+    bool IsDraft = false,
+    string? AuthorDisplayName = null);
 
 /// <summary>
 /// Full detail for a single PR, fetched once per sync. Carries enough state

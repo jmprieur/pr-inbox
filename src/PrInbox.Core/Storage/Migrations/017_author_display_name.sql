@@ -1,0 +1,1 @@
+ALTER TABLE pull_requests ADD COLUMN author_display_name TEXT;

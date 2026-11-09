@@ -158,7 +158,7 @@ just `Repos • 23` / `Authors • 24`.
 |---|---|---|
 | **Repo** | `☆` star + `owner/repo` (clickable) | Click the star to flag the PR as "of interest"; star turns gold ★ |
 | **#PR** | PR number + title | Click to open on the platform |
-| **Author** | `@login` (avatar where available) | |
+| **Author** | `Name (email)` for ADO or `Name (username)` for GitHub when a name is available; otherwise email/username | |
 | **Age** | Days since opened | `Xd`; gets warmer over time |
 | **Drift** | `+N` commits since last review, or `⚠ force-push` | Anchored on `last_reviewed_head_sha` |
 | **Findings** | Per-severity pills `C:0 H:1 M:2 L:0`, plus `✓ clean` or convergence badge | Click any pill → opens Review page filtered to that severity |
@@ -208,7 +208,18 @@ A second toolbar lets you flip the sort:
 **Author filter** (the **Authors** pill): identical shape to Repos.
 Useful when one team's PRs are dominating the inbox and you want to
 skim without losing them. Authors with missing logins are bucketed as
-`(unknown)`.
+`(unknown)`. ADO authors appear as `Name (email)` when a display name is
+available. GitHub authors appear as `Name (username)` when **Settings ->
+General -> Retrieve GitHub author names** is enabled and the profile has a
+name; otherwise they appear by username. No `@` prefix is added.
+Search matches names, emails, and usernames without regard to case.
+ADO names populate on the next sync, and existing author filter selections
+are preserved. The author list defaults to alphabetical order by the
+displayed name (or username when no name is available). Use **Name**,
+**PRs**, or **Recent** to change its order; explicitly saved choices are
+preserved. **Name** combines ADO and GitHub authors into one alphabetical
+list, without grouping by source. Alphabetical ties in **PRs** and **Recent**
+also use the displayed name rather than the ADO email.
 
 **Source chips**: top-level cohort filter — EMU, public, GHE (proxima),
 ADO. Unchecking a chip is a faster gesture than ignoring every repo on
@@ -250,7 +261,14 @@ author reply, or follow a teammate's work.
   filter (when you've scoped a repo to specific folders).
 - **Group by Tag** — group rows into collapsible sections by the tags
   you've attached.
-- **Age** column header — sort oldest-first / newest-first / off.
+- **Age** is the default table sort, oldest first. Click **Title**,
+  **Repo / PR**, or **Author** to sort by that column; click the active
+  header again to reverse direction. **Author** sorts by the displayed name,
+  falling back to email or username when no name is available.
+  Click **Age** to return to age sorting.
+  Both direction arrows remain visible beside each sortable header; only
+  the active sort direction is highlighted.
+  Unknown values sort last, and your selected sort survives a reload.
 
 ### Disappeared PRs
 
@@ -523,7 +541,19 @@ that used to require searching the platform manually.
 
 ## Settings tour
 
-Six sections, top to bottom.
+Settings sections, top to bottom.
+
+### General
+
+**Retrieve GitHub author names** is off by default. When enabled, every
+fast sync makes one additional user-profile API call per unique GitHub
+author per source, shared across the reviewer and authored PR lists.
+This applies to GitHub.com and GitHub Enterprise. Names are fetched anew
+each sync; no profile cache is used to skip requests. The latest name is
+stored with PR metadata so the Authors filter can display and search it.
+Profiles with no name or no available profile fall back to the username;
+unavailable profiles are logged, and other lookup failures mark the sync
+as failed. Changing the setting takes effect on the next sync.
 
 ### Sources
 

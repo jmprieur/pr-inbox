@@ -27,7 +27,8 @@ public sealed class SourceFactory
                             $"Source '{sc.Id}' is kind=github but has no host configured.");
                     }
                     var tokenProvider = new GhCliTokenProvider(sc.Id, sc.Host, sc.Identity);
-                    var source = new GitHubReadSource(sc.Id, sc.Host, isEnterprise: false, tokenProvider, botDetector);
+                    var source = new GitHubReadSource(sc.Id, sc.Host, isEnterprise: false, tokenProvider, botDetector,
+                        retrieveAuthorDisplayNames: config.General.RetrieveGitHubAuthorNames);
                     result.Add(new RuntimeSource(source, tokenProvider, sc.Identity));
                     break;
                 }
@@ -39,7 +40,8 @@ public sealed class SourceFactory
                             $"Source '{sc.Id}' is kind=github-enterprise but has no host configured.");
                     }
                     var tokenProvider = new GhCliTokenProvider(sc.Id, sc.Host, sc.Identity);
-                    var source = new GitHubReadSource(sc.Id, sc.Host, isEnterprise: true, tokenProvider, botDetector);
+                    var source = new GitHubReadSource(sc.Id, sc.Host, isEnterprise: true, tokenProvider, botDetector,
+                        retrieveAuthorDisplayNames: config.General.RetrieveGitHubAuthorNames);
                     result.Add(new RuntimeSource(source, tokenProvider, sc.Identity));
                     break;
                 }

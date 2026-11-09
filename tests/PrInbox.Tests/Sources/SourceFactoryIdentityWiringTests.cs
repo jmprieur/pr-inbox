@@ -15,6 +15,29 @@ namespace PrInbox.Tests.Sources;
 public sealed class SourceFactoryIdentityWiringTests
 {
     [Fact]
+    public void Build_Profile_Lookups_Are_Disabled_By_Default()
+    {
+        var config = new PrInboxConfig
+        {
+            Sources = { new SourceConfig { Id = "gh.com", Kind = SourceConfigKind.GitHub, Host = "github.com" } },
+        };
+        new SourceFactory().Build(config).Single().Source.RetrieveAuthorDisplayNames.Should().BeFalse();
+    }
+
+    [Theory]
+    [InlineData(SourceConfigKind.GitHub, "github.com")]
+    [InlineData(SourceConfigKind.GitHubEnterprise, "ghe.example.com")]
+    public void Build_Wires_General_Profile_Setting_To_GitHub_Sources(SourceConfigKind kind, string host)
+    {
+        var config = new PrInboxConfig
+        {
+            General = new GeneralSettings { RetrieveGitHubAuthorNames = true },
+            Sources = { new SourceConfig { Id = "github-test", Kind = kind, Host = host } },
+        };
+        new SourceFactory().Build(config).Single().Source.RetrieveAuthorDisplayNames.Should().BeTrue();
+    }
+
+    [Fact]
     public void Build_GitHub_Source_With_Explicit_Identity_Plumbs_Through_To_TokenProvider_And_RuntimeSource()
     {
         var config = new PrInboxConfig();

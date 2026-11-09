@@ -32,6 +32,25 @@ else
     <p class="muted">Config file: <code>@ConfigSvc.ConfigPath</code></p>
 
     <section class="settings-section">
+        <h2>General</h2>
+        <div class="settings-toggle">
+            <label>
+                <input type="checkbox"
+                       checked="@_cfg.General.RetrieveGitHubAuthorNames"
+                       @onchange="@(e => OnRetrieveGitHubAuthorNamesChanged((bool)e.Value!))"
+                       disabled="@_busy" />
+                <strong>Retrieve GitHub author names</strong>
+                <span class="muted">
+                    Off by default. Show GitHub authors as Name (username) when a profile name is available.
+                    Makes one additional GitHub API call per unique author, per source, during every sync,
+                    including GitHub Enterprise. Names are fetched again each sync, with no profile cache.
+                    Profiles without a name still show the username.
+                </span>
+            </label>
+        </div>
+    </section>
+
+    <section class="settings-section">
         <h2>Sources</h2>
         @if (_cfg.Sources.Count == 0)
         {
@@ -1213,6 +1232,13 @@ else
         }
         return map;
     }
+
+    private Task OnRetrieveGitHubAuthorNamesChanged(bool value) =>
+        WrapAsync(async () =>
+        {
+            await ConfigSvc.SetRetrieveGitHubAuthorNamesAsync(value);
+            SetMessage($"Retrieve GitHub author names {(value ? "ON" : "OFF")}; takes effect on the next sync.");
+        });
 
     private Task OnAutoSendChanged(bool value)
     {

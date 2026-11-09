@@ -38,6 +38,127 @@ public class SyncOrchestratorAuthoredTests : IAsyncLifetime
     public async Task DisposeAsync() => await _keepAlive.DisposeAsync();
 
     [Fact]
+    public async Task RunFast_Fetches_Once_Per_Author_Across_Both_Passes_And_Refetches_Next_Sync()
+    {
+        var ids = Enumerable.Range(1, 4)
+            .Select(n => new PrIdentity($"https://github.com/owner/repo/pull/{n}", $"gh.com:100#{n}"))
+            .ToArray();
+        var source = new ProfileSource(new FakePrReadSourceBuilder("gh.com:emu", SourceKind.GitHub)
+            .WithPullRequest(BasicPr(ids[0]), Detail(ids[0]))
+            .WithPullRequest(BasicPr(ids[1]) with { AuthorLogin = "OCTOCAT" }, Detail(ids[1]))
+            .WithAuthoredPullRequest(BasicPr(ids[2]))
+            .WithAuthoredPullRequest(BasicPr(ids[3]) with { AuthorLogin = "alice" })
+            .Build());
+        var orch = new SyncOrchestrator(source, _prs, _snaps, _threads, _syncRuns);
+
+        (await orch.RunFastAsync("self", null, CancellationToken.None)).Status.Should().Be(SyncRunStatus.Ok);
+        source.RequestedLogins.Should().Equal("octocat", "alice");
+        foreach (var id in ids)
+            (await _prs.GetAsync(id.Url, CancellationToken.None))!.AuthorDisplayName.Should().Be("First Name");
+
+        source.Name = "Updated Name";
+        await orch.RunFastAsync("self", null, CancellationToken.None);
+        source.RequestedLogins.Should().Equal("octocat", "alice", "octocat", "alice");
+        foreach (var id in ids)
+            (await _prs.GetAsync(id.Url, CancellationToken.None))!.AuthorDisplayName.Should().Be("Updated Name");
+
+        source.Name = null;
+        await orch.RunFastAsync("self", null, CancellationToken.None);
+        source.RequestedLogins.Should().HaveCount(6);
+        foreach (var id in ids)
+            (await _prs.GetAsync(id.Url, CancellationToken.None))!.AuthorDisplayName.Should().BeNull();
+    }
+
+    [Theory]
+    [InlineData(false, "octocat", 0)]
+    [InlineData(true, "", 0)]
+    [InlineData(true, "octocat", 1)]
+    public async Task RunFast_Profile_Flag_And_Missing_Login_Control_Requests(bool enabled, string login, int count)
+    {
+        var id = new PrIdentity("https://github.com/owner/repo/pull/1", "gh.com:100#1");
+        var pr = BasicPr(id) with { AuthorLogin = login };
+        var source = new ProfileSource(new FakePrReadSourceBuilder("gh.com:emu", SourceKind.GitHub)
+            .WithPullRequest(pr, Detail(id))
+            .WithAuthoredPullRequest(pr)
+            .Build()) { RetrieveAuthorDisplayNames = enabled, Name = null };
+
+        var result = await new SyncOrchestrator(source, _prs, _snaps, _threads, _syncRuns)
+            .RunFastAsync("self", null, CancellationToken.None);
+
+        result.Status.Should().Be(SyncRunStatus.Ok);
+        source.RequestedLogins.Should().HaveCount(count);
+        (await _prs.GetAsync(id.Url, CancellationToken.None))!.AuthorLogin.Should().Be(login);
+        (await _prs.GetAsync(id.Url, CancellationToken.None))!.AuthorDisplayName.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task RunFast_Profile_Error_Fails_Sync_And_Preserves_Reviewer_Tracking()
+    {
+        var id = new PrIdentity("https://github.com/owner/repo/pull/1", "gh.com:100#1");
+        var missingId = new PrIdentity("https://github.com/owner/repo/pull/2", "gh.com:100#2");
+        var fake = new FakePrReadSourceBuilder("gh.com:emu", SourceKind.GitHub)
+            .WithPullRequest(BasicPr(id), Detail(id)).Build();
+        var initial = new FakePrReadSourceBuilder("gh.com:emu", SourceKind.GitHub)
+            .WithPullRequest(BasicPr(id), Detail(id))
+            .WithPullRequest(BasicPr(missingId), Detail(missingId)).Build();
+        await new SyncOrchestrator(initial, _prs, _snaps, _threads, _syncRuns)
+            .RunFastAsync("self", null, CancellationToken.None);
+        var source = new ProfileSource(fake) { Error = new HttpRequestException("profile request failed") };
+
+        var result = await new SyncOrchestrator(source, _prs, _snaps, _threads, _syncRuns)
+            .RunFastAsync("self", null, CancellationToken.None);
+
+        result.Status.Should().Be(SyncRunStatus.Failed);
+        result.Error.Should().Contain("profile request failed");
+        source.RequestedLogins.Should().ContainSingle();
+        (await _prs.GetAsync(id.Url, CancellationToken.None))!.TrackingReason.Should().Be(TrackingReason.Assigned);
+        (await _prs.GetAsync(missingId.Url, CancellationToken.None))!.TrackingReason.Should().Be(TrackingReason.Assigned);
+    }
+
+    [Fact]
+    public async Task RunFast_Profile_Cancellation_Is_Propagated()
+    {
+        var id = new PrIdentity("https://github.com/owner/repo/pull/1", "gh.com:100#1");
+        var source = new ProfileSource(new FakePrReadSourceBuilder("gh.com:emu", SourceKind.GitHub)
+            .WithPullRequest(BasicPr(id), Detail(id)).Build())
+        {
+            Error = new OperationCanceledException(),
+        };
+        var orch = new SyncOrchestrator(source, _prs, _snaps, _threads, _syncRuns);
+        Func<Task> sync = () => orch.RunFastAsync("self", null, CancellationToken.None);
+        await sync.Should().ThrowAsync<OperationCanceledException>();
+    }
+
+    [Fact]
+    public async Task RunFast_Persists_AuthorDisplayName_For_Both_Passes()
+    {
+        var reviewerId = new PrIdentity("https://dev.azure.com/fabrikam/Context/_git/MyRepo/pullrequest/1", "ado:1#1");
+        var authoredId = new PrIdentity("https://dev.azure.com/fabrikam/Context/_git/MyRepo/pullrequest/2", "ado:1#2");
+        var reviewerPr = BasicPr(reviewerId) with
+        {
+            SourceKind = SourceKind.AzureDevOps,
+            SourceId = "ado:fabrikam/Context",
+            AuthorLogin = "alice@example.com",
+            AuthorDisplayName = "Alice Smith",
+        };
+        var authoredPr = reviewerPr with { Identity = authoredId, Url = authoredId.Url, Number = 2 };
+        var source = new FakePrReadSourceBuilder("ado:fabrikam/Context", SourceKind.AzureDevOps)
+            .WithPullRequest(reviewerPr, Detail(reviewerId))
+            .WithAuthoredPullRequest(authoredPr)
+            .Build();
+
+        await new SyncOrchestrator(source, _prs, _snaps, _threads, _syncRuns)
+            .RunFastAsync("self", progress: null, CancellationToken.None);
+
+        foreach (var id in new[] { reviewerId, authoredId })
+        {
+            var row = await _prs.GetAsync(id.Url, CancellationToken.None);
+            row!.AuthorLogin.Should().Be("alice@example.com");
+            row.AuthorDisplayName.Should().Be("Alice Smith");
+        }
+    }
+
+    [Fact]
     public async Task RunFast_TagsAuthoredPrs_AsAuthor_NotReviewer_AndSeparatesViews()
     {
         var reviewerId = new PrIdentity("https://github.com/owner/repo/pull/1", "gh.com:100#1000");
@@ -162,6 +283,31 @@ public class SyncOrchestratorAuthoredTests : IAsyncLifetime
         var authored = await _prs.ListAuthoredAsync(CancellationToken.None);
         authored.Select(r => r.Url).Should().Contain(openId.Url);
         authored.Select(r => r.Url).Should().NotContain(mergedId.Url);
+    }
+
+    private sealed class ProfileSource(IPrReadSource inner) : IPrReadSource
+    {
+        public string SourceId => inner.SourceId;
+        public SourceKind Kind => inner.Kind;
+        public SourceCapabilities Capabilities => inner.Capabilities;
+        public bool RetrieveAuthorDisplayNames { get; init; } = true;
+        public string? Name { get; set; } = "First Name";
+        public Exception? Error { get; init; }
+        public List<string> RequestedLogins { get; } = new();
+
+        public Task<string?> FetchAuthorDisplayNameAsync(string login, CancellationToken ct)
+        {
+            ct.ThrowIfCancellationRequested();
+            RequestedLogins.Add(login);
+            return Error is null ? Task.FromResult(Name) : Task.FromException<string?>(Error);
+        }
+
+        public IAsyncEnumerable<RemotePullRequest> ListAssignedFastAsync(CancellationToken ct) => inner.ListAssignedFastAsync(ct);
+        public IAsyncEnumerable<RemotePullRequest> ListAuthoredFastAsync(CancellationToken ct) => inner.ListAuthoredFastAsync(ct);
+        public Task<PrEnrichmentBundle> EnrichAsync(PrIdentity id, CancellationToken ct) => inner.EnrichAsync(id, ct);
+        public Task<IReadOnlyList<RemoteCommit>> GetCommitsAsync(PrIdentity id, CancellationToken ct) => inner.GetCommitsAsync(id, ct);
+        public Task<CompareResult> CompareAsync(PrIdentity id, string previousHeadSha, string currentHeadSha, CancellationToken ct) =>
+            inner.CompareAsync(id, previousHeadSha, currentHeadSha, ct);
     }
 
     private static RemotePullRequest BasicPr(PrIdentity id) =>

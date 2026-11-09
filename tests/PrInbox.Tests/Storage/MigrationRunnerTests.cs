@@ -19,6 +19,7 @@ public class MigrationRunnerTests
 
         migrations.Should().Contain(m => m.Version == 2 && m.Name == "url_as_identity");
         migrations.Should().Contain(m => m.Version == 3 && m.Name == "enrich_state");
+        migrations.Should().Contain(m => m.Version == 17 && m.Name == "author_display_name");
     }
 
     [Fact]
@@ -166,6 +167,8 @@ public class MigrationRunnerTests
         var parentId = await ScalarStringAsync(keepAlive,
             "SELECT pr_identity FROM pull_requests WHERE stable_identity = 'gh.com:100#4248';");
         parentId.Should().Be("https://github.com/octocat/playground/pull/4248");
+        (await new PullRequestRepository(db).GetAsync(parentId, CancellationToken.None))!
+            .AuthorDisplayName.Should().BeNull();
 
         // Children point at the URL too.
         var childId = await ScalarStringAsync(keepAlive,

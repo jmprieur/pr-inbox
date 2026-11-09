@@ -15,6 +15,9 @@ public enum InboxFilterSortMode
     /// non-null values before null, then alphabetic name as tie-breaker.
     /// </summary>
     Recent,
+
+    /// <summary>Alphabetic display label, regardless of count or activity.</summary>
+    Alphabetical,
 }
 
 /// <summary>
@@ -71,6 +74,9 @@ public interface IInboxFilterItem
     /// <summary>Unique key (repo name / author login / unknown-author key).</summary>
     string Name { get; }
 
+    /// <summary>Human-readable label used for alphabetic ordering.</summary>
+    string DisplayLabel => Name;
+
     /// <summary>PR count after the current filter pipeline.</summary>
     int Count { get; }
 
@@ -90,9 +96,25 @@ public interface IInboxFilterItem
 /// </summary>
 public static class InboxFilterHelpers
 {
+    public static string AuthorDisplayLabel(string key, string? displayName)
+    {
+        if (key == InboxFilters.UnknownAuthorKey) return "(unknown)";
+        var name = displayName?.Trim();
+        return string.IsNullOrEmpty(name) || string.Equals(name, key, StringComparison.OrdinalIgnoreCase)
+            ? key
+            : $"{name} ({key})";
+    }
+
+    public static bool AuthorMatchesSearch(string key, string displayLabel, string search)
+    {
+        var needle = search.Trim();
+        return key.Contains(needle, StringComparison.OrdinalIgnoreCase)
+            || displayLabel.Contains(needle, StringComparison.OrdinalIgnoreCase);
+    }
+
     /// <summary>
-    /// Sort a sequence of filter items by the user's chosen mode. Count mode
-    /// preserves the legacy ordering (count desc, name asc); Recent mode
+    /// Sort a sequence of filter items by the user's chosen mode. Alphabetic
+    /// ordering and ties use display labels across all sources. Recent mode
     /// surfaces actors with the freshest upstream activity, demoting
     /// groups whose <see cref="IInboxFilterItem.MaxRecent"/> is null to
     /// the bottom of the list.
@@ -100,15 +122,23 @@ public static class InboxFilterHelpers
     public static IEnumerable<T> Sort<T>(IEnumerable<T> items, InboxFilterSortMode mode)
         where T : IInboxFilterItem
     {
+        if (mode == InboxFilterSortMode.Alphabetical)
+        {
+            return items
+                .OrderBy(i => i.DisplayLabel, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(i => i.Name, StringComparer.OrdinalIgnoreCase);
+        }
         if (mode == InboxFilterSortMode.Recent)
         {
             return items
                 .OrderByDescending(i => i.MaxRecent.HasValue)
                 .ThenByDescending(i => i.MaxRecent ?? DateTimeOffset.MinValue)
+                .ThenBy(i => i.DisplayLabel, StringComparer.OrdinalIgnoreCase)
                 .ThenBy(i => i.Name, StringComparer.OrdinalIgnoreCase);
         }
         return items
             .OrderByDescending(i => i.Count)
+            .ThenBy(i => i.DisplayLabel, StringComparer.OrdinalIgnoreCase)
             .ThenBy(i => i.Name, StringComparer.OrdinalIgnoreCase);
     }
 

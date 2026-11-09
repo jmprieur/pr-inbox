@@ -90,6 +90,20 @@ public sealed class SyncOrchestrator
         var seenIdentities = new HashSet<string>();
         var reviewerSeen = new HashSet<string>();
         var listingCompleted = false;
+        // Shared by reviewer and authored passes, but never reused on another sync.
+        var authorNames = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+
+        async Task<RemotePullRequest> WithAuthorNameAsync(RemotePullRequest pr)
+        {
+            if (!_source.RetrieveAuthorDisplayNames || string.IsNullOrWhiteSpace(pr.AuthorLogin))
+                return pr;
+            if (!authorNames.TryGetValue(pr.AuthorLogin, out var name))
+            {
+                name = await _source.FetchAuthorDisplayNameAsync(pr.AuthorLogin, ct);
+                authorNames.Add(pr.AuthorLogin, name);
+            }
+            return pr with { AuthorDisplayName = name };
+        }
 
         try
         {
@@ -101,10 +115,11 @@ public sealed class SyncOrchestrator
                 seenIdentities.Add(pr.Identity.Url);
                 reviewerSeen.Add(pr.Identity.Url);
                 progress?.Report(new SyncProgress(_source.SourceId, $"#{pr.Number} {pr.DisplayRepo}", prsSeen, null));
+                var namedPr = await WithAuthorNameAsync(pr);
 
                 try
                 {
-                    await UpsertFastAsync(pr, MyRole.Reviewer, identityUsed, syncedAt, ct);
+                    await UpsertFastAsync(namedPr, MyRole.Reviewer, identityUsed, syncedAt, ct);
                     prsSeen++;
                 }
                 catch (Exception ex)
@@ -130,10 +145,11 @@ public sealed class SyncOrchestrator
                     ct.ThrowIfCancellationRequested();
                     seenIdentities.Add(pr.Identity.Url);
                     progress?.Report(new SyncProgress(_source.SourceId, $"#{pr.Number} {pr.DisplayRepo}", prsSeen, null));
+                    var namedPr = await WithAuthorNameAsync(pr);
 
                     try
                     {
-                        await UpsertFastAsync(pr, MyRole.Author, identityUsed, syncedAt, ct);
+                        await UpsertFastAsync(namedPr, MyRole.Author, identityUsed, syncedAt, ct);
                         prsSeen++;
                     }
                     catch (Exception ex)
@@ -417,7 +433,8 @@ public sealed class SyncOrchestrator
             // repository COALESCEs on upsert so a null never wipes a known value.
             UpstreamCreatedAt: pr.CreatedAt,
             MyRole: myRole,
-            IsDraft: pr.IsDraft);
+            IsDraft: pr.IsDraft,
+            AuthorDisplayName: pr.AuthorDisplayName);
 
         await _pullRequests.UpsertAsync(row, ct);
     }
