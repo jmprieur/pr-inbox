@@ -404,6 +404,7 @@ public class DoctorServiceTests : IAsyncLifetime
         public bool ConfigFileExists() => true;
         public Task<DoctorReport> RunDoctorAsync(CancellationToken ct = default) => Task.FromResult(_report);
         public Task<PrInboxConfig> GetAsync(CancellationToken ct = default) => throw new NotImplementedException();
+        public Task SetRetrieveGitHubAuthorNamesAsync(bool enabled, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<bool> AddGitHubSourceAsync(SourceConfigKind kind, string host, string? id = null, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<bool> AddGitHubSourceWithIdentityAsync(SourceConfigKind kind, string host, string identity, string? id = null, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<bool> AddAdoProjectAsync(string org, string project, CancellationToken ct = default) => throw new NotImplementedException();

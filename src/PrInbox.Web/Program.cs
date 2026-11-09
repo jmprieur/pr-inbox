@@ -97,6 +97,7 @@ if (!app.Environment.IsDevelopment())
 
 app.UseStaticFiles();
 app.UseAntiforgery();
+app.MapStaticAssets();
 
 // Lightweight liveness probe used by tools/splash.html to know when the
 // web app is up and ready to receive a real navigation. Returns 200 as

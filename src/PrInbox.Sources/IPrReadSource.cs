@@ -50,6 +50,17 @@ public interface IPrReadSource
     /// </summary>
     SourceCapabilities Capabilities { get; }
 
+    /// <summary>Whether this source has opted into per-author profile lookups during sync.</summary>
+    bool RetrieveAuthorDisplayNames => false;
+
+    /// <summary>
+    /// Fetch a current author profile name. Called once per unique login per
+    /// fast sync when <see cref="RetrieveAuthorDisplayNames"/> is enabled.
+    /// A null result means the profile has no available name.
+    /// </summary>
+    Task<string?> FetchAuthorDisplayNameAsync(string login, CancellationToken ct)
+        => throw new NotSupportedException("This source does not support author profile lookups.");
+
     /// <summary>
     /// Tier-2 fast listing: streams every PR where the authenticated user is
     /// currently a requested reviewer. Items yield as the source's search

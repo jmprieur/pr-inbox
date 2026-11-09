@@ -61,6 +61,7 @@ public class AzureDevOpsReadSourceTests
         only.Number.Should().Be(42);
         only.Title.Should().Be("Fix things");
         only.AuthorLogin.Should().Be("alice@example.com");
+        only.AuthorDisplayName.Should().Be("Alice");
         only.Url.Should().Be("https://dev.azure.com/fabrikam/Context/_git/MyRepo/pullrequest/42");
         only.DisplayRepo.Should().Be("Context/MyRepo");
         only.Status.Should().Be(PullRequestStatus.Open);
@@ -110,6 +111,7 @@ public class AzureDevOpsReadSourceTests
         results.Should().HaveCount(1);
         results[0].Number.Should().Be(77);
         results[0].AuthorLogin.Should().Be("jm@example.com");
+        results[0].AuthorDisplayName.Should().Be("Jean-Marc");
 
         handler.Requests[1].RequestUri!.ToString().Should()
             .Contain("/fabrikam/Context/_apis/git/pullrequests")
@@ -148,6 +150,7 @@ public class AzureDevOpsReadSourceTests
 
         results.Single(r => r.Number == 1).IsDraft.Should().BeTrue();
         results.Single(r => r.Number == 2).IsDraft.Should().BeFalse();
+        results.Should().OnlyContain(r => r.AuthorDisplayName == null);
     }
 
     [Fact]

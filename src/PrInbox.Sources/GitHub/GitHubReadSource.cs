@@ -30,7 +30,8 @@ public sealed class GitHubReadSource : IPrReadSource
         bool isEnterprise,
         ITokenProvider tokenProvider,
         BotDetector? botDetector = null,
-        ILogger<GitHubReadSource>? logger = null)
+        ILogger<GitHubReadSource>? logger = null,
+        bool retrieveAuthorDisplayNames = false)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sourceId);
         ArgumentException.ThrowIfNullOrWhiteSpace(hostname);
@@ -40,11 +41,45 @@ public sealed class GitHubReadSource : IPrReadSource
         _tokenProvider = tokenProvider;
         _botDetector = botDetector ?? new BotDetector();
         _logger = logger ?? NullLogger<GitHubReadSource>.Instance;
+        RetrieveAuthorDisplayNames = retrieveAuthorDisplayNames;
     }
 
     public string SourceId { get; }
 
     public SourceKind Kind => _isEnterprise ? SourceKind.GitHubEnterprise : SourceKind.GitHub;
+
+    public bool RetrieveAuthorDisplayNames { get; }
+
+    public async Task<string?> FetchAuthorDisplayNameAsync(string login, CancellationToken ct)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(login);
+        ct.ThrowIfCancellationRequested();
+        if (!RetrieveAuthorDisplayNames) return null;
+        var client = await CreateClientAsync(ct);
+        return await FetchAuthorDisplayNameAsync(client, login, ct);
+    }
+
+    internal async Task<string?> FetchAuthorDisplayNameAsync(IGitHubClient client, string login, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        try
+        {
+            var user = await client.User.Get(login).WaitAsync(ct);
+            var name = user.Name?.Trim();
+            return string.IsNullOrEmpty(name) ? null : name;
+        }
+        catch (NotFoundException ex)
+        {
+            // Some bot logins do not expose a user profile.
+            _logger.LogWarning(ex, "GitHub profile unavailable for {Login} on {Host}; using username.", login, _hostname);
+            return null;
+        }
+        catch (RateLimitExceededException ex)
+        {
+            _logger.LogWarning(ex, "GitHub profile lookup rate limited for {Login} on {Host}.", login, _hostname);
+            throw;
+        }
+    }
 
     public SourceCapabilities Capabilities { get; } = new(
         SupportsGlobalReviewerInbox: true,

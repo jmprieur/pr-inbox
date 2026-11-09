@@ -12,6 +12,8 @@ public sealed class PrInboxConfig
 {
     public int SchemaVersion { get; init; } = 1;
 
+    public GeneralSettings General { get; init; } = new();
+
     public List<SourceConfig> Sources { get; init; } = new();
 
     public AdoConfig Ado { get; init; } = new();
@@ -117,8 +119,18 @@ public sealed class PrInboxConfig
 }
 
 /// <summary>
-/// One source configured in pr-inbox.
+/// App-wide settings.
 /// </summary>
+public sealed class GeneralSettings
+{
+    /// <summary>
+    /// Fetch GitHub profile names once per unique author per source on every
+    /// sync. Disabled by default; profile results are not reused across syncs.
+    /// </summary>
+    public bool RetrieveGitHubAuthorNames { get; set; }
+}
+
+/// <summary>One source configured in pr-inbox.</summary>
 public sealed class SourceConfig
 {
     /// <summary>Stable id, e.g. <c>gh.com</c>, <c>ghe.contoso.com</c>, <c>ado:fabrikam</c>.</summary>

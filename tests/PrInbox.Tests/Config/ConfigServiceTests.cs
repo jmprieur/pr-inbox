@@ -24,6 +24,33 @@ public sealed class ConfigServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task General_Profile_Setting_Persists_Refreshes_Singleton_And_Preserves_Other_Settings()
+    {
+        var singleton = new PrInboxConfig();
+        var svc = new ConfigService(singleton, _path);
+        await svc.AddGitHubSourceAsync(SourceConfigKind.GitHub, "github.com");
+        await svc.SetIgnoredReposAsync(new[] { "sandbox" });
+        await svc.SetReviewLauncherFlagsAsync(autoSend: true, allowAllPaths: false, yolo: false);
+
+        await svc.SetRetrieveGitHubAuthorNamesAsync(true);
+
+        singleton.General.RetrieveGitHubAuthorNames.Should().BeTrue();
+        var saved = await svc.GetAsync();
+        saved.General.RetrieveGitHubAuthorNames.Should().BeTrue();
+        saved.Sources.Should().ContainSingle();
+        saved.IgnoredRepos.Should().ContainSingle().Which.Should().Be("sandbox");
+        saved.ReviewLauncher.AutoSend.Should().BeTrue();
+        (await File.ReadAllTextAsync(_path)).Should().Contain("\"retrieveGitHubAuthorNames\": true");
+
+        await svc.SetIgnoredReposAsync(new[] { "another" });
+        (await svc.GetAsync()).General.RetrieveGitHubAuthorNames.Should().BeTrue();
+
+        await svc.SetRetrieveGitHubAuthorNamesAsync(false);
+        singleton.General.RetrieveGitHubAuthorNames.Should().BeFalse();
+        (await svc.GetAsync()).General.RetrieveGitHubAuthorNames.Should().BeFalse();
+    }
+
+    [Fact]
     public void ConfigFileExists_Is_False_When_File_Missing()
     {
         var svc = new ConfigService(_path);

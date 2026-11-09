@@ -1,4 +1,6 @@
 using FluentAssertions;
+using PrInbox.Core.Models;
+using PrInbox.Core.Storage;
 using PrInbox.Web.Services;
 
 namespace PrInbox.Tests.Web;
@@ -10,11 +12,119 @@ namespace PrInbox.Tests.Web;
 /// </summary>
 public class InboxFilterHelpersTests
 {
+    [Theory]
+    [InlineData("alice@example.com", "Alice Smith", "Alice Smith (alice@example.com)")]
+    [InlineData("alice@example.com", " Alice Smith ", "Alice Smith (alice@example.com)")]
+    [InlineData("alice@example.com", null, "alice@example.com")]
+    [InlineData("alice@example.com", " ", "alice@example.com")]
+    [InlineData("alice@example.com", "ALICE@example.com", "alice@example.com")]
+    [InlineData("octocat", null, "octocat")]
+    [InlineData("(unknown)", null, "(unknown)")]
+    [InlineData("(unknown)", "Alice Smith", "(unknown)")]
+    public void AuthorDisplayLabel_Uses_Name_And_Login_Without_An_Added_At_Prefix(
+        string key, string? displayName, string expected)
+        => InboxFilterHelpers.AuthorDisplayLabel(key, displayName).Should().Be(expected);
+
+    [Theory]
+    [InlineData("alice@example.com", "Alice Smith", " SMITH ", true)]
+    [InlineData("alice@example.com", "Alice Smith", "ALICE@EXAMPLE", true)]
+    [InlineData("alice@example.com", "Alice Smith", "bob", false)]
+    [InlineData("alice@example.com", null, "example.com", true)]
+    [InlineData("octocat", null, "OCTO", true)]
+    [InlineData("(unknown)", null, "unknown", true)]
+    [InlineData("alice@example.com", "Alice Smith", " ", true)]
+    public void AuthorMatchesSearch_Matches_Name_Or_Login_Case_Insensitively(
+        string key, string? displayName, string search, bool expected)
+    {
+        var label = InboxFilterHelpers.AuthorDisplayLabel(key, displayName);
+        InboxFilterHelpers.AuthorMatchesSearch(key, label, search).Should().Be(expected);
+    }
+
+    [Fact]
+    public void InboxRow_FromRow_Carries_AuthorDisplayName_And_Preserves_Filter_Key()
+    {
+        var row = new PullRequestRow(
+            new PrIdentity("https://dev.azure.com/fabrikam/Context/_git/MyRepo/pullrequest/1", "ado:1#1"),
+            SourceKind.AzureDevOps, "ado:fabrikam/Context", "Context/MyRepo", 1, "Test",
+            "alice@example.com", "https://dev.azure.com/fabrikam/Context/_git/MyRepo/pullrequest/1",
+            PullRequestStatus.Open, TrackingReason.Assigned, "self",
+            DateTimeOffset.UnixEpoch, DateTimeOffset.UnixEpoch, EnrichState.Basic,
+            null, null, null, AuthorDisplayName: "Alice Smith");
+
+        var inboxRow = InboxRow.FromRow(row, openThreads: 0, unresolvedBot: 0);
+
+        inboxRow.AuthorDisplayName.Should().Be("Alice Smith");
+        InboxFilters.AuthorKeyOf(inboxRow.AuthorLogin).Should().Be("alice@example.com");
+        var filters = InboxFilters.From(
+            showClosed: false, showIgnored: false,
+            enabledSources: InboxFilters.KnownSourceClasses,
+            excludedRepos: Array.Empty<string>(),
+            excludedAuthors: new[] { "ALICE@example.com" },
+            ignoredRepoRegexes: Array.Empty<System.Text.RegularExpressions.Regex>());
+        filters.ShouldShow(inboxRow).Should().BeFalse();
+    }
+
     private sealed record TestItem(
         string Name,
         int Count,
         bool Excluded,
         DateTimeOffset? MaxRecent) : IInboxFilterItem;
+
+    private sealed record NamedItem(string Name, string DisplayLabel, int Count) : IInboxFilterItem
+    {
+        public bool Excluded => false;
+        public DateTimeOffset? MaxRecent => null;
+    }
+
+    [Fact]
+    public void Sort_Alphabetical_Uses_Display_Label_Not_Login_Count_Or_Activity()
+    {
+        var items = new[]
+        {
+            new NamedItem("a@example.com", "Zoe (a@example.com)", 50),
+            new NamedItem("z@example.com", "alice (z@example.com)", 1),
+            new NamedItem("bob", "Bob", 0),
+        };
+
+        InboxFilterHelpers.Sort(items, InboxFilterSortMode.Alphabetical)
+            .Select(i => i.Name).Should().Equal("z@example.com", "bob", "a@example.com");
+    }
+
+    [Fact]
+    public void Sort_Alphabetical_Defaults_To_Key_When_No_Display_Label_Is_Provided()
+    {
+        var items = new[]
+        {
+            new TestItem("zeta", 9, false, DateTimeOffset.UtcNow),
+            new TestItem("Alpha", 1, false, null),
+        };
+
+        InboxFilterHelpers.Sort(items, InboxFilterSortMode.Alphabetical)
+            .Select(i => i.Name).Should().Equal("Alpha", "zeta");
+    }
+
+    [Theory]
+    [InlineData(InboxFilterSortMode.Alphabetical)]
+    [InlineData(InboxFilterSortMode.Count)]
+    [InlineData(InboxFilterSortMode.Recent)]
+    public void Sort_Combines_Author_Sources_By_Display_Name_For_Alphabetic_Order_And_Ties(
+        InboxFilterSortMode mode)
+    {
+        var items = new[]
+        {
+            new NamedItem("aaron@example.com",
+                InboxFilterHelpers.AuthorDisplayLabel("aaron@example.com", "Zoe"), 0),
+            new NamedItem("bravo", InboxFilterHelpers.AuthorDisplayLabel("bravo", null), 0),
+            new NamedItem("zulu@example.com",
+                InboxFilterHelpers.AuthorDisplayLabel("zulu@example.com", "Alice"), 0),
+            new NamedItem("delta", InboxFilterHelpers.AuthorDisplayLabel("delta", null), 0),
+            new NamedItem("a@example.com",
+                InboxFilterHelpers.AuthorDisplayLabel("a@example.com", "Carlos"), 0),
+        };
+
+        InboxFilterHelpers.Sort(items, mode).Select(i => i.Name)
+            .Should().Equal("zulu@example.com", "bravo", "a@example.com", "delta", "aaron@example.com");
+    }
 
     // ---------- Sort: Count mode ----------
 

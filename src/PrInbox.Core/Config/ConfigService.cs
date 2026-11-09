@@ -46,6 +46,14 @@ public sealed class ConfigService : IConfigService
         => PrInboxConfig.LoadAsync(_configPath, ct);
 
     /// <inheritdoc />
+    public async Task SetRetrieveGitHubAuthorNamesAsync(bool enabled, CancellationToken ct = default)
+    {
+        var cfg = await PrInboxConfig.LoadAsync(_configPath, ct);
+        cfg.General.RetrieveGitHubAuthorNames = enabled;
+        await SaveAndRefreshAsync(cfg, ct);
+    }
+
+    /// <inheritdoc />
     public async Task<bool> AddGitHubSourceAsync(
         SourceConfigKind kind,
         string host,
@@ -412,6 +420,8 @@ public sealed class ConfigService : IConfigService
         await cfg.SaveAsync(_configPath, ct);
 
         if (_singleton is null) return;
+
+        _singleton.General.RetrieveGitHubAuthorNames = cfg.General.RetrieveGitHubAuthorNames;
 
         _singleton.Sources.Clear();
         foreach (var s in cfg.Sources) _singleton.Sources.Add(s);

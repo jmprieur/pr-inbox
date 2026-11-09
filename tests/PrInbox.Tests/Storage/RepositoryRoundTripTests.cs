@@ -70,6 +70,28 @@ public class RepositoryRoundTripTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task PullRequest_AuthorDisplayName_RoundTrips_And_Updates_Without_Changing_Login()
+    {
+        var repo = new PullRequestRepository(_db);
+        var row = SampleRow() with { AuthorLogin = "alice@example.com", AuthorDisplayName = "Alice Smith" };
+        await repo.UpsertAsync(row, CancellationToken.None);
+
+        var fetched = await repo.GetAsync(row.Url, CancellationToken.None);
+        fetched!.AuthorDisplayName.Should().Be("Alice Smith");
+        fetched.AuthorLogin.Should().Be("alice@example.com");
+
+        await repo.UpsertAsync(row with { AuthorDisplayName = "Alice Jones" }, CancellationToken.None);
+        fetched = await repo.GetAsync(row.Url, CancellationToken.None);
+        fetched!.AuthorDisplayName.Should().Be("Alice Jones");
+        fetched.AuthorLogin.Should().Be("alice@example.com");
+
+        await repo.UpsertAsync(row with { AuthorDisplayName = null }, CancellationToken.None);
+        fetched = await repo.GetAsync(row.Url, CancellationToken.None);
+        fetched!.AuthorDisplayName.Should().BeNull();
+        fetched.AuthorLogin.Should().Be("alice@example.com");
+    }
+
+    [Fact]
     public async Task PullRequest_Upsert_Twice_Updates_Mutable_Fields()
     {
         var repo = new PullRequestRepository(_db);
@@ -1269,4 +1291,3 @@ public class RepositoryRoundTripTests : IAsyncLifetime
         tags[0].Color.Should().Be("#dc2626");
     }
 }
-

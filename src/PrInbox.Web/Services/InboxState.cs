@@ -62,8 +62,13 @@ public sealed record InboxRow(
     string? CiStatus = null,
     string? MergeableState = null,
     string? ReviewDecision = null,
-    bool IsDraft = false)
+    bool IsDraft = false,
+    string? AuthorDisplayName = null)
 {
+    public string AuthorLabel => string.IsNullOrWhiteSpace(AuthorLogin)
+        ? AuthorDisplayName?.Trim() ?? ""
+        : InboxFilterHelpers.AuthorDisplayLabel(AuthorLogin, AuthorDisplayName);
+
     /// <summary>
     /// True when the user has flagged this PR as "of interest." Flag is
     /// orthogonal to done / ignore / closed — flagging does not bypass
@@ -160,7 +165,8 @@ public sealed record InboxRow(
             ciStatus,
             mergeableState,
             reviewDecision,
-            row.IsDraft);
+            row.IsDraft,
+            row.AuthorDisplayName);
     }
 
     /// <summary>

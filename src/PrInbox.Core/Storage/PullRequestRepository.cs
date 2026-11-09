@@ -28,14 +28,14 @@ public sealed class PullRequestRepository
         cmd.CommandText = """
             INSERT INTO pull_requests (
               pr_identity, stable_identity, source_id, source_kind,
-              display_repo, number, title, author_login, url,
+              display_repo, number, title, author_login, author_display_name, url,
               status, tracking_reason, identity_used,
               first_seen_at, last_synced_at, enrich_state,
               last_briefed_head_sha, last_review_run_head_sha, last_posted_review_head_sha,
               body, last_upstream_updated_at, upstream_created_at, my_role, is_draft
             ) VALUES (
               $prId, $stableId, $sourceId, $sourceKind,
-              $displayRepo, $number, $title, $author, $url,
+              $displayRepo, $number, $title, $author, $authorDisplayName, $url,
               $status, $tracking, $identityUsed,
               $firstSeen, $lastSynced, $enrichState,
               $lastBriefed, $lastReviewRun, $lastPosted,
@@ -49,6 +49,7 @@ public sealed class PullRequestRepository
               number        = excluded.number,
               title         = excluded.title,
               author_login  = excluded.author_login,
+              author_display_name = excluded.author_display_name,
               url           = excluded.url,
               status        = excluded.status,
               my_role       = excluded.my_role,
@@ -84,6 +85,7 @@ public sealed class PullRequestRepository
         cmd.Parameters.AddWithValue("$number", row.Number);
         cmd.Parameters.AddWithValue("$title", (object?)row.Title ?? DBNull.Value);
         cmd.Parameters.AddWithValue("$author", (object?)row.AuthorLogin ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("$authorDisplayName", (object?)row.AuthorDisplayName ?? DBNull.Value);
         cmd.Parameters.AddWithValue("$url", row.Url);
         cmd.Parameters.AddWithValue("$status", row.Status.ToString().ToLowerInvariant());
         cmd.Parameters.AddWithValue("$tracking", TrackingReasonToDb(row.TrackingReason));
@@ -627,7 +629,10 @@ public sealed class PullRequestRepository
                 ? ParseMyRole(reader.GetString(reader.GetOrdinal("my_role")))
                 : MyRole.Reviewer,
             IsDraft: HasColumn(reader, "is_draft")
-                && reader.GetInt64(reader.GetOrdinal("is_draft")) != 0);
+                && reader.GetInt64(reader.GetOrdinal("is_draft")) != 0,
+            AuthorDisplayName: HasColumn(reader, "author_display_name")
+                ? GetStringOrNull(reader, "author_display_name")
+                : null);
     }
 
     private static bool HasColumn(SqliteDataReader reader, string name)

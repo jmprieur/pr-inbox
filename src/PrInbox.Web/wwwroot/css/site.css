@@ -154,9 +154,12 @@ a.drift:hover { text-decoration: underline; }
     letter-spacing: 0.04em;
 }
 .pr-table tr:last-child td { border-bottom: none; }
-/* Clickable "Age" column header. Inherits the th's uppercase muted look but
-   is interactive; .active marks the column the table is currently sorted by. */
+/* Clickable table headers inherit the th's uppercase muted look. */
 .pr-table th .th-sort {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35em;
+    white-space: nowrap;
     background: transparent;
     border: none;
     margin: 0;
@@ -168,7 +171,8 @@ a.drift:hover { text-decoration: underline; }
     cursor: pointer;
 }
 .pr-table th .th-sort:hover { color: var(--fg); }
-.pr-table th .th-sort.active { color: var(--accent); }
+.pr-table th .sort-arrows { display: inline-flex; gap: 0.1em; color: var(--muted); }
+.pr-table th .sort-arrow.active { color: var(--accent); }
 .pr-table td.age { white-space: nowrap; }
 
 .title { max-width: 360px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

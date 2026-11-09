@@ -124,7 +124,7 @@
             <div class="repo-popover" role="dialog" aria-label="Per-author filter">
                 <input type="search"
                        class="repo-popover-search"
-                       placeholder="Filter authors…"
+                       placeholder="Search name, email or username…"
                        @bind="_authorFilterSearch"
                        @bind:event="oninput" />
                 @{
@@ -145,6 +145,10 @@
                 </div>
                 <div class="repo-popover-sort">
                     <span class="muted">Sort:</span>
+                    <button type="button"
+                            class="sort-btn @(_authorSortMode == InboxFilterSortMode.Alphabetical ? "active" : "")"
+                            title="Sort alphabetically by the displayed author name."
+                            @onclick="@(() => OnAuthorSortChangeAsync(InboxFilterSortMode.Alphabetical))">Name</button>
                     <button type="button"
                             class="sort-btn @(_authorSortMode == InboxFilterSortMode.Count ? "active" : "")"
                             title="Sort by PR count, highest first."
@@ -266,7 +270,7 @@ else if (consoles.Count > 0)
 }
 
 @{
-    var visible = InboxAgeSort.Order(VisibleRows, _ageSortMode);
+    var visible = _tableSort.Order(VisibleRows);
 }
 @if (visible.Count == 0)
 {
@@ -285,16 +289,55 @@ else
         <thead>
             <tr>
                 <th>Source</th>
-                <th>Repo / PR</th>
-                <th>Title</th>
-                <th>Author</th>
+                <th aria-sort="@_tableSort.AriaSort(InboxTableSortColumn.Repo)">
+                    <button type="button"
+                            class="th-sort"
+                            title="Sort by repository and PR number. Click to reverse direction."
+                            @onclick="@(() => OnTableHeaderClickAsync(InboxTableSortColumn.Repo))">
+                        Repo / PR
+                        <span class="sort-arrows" aria-hidden="true">
+                            <span class="sort-arrow @(_tableSort.AriaSort(InboxTableSortColumn.Repo) == "ascending" ? "active" : "")">▲</span>
+                            <span class="sort-arrow @(_tableSort.AriaSort(InboxTableSortColumn.Repo) == "descending" ? "active" : "")">▼</span>
+                        </span>
+                    </button>
+                </th>
+                <th aria-sort="@_tableSort.AriaSort(InboxTableSortColumn.Title)">
+                    <button type="button"
+                            class="th-sort"
+                            title="Sort by title. Click to reverse direction."
+                            @onclick="@(() => OnTableHeaderClickAsync(InboxTableSortColumn.Title))">
+                        Title
+                        <span class="sort-arrows" aria-hidden="true">
+                            <span class="sort-arrow @(_tableSort.AriaSort(InboxTableSortColumn.Title) == "ascending" ? "active" : "")">▲</span>
+                            <span class="sort-arrow @(_tableSort.AriaSort(InboxTableSortColumn.Title) == "descending" ? "active" : "")">▼</span>
+                        </span>
+                    </button>
+                </th>
+                <th aria-sort="@_tableSort.AriaSort(InboxTableSortColumn.Author)">
+                    <button type="button"
+                            class="th-sort"
+                            title="Sort by author email or username. Click to reverse direction."
+                            @onclick="@(() => OnTableHeaderClickAsync(InboxTableSortColumn.Author))">
+                        Author
+                        <span class="sort-arrows" aria-hidden="true">
+                            <span class="sort-arrow @(_tableSort.AriaSort(InboxTableSortColumn.Author) == "ascending" ? "active" : "")">▲</span>
+                            <span class="sort-arrow @(_tableSort.AriaSort(InboxTableSortColumn.Author) == "descending" ? "active" : "")">▼</span>
+                        </span>
+                    </button>
+                </th>
                 <th>Threads</th>
                 <th>State</th>
-                <th class="age-th">
+                <th class="age-th" aria-sort="@_tableSort.AriaSort(InboxTableSortColumn.Age)">
                     <button type="button"
-                            class="th-sort @(_ageSortMode != AgeSortMode.None ? "active" : "")"
-                            title="Age since the PR was opened upstream. Click to cycle sort: oldest first → newest first → off."
-                            @onclick="OnAgeHeaderClickAsync">Age@(AgeSortGlyph)</button>
+                            class="th-sort"
+                            title="Age since the PR was opened upstream. Click to sort oldest first; click again for newest first."
+                            @onclick="@(() => OnTableHeaderClickAsync(InboxTableSortColumn.Age))">
+                        Age
+                        <span class="sort-arrows" aria-hidden="true">
+                            <span class="sort-arrow @(_tableSort.AriaSort(InboxTableSortColumn.Age) == "ascending" ? "active" : "")">▲</span>
+                            <span class="sort-arrow @(_tableSort.AriaSort(InboxTableSortColumn.Age) == "descending" ? "active" : "")">▼</span>
+                        </span>
+                    </button>
                 </th>
                 <th>Last sync</th>
                 <th>Review</th>
@@ -411,7 +454,7 @@ else
                         }
                         <span class="@(row.IsDraft ? "pr-draft-title" : null)">@(row.Title ?? "")</span>
                     </td>
-                    <td>@(row.AuthorLogin ?? "")</td>
+                    <td>@row.AuthorLabel</td>
                     <td>
                         @if (row.OpenThreadCount == 0)
                         {
@@ -619,6 +662,7 @@ else
     private const string PrefRepoSortMode   = "inbox.repo_sort_mode";
     private const string PrefGroupBy        = "inbox.group_by";
     private const string PrefAgeSortMode    = "inbox.age_sort_mode";
+    private const string PrefTableSort = "inbox.table_sort";
 
     public enum GroupByMode { None, Tag }
 
@@ -691,13 +735,11 @@ else
     private string _authorFilterSearch = string.Empty;
 
     // Sort modes for the popovers. Persisted so the choice survives a
-    // page reload. Defaults to Count to match the previous behavior.
-    private InboxFilterSortMode _authorSortMode = InboxFilterSortMode.Count;
+    // page reload. Authors default to name; repos default to PR count.
+    private InboxFilterSortMode _authorSortMode = InboxFilterSortMode.Alphabetical;
     private InboxFilterSortMode _repoSortMode = InboxFilterSortMode.Count;
 
-    // Age-column sort for the main table. Persisted so the choice survives a
-    // page reload. Defaults to None (preserve the last-synced ordering).
-    private AgeSortMode _ageSortMode = AgeSortMode.None;
+    private InboxTableSort _tableSort = new();
 
     private const string UnknownAuthorKey = InboxFilters.UnknownAuthorKey;
 
@@ -965,9 +1007,11 @@ else
                 }
             }
 
-            _authorSortMode = ParseSortMode(await Prefs.GetAsync(PrefAuthorSortMode), InboxFilterSortMode.Count);
+            _authorSortMode = ParseSortMode(await Prefs.GetAsync(PrefAuthorSortMode), InboxFilterSortMode.Alphabetical);
             _repoSortMode   = ParseSortMode(await Prefs.GetAsync(PrefRepoSortMode),   InboxFilterSortMode.Count);
-            _ageSortMode    = ParseAgeSortMode(await Prefs.GetAsync(PrefAgeSortMode));
+            _tableSort = InboxTableSort.FromPreferences(
+                await Prefs.GetAsync(PrefTableSort),
+                await Prefs.GetAsync(PrefAgeSortMode));
         }
         catch (Exception ex)
         {
@@ -979,41 +1023,19 @@ else
     {
         if (string.IsNullOrWhiteSpace(raw)) return fallback;
         return Enum.TryParse<InboxFilterSortMode>(raw, ignoreCase: true, out var parsed)
+            && Enum.IsDefined(parsed)
             ? parsed
             : fallback;
     }
 
-    private static AgeSortMode ParseAgeSortMode(string? raw)
+    private async Task OnTableHeaderClickAsync(InboxTableSortColumn column)
     {
-        if (string.IsNullOrWhiteSpace(raw)) return AgeSortMode.None;
-        return Enum.TryParse<AgeSortMode>(raw, ignoreCase: true, out var parsed)
-            ? parsed
-            : AgeSortMode.None;
-    }
-
-    // Direction glyph shown next to the "Age" header. ▲ = oldest first
-    // (ascending age-at-top is the oldest open PR), ▼ = newest first.
-    private string AgeSortGlyph => _ageSortMode switch
-    {
-        AgeSortMode.OldestFirst => " ▲",
-        AgeSortMode.NewestFirst => " ▼",
-        _ => "",
-    };
-
-    /// <summary>
-    /// Cycle the Age column sort on header click: None → OldestFirst →
-    /// NewestFirst → None. Persisted so it survives a reload.
-    /// </summary>
-    private async Task OnAgeHeaderClickAsync()
-    {
-        _ageSortMode = _ageSortMode switch
+        _tableSort = _tableSort.Toggle(column);
+        try
         {
-            AgeSortMode.None => AgeSortMode.OldestFirst,
-            AgeSortMode.OldestFirst => AgeSortMode.NewestFirst,
-            _ => AgeSortMode.None,
-        };
-        try { await Prefs.SetAsync(PrefAgeSortMode, _ageSortMode.ToString()); }
-        catch (Exception ex) { Log.LogDebug(ex, "Persist {Key} failed.", PrefAgeSortMode); }
+            await Prefs.SetAsync(PrefTableSort, _tableSort.ToPreference());
+        }
+        catch (Exception ex) { Log.LogDebug(ex, "Persist {Key} failed.", PrefTableSort); }
     }
 
     /// <summary>
@@ -1518,8 +1540,13 @@ else
     private static string AuthorKeyOf(InboxRow row) =>
         string.IsNullOrWhiteSpace(row.AuthorLogin) ? UnknownAuthorKey : row.AuthorLogin!;
 
-    private static string AuthorDisplayLabel(string key) =>
-        key == UnknownAuthorKey ? "(unknown)" : "@" + key;
+    private string AuthorDisplayLabel(string key) =>
+        InboxFilterHelpers.AuthorDisplayLabel(key, _rows
+            .Where(r => string.Equals(AuthorKeyOf(r), key, StringComparison.OrdinalIgnoreCase)
+                     && !string.IsNullOrWhiteSpace(r.AuthorDisplayName))
+            .OrderByDescending(r => r.LastSyncedAt)
+            .Select(r => r.AuthorDisplayName)
+            .FirstOrDefault());
 
     /// <summary>
     /// Authors that <em>could</em> show up given the current source-chip /
@@ -1570,10 +1597,8 @@ else
         {
             var items = AllAuthorFilterItems;
             if (string.IsNullOrWhiteSpace(_authorFilterSearch)) return items;
-            var needle = _authorFilterSearch.Trim();
             return items
-                .Where(i => i.Name.Contains(needle, StringComparison.OrdinalIgnoreCase)
-                         || i.DisplayLabel.Contains(needle, StringComparison.OrdinalIgnoreCase))
+                .Where(i => InboxFilterHelpers.AuthorMatchesSearch(i.Name, i.DisplayLabel, _authorFilterSearch))
                 .ToList();
         }
     }

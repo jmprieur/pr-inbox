@@ -231,7 +231,8 @@ public sealed class AzureDevOpsReadSource : IPrReadSource
             Status: MapStatus(pr.Status),
             LastUpdated: pr.CreationDate, // ADO list endpoint doesn't return lastUpdated; CreationDate is best available.
             CreatedAt: pr.CreationDate,
-            IsDraft: pr.IsDraft);
+            IsDraft: pr.IsDraft,
+            AuthorDisplayName: pr.CreatedBy?.DisplayName);
     }
 
     private RemotePullRequestDetail MapDetail(PrIdentity id, AdoDtos.PullRequest pr, IReadOnlyList<AdoDtos.Commit> commits)

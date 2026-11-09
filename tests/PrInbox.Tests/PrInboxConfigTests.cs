@@ -17,6 +17,7 @@ public class PrInboxConfigTests
         config.Bots.ExtraLogins.Should().BeEmpty();
         config.ReviewLauncher.Model.Should().Be("gpt-5.6-sol");
         config.ReviewLauncher.AllowAllPaths.Should().BeFalse();
+        config.General.RetrieveGitHubAuthorNames.Should().BeFalse();
     }
 
     [Fact]
@@ -27,6 +28,7 @@ public class PrInboxConfigTests
         {
             var original = new PrInboxConfig
             {
+                General = new GeneralSettings { RetrieveGitHubAuthorNames = true },
                 Sources =
                 {
                     new SourceConfig
@@ -62,6 +64,23 @@ public class PrInboxConfigTests
             loaded.Sources.Should().Contain(s => s.Id == "ado:fabrikam" && s.Kind == SourceConfigKind.AzureDevOps);
             loaded.Ado.Projects.Should().ContainSingle(p => p.Org == "fabrikam" && p.Project == "Context");
             loaded.Bots.ExtraLogins.Should().ContainSingle(l => l == "Copilot");
+            loaded.General.RetrieveGitHubAuthorNames.Should().BeTrue();
+        }
+        finally
+        {
+            if (File.Exists(path)) File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public async Task LoadAsync_Old_Config_Without_General_Defaults_To_No_Profile_Lookups()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"pr-inbox-{Guid.NewGuid():N}.json");
+        try
+        {
+            await File.WriteAllTextAsync(path, """{"schemaVersion":1,"sources":[]}""");
+            var config = await PrInboxConfig.LoadAsync(path);
+            config.General.RetrieveGitHubAuthorNames.Should().BeFalse();
         }
         finally
         {

@@ -32,6 +32,9 @@ public interface IConfigService
     /// <summary>Loads the current config fresh from disk (does not return the cached singleton).</summary>
     Task<PrInboxConfig> GetAsync(CancellationToken ct = default);
 
+    /// <summary>Updates the opt-in GitHub profile-name setting for the next sync.</summary>
+    Task SetRetrieveGitHubAuthorNamesAsync(bool enabled, CancellationToken ct = default);
+
     /// <summary>
     /// Adds a GitHub-flavored source bound to <c>"default"</c> identity
     /// (uses whichever <c>gh</c> account is currently active for the
