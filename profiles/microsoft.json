@@ -5,7 +5,7 @@
     { "name": "Public",  "host": "github.com",        "aliasSuffix": "" }
   ],
   "reviewLauncher": {
-    "launchCommand": "agency copilot --mcp workiq --mcp teams --plugin {plugin} --model {model} --agent {agent}",
-    "model": "gpt-5.6-sol"
+    "launchCommand": "agency copilot --mcp workiq --mcp teams --plugin {plugin} --model {model} --reasoning-effort medium --context long_context --agent {agent}",
+    "model": "gpt-6.1-sol"
   }
 }
